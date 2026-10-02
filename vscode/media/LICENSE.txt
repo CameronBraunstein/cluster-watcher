@@ -1,0 +1,16 @@
+Cluster Watcher Activity Bar Icon
+=================================
+
+Covered files: cluster-watcher.svg, icon-source.svg, and icon.png (rendered from
+icon-source.svg for the Marketplace listing).
+
+This original icon was created specifically for the Cluster Watcher project
+and was not derived from a third-party icon or logo.
+
+To the extent possible under law, the Cluster Watcher contributors have
+dedicated this icon to the public domain under the Creative Commons CC0 1.0
+Universal Public Domain Dedication.
+
+SPDX-License-Identifier: CC0-1.0
+Canonical terms: https://creativecommons.org/publicdomain/zero/1.0/legalcode.en
+Human-readable summary: https://creativecommons.org/publicdomain/zero/1.0/

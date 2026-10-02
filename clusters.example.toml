@@ -1,0 +1,34 @@
+# Example Cluster Watcher configuration. Copy it to clusters.toml (or run
+# `cluster-watcher setup`) and replace the example machines with your own.
+# This file contains connection identities, not passwords. SSH keys, agent
+# forwarding, host verification, ProxyJump, etc. remain managed by your normal
+# OpenSSH configuration.
+# Add `hidden = true` to any machine entry to skip its login, polling, and display.
+
+[[machine]]
+name = "cluster-a"
+host = "login.cluster-a.example.org"
+username = "alice"
+default_partition_max_time_minutes = 1440
+# Explicit `path=` log requests are limited to these remote directory trees.
+job_log_roots = ["/home/alice/jobs"]
+# port = 22
+# identity_file = "~/.ssh/id_ed25519"
+
+[[machine]]
+name = "cluster-b"
+host = "login.cluster-b.example.org"
+username = "alice"
+# Prompts once for the shared password, then for each machine's single-use OTP.
+interactive_auth = true
+credential_group = "site-b"
+# OpenSSH closes the background session after this period without activity.
+control_persist = "8h"
+default_partition_max_time_minutes = 1440
+
+[machine.partition_max_time_minutes]
+gpudev = 15
+
+[dashboard]
+# Pending-job waits are displayed as < 5 minutes, < 30 minutes, then as a nearest-hour estimate.
+wait_threshold_minutes = [5, 30]

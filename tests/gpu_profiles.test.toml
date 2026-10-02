@@ -1,0 +1,48 @@
+# Generic GPU catalog fixture for the test suite; tests/helpers.py selects it
+# for every test. Values are public vendor specifications.
+
+# cluster_0 and cluster_3 both label a GPU "a100" but with different memory,
+# which exercises the per-cluster scoping of profiles.
+[[profile]]
+cluster = "cluster_0"
+name = "NVIDIA H100 80 GB"
+aliases = ["h100"]
+vram_gb = 80
+fp16_bf16_tensor_tflops = 989.0
+
+[[profile]]
+cluster = "cluster_0"
+name = "NVIDIA A100 80 GB"
+aliases = ["a100"]
+vram_gb = 80
+fp16_bf16_tensor_tflops = 312.0
+
+[[profile]]
+cluster = "cluster_0"
+name = "NVIDIA A40"
+aliases = ["a40"]
+vram_gb = 48
+fp16_bf16_tensor_tflops = 149.7
+
+# APUs that some sites report only through TRES.
+[[profile]]
+cluster = "cluster_1"
+name = "AMD Instinct MI300A"
+aliases = ["mi300a", "apu"]
+vram_gb = 128
+fp16_bf16_tensor_tflops = 980.6
+
+# Generic partitions: the GPU is identified from the node-name prefix "bnode".
+[[profile]]
+cluster = "cluster_2"
+name = "NVIDIA B200"
+aliases = ["b200", "bnode"]
+vram_gb = 180
+fp16_bf16_tensor_tflops = 2250.0
+
+[[profile]]
+cluster = "cluster_3"
+name = "NVIDIA A100 40 GB"
+aliases = ["a100"]
+vram_gb = 40
+fp16_bf16_tensor_tflops = 312.0

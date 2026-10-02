@@ -1,0 +1,35 @@
+# Build dist/cluster-watcher-linux-<arch> and prove it starts on glibc 2.17.
+#
+# A python-build-standalone interpreter (installed by uv) is used instead of the
+# runner's Python: it ships a shared libpython built against glibc 2.17, so the
+# PyInstaller executable runs on old cluster login nodes, not just on the
+# runner's recent Ubuntu.
+name: Build standalone executable
+description: Build and smoke-test the PyInstaller executable for one architecture.
+inputs:
+  arch:
+    description: Expected architecture suffix (x86_64 or aarch64).
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v6
+    - name: Build with PyInstaller
+      shell: bash
+      run: |
+        uv python install 3.12
+        uv venv --python 3.12 --managed-python .build-venv
+        uv pip install --python .build-venv 'pyinstaller>=6.0,<7'
+        .build-venv/bin/python -m PyInstaller --noconfirm --clean cluster-watcher.spec
+        test -x "dist/cluster-watcher-linux-${{ inputs.arch }}"
+    - name: Smoke-test on the runner
+      shell: bash
+      run: |
+        binary="dist/cluster-watcher-linux-${{ inputs.arch }}"
+        "$binary" --help
+        "$binary" --config clusters.example.toml list
+    - name: Smoke-test on glibc 2.17 (manylinux2014)
+      shell: bash
+      run: |
+        docker run --rm -v "$PWD:/work" -w /work "quay.io/pypa/manylinux2014_${{ inputs.arch }}" \
+          "dist/cluster-watcher-linux-${{ inputs.arch }}" --config clusters.example.toml list

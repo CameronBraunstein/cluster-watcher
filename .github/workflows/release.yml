@@ -1,0 +1,92 @@
+# Publish a GitHub Release when a version tag such as v0.1.0 is pushed:
+# Linux executables for x86_64 and aarch64, the VS Code extension VSIX,
+# install.sh, and SHA256SUMS (which install.sh verifies before installing).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    name: Check tag matches versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Compare tag with pyproject.toml and vscode/package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          python_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          extension_version="$(node -p 'require("./vscode/package.json").version')"
+          echo "tag=$tag pyproject=$python_version extension=$extension_version"
+          test "$tag" = "$python_version" && test "$tag" = "$extension_version"
+
+  standalone:
+    name: Standalone build (${{ matrix.arch }})
+    needs: check-version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-latest }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/build-standalone
+        with:
+          arch: ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cluster-watcher-linux-${{ matrix.arch }}
+          path: dist/cluster-watcher-linux-${{ matrix.arch }}
+          if-no-files-found: error
+
+  vsix:
+    name: VS Code extension package
+    needs: check-version
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npx vsce package --out "cluster-watcher-${GITHUB_REF_NAME#v}.vsix"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: vscode/*.vsix
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: [standalone, vsix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Collect assets and checksums
+        run: |
+          cp install.sh uninstall.sh clusters.example.toml assets/
+          chmod 0755 assets/cluster-watcher-linux-*
+          cd assets
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" assets/* --title "Cluster Watcher $GITHUB_REF_NAME" --generate-notes --verify-tag

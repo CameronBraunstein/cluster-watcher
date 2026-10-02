@@ -1,0 +1,18 @@
+__pycache__/
+build/
+dist/
+vscode/node_modules/
+vscode/*.vsix
+vscode/*.tgz
+vscode/.vscode-test/
+
+# Personal files kept locally, never published.
+clusters.toml
+clusters.toml.bak
+gpu_profiles.toml
+AGENTS.md
+
+# Build and packaging by-products.
+.build-venv/
+*.egg-info/
+pip_cache/

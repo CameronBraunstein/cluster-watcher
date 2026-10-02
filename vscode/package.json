@@ -1,0 +1,205 @@
+{
+  "name": "cluster-watcher",
+  "displayName": "Cluster Watcher",
+  "description": "Monitor Cluster Watcher Slurm jobs and partition capacity from the VS Code sidebar.",
+  "version": "0.1.0",
+  "publisher": "cluster-watcher-project",
+  "license": "GPL-3.0-or-later",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CameronBraunstein/cluster-watcher.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CameronBraunstein/cluster-watcher/issues"
+  },
+  "homepage": "https://github.com/CameronBraunstein/cluster-watcher/tree/master/vscode#readme",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "slurm",
+    "cluster",
+    "ssh",
+    "hpc"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "clusterWatcher.startService",
+        "title": "Cluster Watcher: Start Service & SSH Sessions",
+        "icon": "$(play)"
+      },
+      {
+        "command": "clusterWatcher.stopService",
+        "title": "Cluster Watcher: Stop Extension-started Service"
+      },
+      {
+        "command": "clusterWatcher.refresh",
+        "title": "Cluster Watcher: Refresh Sidebar",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "clusterWatcher.openDashboard",
+        "title": "Cluster Watcher: Open Web Dashboard"
+      },
+      {
+        "command": "clusterWatcher.showServiceTerminal",
+        "title": "Cluster Watcher: Show Service Terminal"
+      },
+      {
+        "command": "clusterWatcher.loadMoreLog",
+        "title": "Cluster Watcher: Load 2,000 Older Lines",
+        "icon": "$(go-up)"
+      },
+      {
+        "command": "clusterWatcher.runSetup",
+        "title": "Cluster Watcher: Run Configuration Setup Wizard"
+      },
+      {
+        "command": "clusterWatcher.editConfig",
+        "title": "Cluster Watcher: Edit Configuration",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "clusterWatcher.openSettings",
+        "title": "Cluster Watcher: Open Extension Settings"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "clusterWatcher",
+          "title": "Cluster Watcher",
+          "icon": "media/cluster-watcher.svg"
+        }
+      ]
+    },
+    "views": {
+      "clusterWatcher": [
+        {
+          "id": "clusterWatcher.jobs",
+          "name": "My Jobs",
+          "type": "webview"
+        },
+        {
+          "id": "clusterWatcher.status",
+          "name": "Cluster Status",
+          "type": "webview"
+        }
+      ]
+    },
+    "menus": {
+      "viewContainer/title": [
+        {
+          "command": "clusterWatcher.refresh",
+          "when": "viewContainer == clusterWatcher",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clusterWatcher.startService",
+          "when": "viewContainer == clusterWatcher",
+          "group": "navigation@2"
+        },
+        {
+          "command": "clusterWatcher.editConfig",
+          "when": "viewContainer == clusterWatcher",
+          "group": "navigation@3"
+        },
+        {
+          "command": "clusterWatcher.runSetup",
+          "when": "viewContainer == clusterWatcher",
+          "group": "config@1"
+        },
+        {
+          "command": "clusterWatcher.openSettings",
+          "when": "viewContainer == clusterWatcher",
+          "group": "config@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "clusterWatcher.loadMoreLog",
+          "when": "resourceScheme == cluster-watcher-log",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Cluster Watcher",
+      "properties": {
+        "clusterWatcher.executable": {
+          "type": "string",
+          "default": "cluster-watcher",
+          "description": "Cluster Watcher executable name on PATH or absolute executable path. Set this in VS Code Settings/settings.json; do not edit the extension package.json."
+        },
+        "clusterWatcher.configPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional clusters.toml path. Empty uses Cluster Watcher's normal default."
+        },
+        "clusterWatcher.backendUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8080/",
+          "description": "Loopback Cluster Watcher service URL used by the sidebar."
+        },
+        "clusterWatcher.refreshSeconds": {
+          "type": "integer",
+          "default": 15,
+          "minimum": 5,
+          "maximum": 3600,
+          "description": "Sidebar and backend status refresh interval in seconds."
+        },
+        "clusterWatcher.sshTimeoutSeconds": {
+          "type": "integer",
+          "default": 15,
+          "minimum": 1,
+          "maximum": 300,
+          "description": "SSH connection timeout passed to a service started by the extension."
+        },
+        "clusterWatcher.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "Start Cluster Watcher in an integrated terminal when no existing service is found."
+        },
+        "clusterWatcher.notifications": {
+          "type": "string",
+          "enum": [
+            "all",
+            "failures",
+            "off"
+          ],
+          "default": "all",
+          "enumDescriptions": [
+            "Notify when a running or pending job completes, fails, or is cancelled.",
+            "Notify only when a job fails (including timeouts and out-of-memory).",
+            "Never show job notifications."
+          ],
+          "description": "Show a notification when one of your jobs finishes. Jobs you end from the sidebar are never reported."
+        },
+        "clusterWatcher.statusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show your running and pending job counts in the status bar."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:integration": "node test/integration/run.js",
+    "package": "vsce package",
+    "publish": "node scripts/check-publish.js && vsce publish"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.2.0"
+  }
+}

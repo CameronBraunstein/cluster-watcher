@@ -1,0 +1,41 @@
+# Example GPU catalog. Copy it to gpu_profiles.toml beside your clusters.toml
+# (for an installed command: ~/.config/cluster-watcher/gpu_profiles.toml).
+# The file is optional; without it Cluster Watcher shows no GPU model, VRAM,
+# or throughput and ranks partitions by GPU count alone.
+#
+# Each profile applies only to the clusters.toml machine named in `cluster`,
+# because Slurm partition and GRES labels are local: "a100" may mean 40 GB on
+# one cluster and 80 GB on another. An alias matches when its normalized text
+# (lowercase letters and digits) occurs in a GRES type, partition name, or node
+# name, longest alias first, so node-name prefixes such as "gpub20" also work
+# where Slurm reports no GPU type.
+# Throughput is dense peak FP16/BF16 Tensor/Matrix TFLOPS per GPU, without
+# sparsity multipliers.
+
+[[profile]]
+cluster = "cluster-a"
+name = "NVIDIA H100 80 GB"
+aliases = ["h100"]
+vram_gb = 80
+fp16_bf16_tensor_tflops = 989.0
+
+[[profile]]
+cluster = "cluster-a"
+name = "NVIDIA A100 80 GB"
+aliases = ["a100"]
+vram_gb = 80
+fp16_bf16_tensor_tflops = 312.0
+
+[[profile]]
+cluster = "cluster-b"
+name = "NVIDIA A100 40 GB"
+aliases = ["a100"]
+vram_gb = 40
+fp16_bf16_tensor_tflops = 312.0
+
+[[profile]]
+cluster = "cluster-b"
+name = "AMD Instinct MI300A"
+aliases = ["mi300a", "apu"]
+vram_gb = 128
+fp16_bf16_tensor_tflops = 980.6
