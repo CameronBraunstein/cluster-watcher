@@ -64,6 +64,10 @@
         "title": "Cluster Watcher: Run Configuration Setup Wizard"
       },
       {
+        "command": "clusterWatcher.login",
+        "title": "Cluster Watcher: Log In Again to Closed SSH Sessions"
+      },
+      {
         "command": "clusterWatcher.editConfig",
         "title": "Cluster Watcher: Edit Configuration",
         "icon": "$(gear)"

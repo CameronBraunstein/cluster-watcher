@@ -16,6 +16,8 @@ from .models import Machine, RemoteCommandResult
 
 _runtime_directory = Path(os.environ.get("XDG_RUNTIME_DIR", tempfile.gettempdir()))
 CONTROL_SOCKET_DIRECTORY = _runtime_directory / f"cluster-watcher-{os.getuid()}" / "ssh"
+SERVER_ALIVE_INTERVAL_SECONDS = 30
+SERVER_ALIVE_COUNT_MAX = 4
 _activity_lock = threading.Lock()
 _last_activity: dict[tuple[str, str, int], datetime] = {}
 
@@ -47,6 +49,11 @@ def _connection_options(machine: Machine, timeout: int, batch_mode: bool) -> lis
     command.extend([
         "-o", "ControlMaster=auto", "-o", f"ControlPersist={machine.control_persist}",
         "-o", f"ControlPath={control_socket_path()}",
+        # Keepalives stop firewalls from dropping an idle shared session (which
+        # would mean entering the password and OTP again) and let a broken one
+        # exit within about two minutes instead of hanging refreshes.
+        "-o", f"ServerAliveInterval={SERVER_ALIVE_INTERVAL_SECONDS}",
+        "-o", f"ServerAliveCountMax={SERVER_ALIVE_COUNT_MAX}",
     ])
     if machine.port != 22:
         command.extend(["-p", str(machine.port)])

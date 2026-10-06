@@ -379,6 +379,15 @@ function waitData(partition, count, asOf) {
 }
 
 /**
+ * Offer to re-open a cluster's closed SSH session. The login also covers
+ * other closed clusters that share its password (credential group).
+ */
+function loginPrompt(cluster) {
+  if (!cluster.login_required) return '';
+  return `<p class="muted">The SSH session has closed.</p><div class="actions"><a class="button" ${commandAttributes('clusterWatcher.login', [String(cluster.name)])} title="Runs cluster-watcher login in a terminal. Closed clusters that share this password are included, so it is asked for once; each cluster asks for its own one-time code.">Log in again</a></div>`;
+}
+
+/**
  * Render the stable availability snapshot in cluster-separated tables.
  * `disclosures` maps disclosure keys to remembered open/closed choices.
  */
@@ -391,7 +400,7 @@ function renderStatus(payload, disclosures = {}) {
     const disclosureKey = escapeHtml(rawKey);
     const open = openAttribute(disclosures, rawKey, true);
     if (!cluster.reachable) {
-      clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary><p class="error">${escapeHtml(cluster.error || 'Cluster is unreachable')}</p></details>`);
+      clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary><p class="error">${escapeHtml(cluster.error || 'Cluster is unreachable')}</p>${loginPrompt(cluster)}</details>`);
       continue;
     }
     const partitions = [...(cluster.partitions || [])].sort((left, right) => (Number(left.rank) || 9999) - (Number(right.rank) || 9999) || String(left.name).localeCompare(String(right.name)));

@@ -275,6 +275,8 @@ def build_snapshot(statuses: list[ClusterStatus], generated_at: str | None, refr
                 "name": status.name,
                 "host": status.host,
                 "reachable": status.error is None,
+                # Additive field: the session needs ``cluster-watcher login NAME``.
+                "login_required": status.login_required,
                 "resource_data_complete": status.error is None and status.resource_error is None,
                 "error": status.error,
                 "resource_error": status.resource_error,

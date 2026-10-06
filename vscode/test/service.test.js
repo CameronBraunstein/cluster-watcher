@@ -5,7 +5,7 @@ const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const {
-  ServiceResponseError, cliCommand, jobsApiDisabled, responseError, serviceCommand, shellQuote, validateExecutable,
+  ServiceResponseError, cliCommand, jobsApiDisabled, loginCommand, responseError, serviceCommand, shellQuote, validateExecutable,
 } = require('../service');
 const manifest = require('../package.json');
 
@@ -101,4 +101,14 @@ test('a plain-text 404 suggests upgrading an older service', () => {
   assert.match(responseError(404, null).message, /older version.*re-run install\.sh/);
   assert.equal(responseError(502, null).message, 'Cluster Watcher returned HTTP 502');
   assert.equal(responseError(400, { error: 'bad id' }).message, 'bad id');
+});
+
+test('login runs the CLI for one machine, or all, and closes the terminal on success', () => {
+  const settings = { executable: 'cluster-watcher', configPath: '' };
+  assert.equal(loginCommand(settings, 'cluster_0'), "'cluster-watcher' 'login' 'cluster_0' && exit");
+  assert.equal(loginCommand(settings), "'cluster-watcher' 'login' && exit");
+  assert.match(loginCommand(settings, "x'; rm -rf ~"), /'x'\\''; rm -rf ~' && exit$/);
+  const commands = manifest.contributes.commands.map((command) => command.command);
+  assert.ok(commands.includes('clusterWatcher.login'));
+  assert.match(readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8'), /'clusterWatcher\.refresh', 'clusterWatcher\.login',/);
 });

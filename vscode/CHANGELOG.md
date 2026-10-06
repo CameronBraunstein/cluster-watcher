@@ -12,6 +12,10 @@ All notable changes to the Cluster Watcher VS Code extension.
   the view headings; job titles are slightly smaller.
 - New `clusterWatcher.dateFormat` setting (default `DD.MM.YYYY`); times are
   shown as 24-hour `HH:mm`.
+- **Log in again** on a Cluster Status card whose SSH session has closed. It
+  runs the new `cluster-watcher login` command, asks for a shared password
+  once per credential group, and skips clusters that are still connected.
+  Shared sessions now send keepalives, so they close less often.
 - **End Job** sits in the lower-right corner of the card, apart from the other
   actions.
 - The sidebar's Refresh, Start Service, Edit Config, Setup and Settings

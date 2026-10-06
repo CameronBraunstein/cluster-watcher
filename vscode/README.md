@@ -99,13 +99,22 @@ sidebar immediately.
 
 Webview buttons do not use command links. Each one posts a message, and the
 extension only runs commands from a fixed allowlist (archive, restore, open
-log, end job, start service, setup, edit configuration, settings).
+log, end job, start service, setup, edit configuration, settings, log in).
 
 Use **Cluster Watcher: Start Service & SSH Sessions** from the Command Palette.
 The service opens in an integrated terminal so password and OTP prompts remain
 visible. If a compatible service is already listening at
 `clusterWatcher.backendUrl`, the extension attaches without starting another
 process.
+
+If a cluster's SSH session closes later, its **Cluster Status** card says so
+and shows **Log in again**. The button runs `cluster-watcher login <cluster>` in
+a terminal, without restarting the service. Other closed clusters that share
+the same password (`credential_group`) are logged in at the same time, so the
+password is asked for once, followed by one one-time code per cluster. The
+terminal closes after a successful login, and the card recovers on the next
+refresh. **Cluster Watcher: Log In Again to Closed SSH Sessions** in the
+Command Palette does the same for every closed cluster.
 
 The `cluster-watcher` executable must be installed on the machine running the
 VS Code extension host. Set `clusterWatcher.executable` to an absolute path if

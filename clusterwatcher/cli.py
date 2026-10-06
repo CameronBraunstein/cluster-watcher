@@ -12,7 +12,7 @@ from typing import Sequence, cast
 from .commands import RemoteCommandService, SessionUnavailableError, UnknownMachineError
 from .compute import configure_gpu_profiles, gpu_profiles, gpu_profiles_path
 from .config import DEFAULT_CONFIG, load_config, load_wait_threshold_minutes
-from .credentials import establish_interactive_sessions
+from .credentials import establish_interactive_sessions, login_targets
 from .dashboard import serve
 from .models import Machine
 from .setup_wizard import edit_config, run_setup
@@ -93,6 +93,21 @@ def _print_execution_result(result: dict[str, object]) -> int:
     return int(result["exit_code"])
 
 
+def run_login(machines: list[Machine], requested: Sequence[str], timeout: int) -> int:
+    """Re-open closed interactive sessions and report each target's result."""
+    targets = login_targets(machines, list(requested))
+    if not targets:
+        print("No configured machine uses interactive login (interactive_auth = true).", file=sys.stderr)
+        return 0
+    errors = dict((machine.name, error) for machine, error in establish_interactive_sessions(targets, timeout))
+    for machine in targets:
+        if machine.name in errors:
+            print(f"{machine.name}: login failed: {errors[machine.name]}", file=sys.stderr)
+        else:
+            print(f"{machine.name}: session open")
+    return 1 if errors else 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI, or the private askpass client in a frozen subprocess."""
     from .askpass import ASKPASS_MODE_ENVIRONMENT_VARIABLE
@@ -167,6 +182,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     serve_parser.add_argument("--jobs-api", action="store_true", help="enable loopback-only personal job and log APIs")
     serve_parser.add_argument("--command-api", action="store_true", help="enable loopback-only SSH session and command APIs")
     serve_parser.add_argument("--no-browser", action="store_true", help="do not open the dashboard in a browser")
+    login_parser = subparsers.add_parser(
+        "login",
+        help="log in again to machines whose SSH session has closed",
+        description=(
+            "Re-open the shared SSH session of interactive (password/OTP) machines "
+            "whose session has closed; a running service picks it up on its next "
+            "refresh. Machines that share a credential_group with a named machine "
+            "are included, so one password covers all of them (each still asks "
+            "for its own OTP). Machines with an open session are skipped."
+        ),
+    )
+    login_parser.add_argument("machines", nargs="*", metavar="MACHINE", help="configured machine names (default: all)")
+    login_parser.add_argument("--timeout", type=int, default=15, help="SSH connect timeout in seconds (default: 15)")
     sessions_parser = subparsers.add_parser("sessions", help="show reusable SSH session state")
     sessions_parser.add_argument("--timeout", type=int, default=5, help="session check timeout in seconds (default: 5)")
     sessions_parser.add_argument("--json", action="store_true", help="emit the versioned JSON session document")
@@ -231,6 +259,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 not args.no_browser, load_wait_threshold_minutes(args.config), args.jobs_api,
                 args.command_api,
             )
+        if args.command == "login":
+            if args.timeout < 1:
+                raise ValueError("--timeout must be at least 1")
+            return run_login(machines, args.machines, args.timeout)
         if args.command == "sessions":
             if args.timeout < 1:
                 raise ValueError("--timeout must be at least 1")

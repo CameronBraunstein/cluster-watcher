@@ -7,7 +7,7 @@ const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = req
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
 const { jobRef, setDateFormat, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup } = require('./renderers');
 const {
-  ExecutableValidationError, jobsApiDisabled, responseError, cliCommand, configurationError, resolveConfigPath, serviceCommand, validateExecutable,
+  ExecutableValidationError, jobsApiDisabled, responseError, cliCommand, configurationError, loginCommand, resolveConfigPath, serviceCommand, validateExecutable,
 } = require('./service');
 
 const CONFIGURATION_SECTION = 'clusterWatcher';
@@ -17,7 +17,7 @@ const WEBVIEW_COMMANDS = new Set([
   'clusterWatcher.archiveJob', 'clusterWatcher.restoreJob', 'clusterWatcher.openLog', 'clusterWatcher.openScript',
   'clusterWatcher.cancelJob',
   'clusterWatcher.startService', 'clusterWatcher.runSetup', 'clusterWatcher.editConfig', 'clusterWatcher.openSettings',
-  'clusterWatcher.copyServiceCommand', 'clusterWatcher.refresh',
+  'clusterWatcher.copyServiceCommand', 'clusterWatcher.refresh', 'clusterWatcher.login',
 ]);
 
 /** Return the current extension configuration. */
@@ -580,6 +580,24 @@ async function runSetup() {
   terminal.sendText(cliCommand(settings, ['setup']), true);
 }
 
+/**
+ * Run ``cluster-watcher login [MACHINE]`` in a terminal for the password and
+ * OTP prompts, refreshing the sidebar when the terminal closes. The running
+ * service reuses the re-opened session on its next refresh.
+ */
+async function login(machine, refresh) {
+  const settings = configuration();
+  await validateExecutable(settings.executable);
+  const terminal = vscode.window.createTerminal({ name: machine ? `Cluster Watcher Login: ${machine}` : 'Cluster Watcher Login' });
+  const closed = vscode.window.onDidCloseTerminal((closedTerminal) => {
+    if (closedTerminal !== terminal) return;
+    closed.dispose();
+    void refresh();
+  });
+  terminal.show();
+  terminal.sendText(loginCommand(settings, typeof machine === 'string' ? machine : undefined), true);
+}
+
 /** Open the CLI's configuration file in an editor tab, offering setup when it is missing. */
 async function editConfig() {
   const path = await resolveConfigPath(configuration());
@@ -643,6 +661,7 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('clusterWatcher.copyServiceCommand', () => copyServiceCommand()),
     vscode.commands.registerCommand('clusterWatcher.runSetup', () => runSetup().catch(reportError)),
+    vscode.commands.registerCommand('clusterWatcher.login', (machine) => login(machine, () => coordinator.refresh()).catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.editConfig', () => editConfig().catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.openSettings', () => vscode.commands.executeCommand('workbench.action.openSettings', CONFIGURATION_SECTION)),
     vscode.workspace.onDidSaveTextDocument((document) => void validateSavedConfig(document)),

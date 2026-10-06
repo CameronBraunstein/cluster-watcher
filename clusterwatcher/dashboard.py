@@ -28,6 +28,7 @@ from .job_scripts import JobScriptNotFound
 from .jobs import JobLogNotFound, JobService, parse_since
 from .models import ClusterStatus, Machine
 from .slurm import collect_status
+from .ssh import session_status
 from .snapshot import build_snapshot
 from .wait_probes import WAIT_PROBE_REFRESH_SECONDS, collect_wait_estimates
 
@@ -497,7 +498,7 @@ function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, es
 
 function clusterView(cluster, waitThresholds) {
   let content;
-  if (cluster.error) content = `<p class="error">${escapeHtml(cluster.error)}</p>`;
+  if (cluster.error) content = `<p class="error">${escapeHtml(cluster.error)}</p>` + (cluster.login_required ? `<p>The SSH session has closed. Log in again with <code>cluster-watcher login ${escapeHtml(cluster.name)}</code>.</p>` : '');
   else if (!cluster.nodes || !cluster.nodes.length) content = '<p>No individual node information was returned by scontrol.</p>';
   else { const compute = new Map((cluster.partition_compute || []).map(summary => [summary.name, summary])); content = partitionGroups(cluster.nodes, compute).map(group => partitionView(cluster.name, group, compute, cluster.user_jobs, waitThresholds || [5, 30, 60, 120], cluster.wait_estimates, cluster.wait_estimates_updated_at)).join(''); }
   if (cluster.jobs) content += `<p><b>Jobs:</b> ${Object.entries(cluster.jobs).map(([state, count]) => `${escapeHtml(state)}=${count}`).join(', ') || 'none'}</p>`;
@@ -638,11 +639,15 @@ class StatusStore:
         }
 
         def collect(machine: Machine) -> ClusterStatus:
-            return collect_status(
+            status = collect_status(
                 machine, self.timeout, self.include_jobs,
                 previous=previous.get(machine.name), refresh_capacity=due[machine.name],
                 include_accounting=self.jobs_api_enabled,
             )
+            if status.error and machine.interactive_auth:
+                # A local ``ssh -O check``: did the failure come from a closed session?
+                status.login_required = not session_status(machine, self.timeout)["session_open"]
+            return status
 
         with ThreadPoolExecutor(max_workers=max(1, len(self.machines)), thread_name_prefix="collect") as pool:
             statuses = list(pool.map(collect, self.machines))  # Keeps configuration order.

@@ -188,6 +188,28 @@ def _start_credential_group(machines: list[Machine], timeout: int) -> list[tuple
     return errors
 
 
+def login_targets(machines: list[Machine], requested: list[str]) -> list[Machine]:
+    """Return the interactive machines that ``cluster-watcher login`` should try.
+
+    With no names, every interactive machine is a target. Named machines also
+    bring in the other machines of their credential groups: one shared
+    password then covers every group member whose session has closed too
+    (each still needs its own OTP). Machines with an open session are skipped
+    later by :func:`establish_interactive_sessions`, so they cost nothing.
+    """
+    known = {machine.name: machine for machine in machines}
+    unknown = [name for name in requested if name not in known]
+    if unknown:
+        raise ValueError(f"unknown machine(s): {', '.join(unknown)}")
+    if not requested:
+        return [machine for machine in machines if machine.interactive_auth]
+    groups = {known[name].credential_group for name in requested} - {None}
+    return [
+        machine for machine in machines
+        if machine.interactive_auth and (machine.name in requested or machine.credential_group in groups)
+    ]
+
+
 def establish_interactive_sessions(machines: list[Machine], timeout: int) -> list[tuple[Machine, RuntimeError]]:
     """Start missing reusable SSH masters, sharing named-group credentials.
 

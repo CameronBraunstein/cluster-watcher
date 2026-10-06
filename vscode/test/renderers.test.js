@@ -255,3 +255,12 @@ test('dates use DD.MM.YYYY by default and follow the configured pattern', () => 
     setDateFormat();
   }
 });
+
+test('a closed SSH session offers a login button on the cluster card', () => {
+  const html = renderStatus({ clusters: [
+    { name: 'cluster_0', reachable: false, error: 'Permission denied (gssapi-with-mic,password).', login_required: true },
+    { name: 'cluster_1', reachable: false, error: 'Connection timed out', login_required: false },
+  ] });
+  assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;cluster_0&quot;\]"[^>]*>Log in again<\/a>/);
+  assert.equal((html.match(/Log in again<\/a>/g) || []).length, 1);
+});

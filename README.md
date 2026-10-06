@@ -742,8 +742,36 @@ remote shell without an execution timeout.
 Neither `exec` nor `shell` initiates authentication or silently reconnects.
 Both first verify the named master and disable OpenSSH's direct-connection
 fallback. If the machine is unknown, the session has expired, or the connection
-drops, the command exits nonzero with a clear diagnostic. Restart `serve` to
+drops, the command exits nonzero with a clear diagnostic. Run `login` to
 authenticate again after an expired session.
+
+### Log in again after a session closes
+
+A login node can close a shared session (a server restart, a network
+interruption, or a session limit), after which every refresh of that machine
+fails with an error such as `Permission denied (gssapi-with-mic,password)`.
+Re-open it without restarting `serve`:
+
+```bash
+cluster-watcher login cluster-b   # one machine and its credential group
+cluster-watcher login             # every interactive machine
+```
+
+`login` asks only for what is needed:
+
+- Machines whose session is still open are skipped and ask for nothing.
+- A named machine brings the other machines of its `credential_group`, so the
+  shared password is asked for once for all closed sessions in the group; each
+  machine still asks for its own one-time code.
+- The running service uses the re-opened session on its next refresh.
+
+When a refresh of an `interactive_auth` machine fails, the service checks
+locally (`ssh -O check`) whether its shared session is still open and reports
+`login_required: true` in `/api/status` and `/api/v1/snapshot` when it is not;
+the web dashboard and the VS Code **Cluster Status** view then offer the login.
+Shared sessions also send SSH keepalives every 30 seconds
+(`ServerAliveInterval=30`, `ServerAliveCountMax=4`), so a firewall does not
+drop an idle session and a broken one is noticed within about two minutes.
 
 ## GPU availability web service
 
@@ -799,7 +827,9 @@ Each cluster contains its configured `name` and `host`, `reachable`,
 totals, the time its wait estimates were last probed, and every known
 partition. `error` means the cluster itself could not be queried;
 `resource_error` means the basic partition query worked but detailed node/GPU
-collection failed. Login usernames and personal job details are deliberately
+collection failed. `login_required` is `true` when an `interactive_auth`
+cluster failed because its shared SSH session has closed (fix it with
+`cluster-watcher login NAME`). Login usernames and personal job details are deliberately
 excluded from this public contract.
 
 Each partition contains:

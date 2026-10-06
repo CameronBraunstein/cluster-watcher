@@ -76,3 +76,6 @@ class ClusterStatus:
     user_jobs_fingerprint: str | None = None
     # Server-internal; removed from API payloads.
     accounting: AccountingSnapshot | None = None
+    # The machine needs an interactive login (password/OTP) and has no open SSH
+    # session; set by the service when collection fails (``cluster-watcher login``).
+    login_required: bool = False

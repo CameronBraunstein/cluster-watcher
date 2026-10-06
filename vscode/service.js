@@ -106,6 +106,16 @@ function cliCommand(settings, args) {
   return [settings.executable, ...configArguments(settings), ...args].map(shellQuote).join(' ');
 }
 
+/**
+ * Return the terminal command that re-opens closed SSH sessions. The CLI adds
+ * the machine's credential-group members, so one password covers them all;
+ * the terminal closes itself after a successful login and stays open to show
+ * an error otherwise.
+ */
+function loginCommand(settings, machine) {
+  return `${cliCommand(settings, ['login', ...(machine ? [String(machine)] : [])])} && exit`;
+}
+
 /** Run the executable directly (no shell) and resolve with stdout/stderr and exit code. */
 function runCli(settings, args, timeoutMilliseconds = 10000) {
   return new Promise((resolve, reject) => {
@@ -150,5 +160,5 @@ function serviceCommand(settings) {
 }
 
 module.exports = {
-  ExecutableValidationError, ServiceResponseError, jobsApiDisabled, responseError, cliCommand, configurationError, resolveConfigPath, runCli, serviceCommand, shellQuote, validateExecutable,
+  ExecutableValidationError, ServiceResponseError, jobsApiDisabled, responseError, cliCommand, configurationError, loginCommand, resolveConfigPath, runCli, serviceCommand, shellQuote, validateExecutable,
 };
