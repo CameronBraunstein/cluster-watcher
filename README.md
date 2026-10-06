@@ -1387,15 +1387,18 @@ executable and point the extension at it.
 
 ### Publish to the VS Code Marketplace
 
-1. Create a Marketplace publisher and replace `cluster-watcher-project` in
-   `vscode/package.json` with its exact publisher ID. Changing the publisher
-   changes the extension ID, so existing local installs start with an empty
-   job archive.
-2. Replace the `REPLACE-ME` placeholders in `repository`, `bugs`, and
-   `homepage`, update `vscode/CHANGELOG.md`, and increment the version.
-   `npm run publish` runs `scripts/check-publish.js` first and refuses to
-   publish while any placeholder remains. The code is licensed
-   GPL-3.0-or-later (`LICENSE`); the icons keep their CC0-1.0 dedication.
+The extension is published as `CameronBraunstein.cluster-watcher` (publisher
+`CameronBraunstein`). The publisher and the `name` field form the permanent
+extension ID; changing either creates a different extension, and local
+installs would start with an empty job archive.
+
+1. For each release, bump the version in both `vscode/package.json` and
+   `pyproject.toml` and add a dated entry to `vscode/CHANGELOG.md`.
+2. Tag the release (`git tag vX.Y.Z && git push origin vX.Y.Z`) so GitHub
+   Actions attaches the matching binaries and VSIX. `npm run publish` runs
+   `scripts/check-publish.js` first and refuses to publish while placeholder
+   metadata remains. The code is licensed GPL-3.0-or-later (`LICENSE`); the
+   icons keep their CC0-1.0 dedication.
 3. Choose Marketplace authentication following the current
    [official publishing guide](https://code.visualstudio.com/api/working-with-extensions/publishing-extension).
    Interactive `vsce login` currently accepts an Azure DevOps personal access
@@ -1404,7 +1407,8 @@ executable and point the extension at it.
 4. If using the currently supported interactive flow, run `npx vsce login
    <publisher-id>` from `vscode/` and provide the token.
 5. Run `npm test`, `npm run test:integration`, `npx vsce package`,
-   inspect/install the resulting VSIX, and finally run `npm run publish`.
+   inspect/install the resulting VSIX, and finally run `npm run publish`
+   from `vscode/`.
 
 Marketplace publication is an external release action and is intentionally
 not performed by `install.sh` or the repository test suite.
