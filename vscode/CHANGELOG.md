@@ -2,6 +2,15 @@
 
 All notable changes to the Cluster Watcher VS Code extension.
 
+## Unreleased
+
+- Job card titles sit next to the collapse arrow instead of below it, with the
+  progress bar aligned under the title.
+- **End Job** sits in the lower-right corner of the card, apart from the other
+  actions.
+- The Activity Bar icon hides the servers behind the magnifying glass, like
+  the Marketplace icon.
+
 ## 0.1.1 — 2026-10-06
 
 - When the service is running but was started without `--jobs-api`, My Jobs

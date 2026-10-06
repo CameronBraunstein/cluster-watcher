@@ -173,3 +173,14 @@ test('jobs-API-disabled view explains the fix and offers copy and retry', () => 
   assert.match(html, /data-command="clusterWatcher\.copyServiceCommand"/);
   assert.match(html, /data-command="clusterWatcher\.refresh"/);
 });
+
+test('card title sits beside its arrow and End Job is placed bottom right', () => {
+  const html = renderJobs({ jobs: [{ job_id: '1', cluster: 'cluster_0', state: 'RUNNING' }] });
+  assert.match(html, /\.card>summary\{[^}]*list-style:none;display:grid;grid-template-columns:auto minmax\(0,1fr\)/);
+  assert.match(html, /\.card>summary::before\{content:'';grid-column:1;grid-row:1/);
+  assert.match(html, /\.card\[open\]>summary::before\{transform:rotate\(90deg\)\}/);
+  assert.match(html, /\.card-summary-title\{grid-column:2;/);
+  assert.match(html, /\.actions>\.end-job\{margin-left:auto\}/);
+  // End Job is the last action, so it lands at the right of the bottom row.
+  assert.match(html, /<a class="button danger end-job"[^>]*>End Job<\/a><\/div><\/div><\/details>/);
+});

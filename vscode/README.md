@@ -37,7 +37,8 @@ see details and to:
   when a job ends, so for finished jobs the extension opens the script file
   named on the recorded `sbatch` command line instead, and a warning says that
   it is the current file and may have changed since submission;
-- for running and pending jobs, select **End Job**. A modal dialog asks for
+- for running and pending jobs, select **End Job** in the card's lower-right
+  corner. A modal dialog asks for
   confirmation, then the service runs `scancel` for that job. The ID badge
   turns red and the button disappears until Slurm stops listing the job;
 - for jobs with a Slurm dependency, read the **Depends on** row. Each job ID in
