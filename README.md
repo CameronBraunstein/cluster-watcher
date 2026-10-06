@@ -587,6 +587,49 @@ Add `--jobs` to show a job-state summary. The interval can be changed with
 `--refresh SECONDS`; avoid lowering it substantially because `sinfo` requests
 place load on the Slurm controller.
 
+### How refreshes are kept cheap
+
+Measured on real clusters, every Slurm query takes milliseconds, but each SSH
+call costs about one to two seconds, even over the shared control master,
+because the cluster starts your login shell and its startup files for every
+session. The service therefore:
+
+1. **Uses one SSH call per cluster per refresh.** All of a refresh's commands
+   run as one `sh` script (`clusterwatcher/remote_batch.py`); its output is
+   split back into per-command stdout, stderr, and exit status with
+   random-token marker lines, so one failing command still only affects its
+   own part of the status. Clusters are collected in parallel (each still gets
+   exactly one call against its own Slurm controller), so a refresh takes as
+   long as the slowest cluster. Measured on four clusters, a refresh dropped
+   from about 38 s to 2.5-4.3 s. A batch may take up to twice `--timeout` plus
+   5 s; a cluster that does not answer in time is reported as "no response
+   from the cluster within N s".
+2. **Refreshes capacity every 60 s and your jobs every refresh.** Partition
+   and node detail (`sinfo`, `scontrol show node -d`, which is over 1 MB on
+   large clusters, and everyone's running-job end times) changes slowly; your
+   own `squeue --me` queries run every `--refresh` interval. The snapshot and
+   `/api/status` keep the capacity data's own `capacity_updated_at`.
+3. **Queries accounting only when your queue changes.** With `--jobs-api`, the
+   same SSH call computes a fingerprint on the cluster: a `cksum` of your
+   sorted `squeue --me` job IDs and states (never elapsed or remaining time).
+   `sacct` runs only when the fingerprint differs from the previous refresh,
+   for example when a job starts, changes state, or leaves the queue (when its
+   final state must come from accounting), and at least every 5 minutes. The
+   personal jobs API serves these records for its default 24-hour window, so
+   polling clients cause no `sacct` queries of their own; requests for
+   specific `job_id`s or another `since` still query `sacct` directly.
+4. **Answers unchanged data with `304 Not Modified`.** `/api/status`,
+   `/api/v1/snapshot`, and `/api/v1/jobs` send an `ETag` computed without
+   fields that move on every refresh (`generated_at`, `updated_at`, the jobs
+   API's default `since`,
+   `capacity_updated_at`, elapsed/remaining times, and
+   `estimated_wait_seconds`). Clients that send it back in `If-None-Match`
+   receive an empty `304` until something real changes. Clients extrapolate
+   those moving values from `generated_at`: running jobs' elapsed time and
+   wait estimates keep counting on the client's clock, in both the web page
+   and the VS Code extension, so times stay current even when nothing new
+   has happened.
+
 Enable recent and completed jobs, the personal jobs API, and on-demand log
 tails explicitly:
 
@@ -1254,9 +1297,13 @@ Cluster Watcher Activity Bar container with two sidebar views:
 
 - **My Jobs** follows the running, pending, completed, failed, and cancelled
   grouping from `cluster-watcher jobs`. State groups and individual job cards
-  are collapsible; a collapsed card retains the job name, a fixed-width ID
-  badge (click it to copy the ID), progress bar, and completion/start
-  estimate. Expanded cards show resource requests, submitted/launched/ended
+  are collapsible; a collapsed card retains the job name, an ID badge sized to
+  the ID (click it to copy the ID), and a progress bar with the elapsed time,
+  time limit or start estimate to its right (below it when the sidebar is too
+  narrow). State-group and cluster headings use the 11px size of the native
+  view headings, and job titles are slightly smaller. Dates use
+  `clusterWatcher.dateFormat` (default `DD.MM.YYYY`, tokens `YYYY`, `YY`, `MM`,
+  `DD`) followed by 24-hour `HH:mm` local time. Expanded cards show resource requests, submitted/launched/ended
   times, any dependency (each referenced job ID jumps to its card), archive
   controls, stdout/stderr and batch-script actions, and, for running or pending jobs, an
   **End Job** button that confirms before cancelling the job.
@@ -1267,8 +1314,8 @@ Cluster Watcher Activity Bar container with two sidebar views:
 
 The redundant in-webview **My Jobs** and **Cluster Status** titles are omitted;
 the native collapsible VS Code view headings provide those labels. The
-**Refresh Sidebar** and **Start Service & SSH Sessions** actions appear once in
-the Cluster Watcher container toolbar rather than once on each view.
+**Refresh Sidebar** and **Start Service & SSH Sessions** actions appear once, in
+the **My Jobs** view's title bar, rather than once on each view.
 
 The Activity Bar SVG depicts three server boxes with a magnifying glass over
 their upper-right corner. It was created specifically for this project and is

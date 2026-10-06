@@ -1,6 +1,6 @@
 """Shared data structures for configuration and collected cluster status."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,22 @@ class RemoteCommandResult:
 
 
 @dataclass
+class AccountingSnapshot:
+    """Recent ``sacct`` records fetched during a status refresh.
+
+    ``fingerprint`` is the checksum of the user's queued job IDs and states
+    when the records were fetched; while it is unchanged the records are reused
+    instead of querying accounting again.
+    """
+
+    records: list[dict[str, object]]
+    fingerprint: str
+    since: str
+    fetched_at: str
+    fetched_monotonic: float = field(default=0.0, compare=False)
+
+
+@dataclass
 class ClusterStatus:
     name: str
     host: str
@@ -54,3 +70,9 @@ class ClusterStatus:
     jobs: dict[str, int] | None = None
     resource_error: str | None = None
     error: str | None = None
+    # When partitions/nodes were last collected; they refresh less often than jobs.
+    capacity_updated_at: str | None = None
+    # Checksum of the user's queued job IDs and states (see slurm.accounting_gate_command).
+    user_jobs_fingerprint: str | None = None
+    # Server-internal; removed from API payloads.
+    accounting: AccountingSnapshot | None = None

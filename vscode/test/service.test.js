@@ -42,8 +42,11 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
     manifest.contributes.configuration.properties['clusterWatcher.executable'].default,
     'cluster-watcher',
   );
-  assert.ok(manifest.contributes.menus['viewContainer/title']);
-  assert.equal(manifest.contributes.menus['view/title'], undefined);
+  // viewContainer/title is a proposed API that published extensions cannot use.
+  assert.equal(manifest.contributes.menus['viewContainer/title'], undefined);
+  for (const item of manifest.contributes.menus['view/title']) {
+    assert.equal(item.when, 'view == clusterWatcher.jobs');
+  }
   assert.match(manifest.contributes.menus['editor/title'][0].when, /cluster-watcher-log/);
   const commands = new Map(manifest.contributes.commands.map((command) => [command.command, command]));
   assert.equal(commands.get('clusterWatcher.refresh').icon, '$(refresh)');

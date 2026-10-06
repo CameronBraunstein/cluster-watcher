@@ -24,11 +24,26 @@ function formatDuration(value) {
   return '<1m';
 }
 
-/** Convert an ISO timestamp to the VS Code host's local display timezone. */
+const DEFAULT_DATE_FORMAT = 'DD.MM.YYYY';
+/** The ``clusterWatcher.dateFormat`` pattern; the webview script receives its own copy. */
+let dateFormat = DEFAULT_DATE_FORMAT;
+
+/** Set the date pattern (``YYYY``, ``YY``, ``MM``, ``DD`` tokens); blank restores the default. */
+function setDateFormat(pattern) {
+  dateFormat = typeof pattern === 'string' && pattern.trim() ? pattern.trim() : DEFAULT_DATE_FORMAT;
+}
+
+/**
+ * Show an ISO timestamp in local time as ``dateFormat`` plus ``HH:mm``.
+ * Self-contained apart from ``dateFormat``, because the webview re-runs it.
+ */
 function localTime(value) {
   if (!value) return 'Unavailable';
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? 'Unavailable' : parsed.toLocaleString();
+  if (Number.isNaN(parsed.getTime())) return 'Unavailable';
+  const pad = (number) => String(number).padStart(2, '0');
+  const parts = { YYYY: String(parsed.getFullYear()), YY: pad(parsed.getFullYear() % 100), MM: pad(parsed.getMonth() + 1), DD: pad(parsed.getDate()) };
+  return `${dateFormat.replace(/YYYY|YY|MM|DD/g, (token) => parts[token])} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
 }
 
 /** Map detailed Slurm states onto the terminal board's groups. */
@@ -67,45 +82,100 @@ function commandAttributes(command, args = []) {
   return `href="#" data-command="${escapeHtml(command)}" data-args="${escapeHtml(JSON.stringify(args))}"`;
 }
 
-/** Render state-appropriate elapsed/wait progress. */
-function jobProgress(job) {
+/**
+ * Capture what a job's progress bar needs, relative to ``asOf`` (the
+ * payload's ``generated_at`` in milliseconds). Elapsed time is reported at
+ * ``asOf``, so the bar can keep advancing on the client's clock while the
+ * service answers "not modified".
+ */
+function progressSpec(job, asOf) {
   const group = stateGroup(job.state);
-  const elapsed = Math.max(0, Number(job.elapsed_seconds) || 0);
-  if (group === 'RUNNING') {
-    const limit = Math.max(0, Number(job.time_limit_seconds) || 0);
-    const percent = limit ? Math.min(100, elapsed / limit * 100) : 0;
-    const started = new Date(job.start_at || job.start_time).getTime();
-    const limitAt = limit && Number.isFinite(started) ? localTime(new Date(started + limit * 1000).toISOString()) : null;
-    const label = limit ? `${formatDuration(elapsed)} / ${formatDuration(limit)}${limitAt ? ` · limit ${limitAt}` : ''}` : `${formatDuration(elapsed)} elapsed`;
-    return `<span class="progress"><span class="progress-fill running" style="width:${percent}%"></span></span><span class="muted">${escapeHtml(label)}</span>`;
+  const time = (value) => {
+    const parsed = Date.parse(value || '');
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  return {
+    group,
+    asOf: Number.isFinite(asOf) ? asOf : Date.now(),
+    elapsed: Math.max(0, Number(job.elapsed_seconds) || 0),
+    limit: Math.max(0, Number(job.time_limit_seconds) || 0),
+    start: time(job.start_at || job.start_time),
+    submit: time(job.submit_at || job.submit_time),
+    expected: time(job.expected_start_at || job.start_at || job.start_time),
+    reason: String(job.reason || ''),
+    ended: ['COMPLETED', 'FAILED', 'CANCELLED', 'OTHER'].includes(group) ? lifecycle(job, 'ended') : '—',
+  };
+}
+
+/**
+ * Compute a progress bar's fill and label at time ``now`` from a
+ * ``progressSpec``. Self-contained apart from ``formatDuration`` and
+ * ``localTime``, because the webview re-runs it every few seconds.
+ */
+function progressView(spec, now) {
+  if (spec.group === 'RUNNING') {
+    const elapsed = spec.elapsed + Math.max(0, (now - spec.asOf) / 1000);
+    const percent = spec.limit ? Math.min(100, elapsed / spec.limit * 100) : 0;
+    const limitAt = spec.limit ? (spec.start ?? spec.asOf - spec.elapsed * 1000) + spec.limit * 1000 : null;
+    const limitText = limitAt ? ` · limit ${localTime(new Date(limitAt).toISOString())}` : '';
+    const label = spec.limit ? `${formatDuration(elapsed)} / ${formatDuration(spec.limit)}${limitText}` : `${formatDuration(elapsed)} elapsed`;
+    return { fill: 'running', percent, label };
   }
-  if (group === 'PENDING') {
-    const submitted = new Date(job.submit_at || job.submit_time).getTime();
-    const expected = new Date(job.expected_start_at || job.start_at || job.start_time).getTime();
-    const now = Date.now();
-    const total = expected - submitted;
-    const percent = Number.isFinite(total) && total > 0 ? Math.max(0, Math.min(100, (now - submitted) / total * 100)) : 0;
-    const remaining = Number.isFinite(expected) ? Math.max(0, (expected - now) / 1000) : null;
-    const reason = String(job.reason || '');
+  if (spec.group === 'PENDING') {
+    const total = spec.expected != null && spec.submit != null ? spec.expected - spec.submit : NaN;
+    const percent = Number.isFinite(total) && total > 0 ? Math.max(0, Math.min(100, (now - spec.submit) / total * 100)) : 0;
+    const remaining = spec.expected != null ? Math.max(0, (spec.expected - now) / 1000) : null;
     const label = remaining == null
-      ? (/^dependency:/i.test(reason) ? `waiting for ${reason}` : 'wait estimate unavailable')
+      ? (/^dependency:/i.test(spec.reason) ? `waiting for ${spec.reason}` : 'wait estimate unavailable')
       : `${formatDuration(remaining)} until estimated start`;
-    return `<span class="progress"><span class="progress-fill pending" style="width:${percent}%"></span></span><span class="muted">${escapeHtml(label)}</span>`;
+    return { fill: 'pending', percent, label };
   }
-  const ended = lifecycle(job, 'ended');
-  const label = ended !== '—' && ended !== 'Unavailable' ? `${formatDuration(elapsed)} elapsed · ended ${ended}` : `${formatDuration(elapsed)} elapsed`;
-  return `<span class="progress"><span class="progress-fill ${group.toLowerCase()}" style="width:100%"></span></span><span class="muted">${escapeHtml(label)}</span>`;
+  const ended = spec.ended !== '—' && spec.ended !== 'Unavailable' ? ` · ended ${spec.ended}` : '';
+  return { fill: spec.group.toLowerCase(), percent: 100, label: `${formatDuration(spec.elapsed)} elapsed${ended}` };
+}
+
+/** Render state-appropriate elapsed/wait progress that the webview keeps current. */
+function jobProgress(job, asOf, now = Date.now()) {
+  const spec = progressSpec(job, asOf);
+  const view = progressView(spec, now);
+  return `<span class="job-progress" data-progress="${escapeHtml(JSON.stringify(spec))}"><span class="progress"><span class="progress-fill ${view.fill}" style="width:${view.percent}%"></span></span><span class="muted progress-label">${escapeHtml(view.label)}</span></span>`;
 }
 
 /** Wrap sidebar content in a self-contained webview document. */
 function document(title, body, updatedAt) {
   const updated = updatedAt ? `Updated ${localTime(updatedAt)}` : '';
+  const updatedAttribute = updatedAt ? ` data-updated="${escapeHtml(updatedAt)}"` : '';
   const nonce = crypto.randomBytes(16).toString('base64');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:1em;text-transform:none}.cluster-group>summary{font-size:1.2rem;margin-bottom:7px}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:6px 0;background:var(--vscode-sideBar-background)}.card>summary{padding:8px;cursor:pointer;list-style:none;display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:7px;align-items:start}.card>summary::-webkit-details-marker{display:none}.card>summary::before{content:'';grid-column:1;grid-row:1;margin-top:.4em;border-style:solid;border-width:4px 0 4px 6px;border-color:transparent transparent transparent currentColor;transition:transform .1s}.card[open]>summary::before{transform:rotate(90deg)}.card-summary-title{grid-column:2;display:flex;justify-content:space-between;gap:8px}.card-summary-progress{grid-column:2;display:block}.card-body{padding:0 8px 8px}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;overflow-wrap:anywhere;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{flex:0 0 auto;box-sizing:content-box;width:12ch;align-self:flex-start;text-align:center;font-family:var(--vscode-editor-font-family);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:copy}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden;margin:6px 0 3px}.progress{display:block;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability{display:flex}.available{background:var(--vscode-testing-iconPassed)}.times{display:grid;grid-template-columns:auto 1fr;gap:2px 6px;margin-top:6px;font-size:.8em}.times dt{color:var(--vscode-descriptionForeground)}.times dd{margin:0;text-align:right}.actions{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}.actions>.end-job{margin-left:auto}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.78em}th,td{text-align:left;padding:3px 5px;border-bottom:1px solid var(--vscode-panel-border);white-space:nowrap}th{color:var(--vscode-descriptionForeground)}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
-</style></head><body><div class="meta">${escapeHtml(updated)}</div>${body}<script nonce="${nonce}">
+body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:6px 0;background:var(--vscode-sideBar-background)}.card>summary{padding:8px;cursor:pointer;list-style:none;display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:7px;align-items:start}.card>summary::-webkit-details-marker{display:none}.card>summary::before{content:'';grid-column:1;grid-row:1;margin-top:.4em;border-style:solid;border-width:4px 0 4px 6px;border-color:transparent transparent transparent currentColor;transition:transform .1s}.card[open]>summary::before{transform:rotate(90deg)}.card-summary-title{grid-column:2;display:flex;justify-content:space-between;gap:8px}.card-summary-progress{grid-column:2;display:block}.job-progress{display:flex;flex-wrap:wrap;align-items:center;column-gap:7px}.job-progress>.progress{flex:1 1 60px;min-width:60px}.progress-label{flex:0 1 auto}.card-body{padding:0 8px 8px}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow-wrap:anywhere;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{flex:0 0 auto;align-self:flex-start;font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden;margin:6px 0 3px}.progress{display:block;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability{display:flex}.available{background:var(--vscode-testing-iconPassed)}.times{display:grid;grid-template-columns:auto 1fr;gap:2px 6px;margin-top:6px;font-size:.8em}.times dt{color:var(--vscode-descriptionForeground)}.times dd{margin:0;text-align:right}.actions{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}.actions>.end-job{margin-left:auto}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.78em}th,td{text-align:left;padding:3px 5px;border-bottom:1px solid var(--vscode-panel-border);white-space:nowrap}th{color:var(--vscode-descriptionForeground)}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
+</style></head><body><div class="meta"${updatedAttribute}>${escapeHtml(updated)}</div>${body}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
+  // Shared with the extension so the page keeps times current between refreshes.
+  ${formatDuration.toString()}
+  const dateFormat = ${JSON.stringify(dateFormat).replace(/</g, '\\u003c')};
+  ${localTime.toString()}
+  ${progressView.toString()}
+  const tick = () => {
+    const now = Date.now();
+    document.querySelectorAll('[data-progress]').forEach((element) => {
+      const view = progressView(JSON.parse(element.dataset.progress), now);
+      element.querySelector('.progress-fill').style.width = view.percent + '%';
+      element.querySelector('.progress-label').textContent = view.label;
+    });
+    document.querySelectorAll('[data-wait]').forEach((cell) => {
+      const [seconds, asOf] = JSON.parse(cell.dataset.wait);
+      cell.textContent = formatDuration(Math.max(0, seconds - (now - asOf) / 1000));
+    });
+  };
+  setInterval(tick, 5000);
+  // The extension reports refreshes that found nothing new ("checked").
+  const meta = document.querySelector('.meta[data-updated]');
+  window.addEventListener('message', (event) => {
+    if (event.data?.type !== 'checked' || !meta) return;
+    meta.textContent = 'Updated ' + localTime(meta.dataset.updated) + ' · checked ' + new Date(event.data.at).toLocaleTimeString();
+    tick();
+  });
   document.addEventListener('click', (event) => {
     const button = event.target.closest('[data-command]');
     if (!button) return;
@@ -238,7 +308,7 @@ function jobRef(job) {
  * Render one collapsible job card with archive, log, and (for active jobs)
  * End Job actions. ``cancelling`` holds job refs whose cancellation was sent.
  */
-function jobCard(job, archived, disclosures, cancelling = new Set()) {
+function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date.now()) {
   const identifier = String(job.job_id || job.id || 'unknown');
   const nodes = Number(job.node_count) || (job.nodes || []).length;
   const resources = `${nodes} node · ${Number(job.gpus) || 0} GPU · ${Number(job.cpus) || 0} CPU`;
@@ -256,7 +326,7 @@ function jobCard(job, archived, disclosures, cancelling = new Set()) {
     actions.push(`<a class="button danger end-job" role="button" ${commandAttributes('clusterWatcher.cancelJob', [job.cluster, identifier, job.name || identifier])}>End Job</a>`);
   }
   const disclosureKey = `card:${archived ? 'archive' : 'active'}:${key}`;
-  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary><span class="card-summary-title"><span class="name">${escapeHtml(job.name || identifier)}</span><span class="badge job-id${ending ? ' ending' : ''}" role="button" tabindex="0" data-copy="${escapeHtml(identifier)}" title="${escapeHtml(identifier)}${ending ? ' · ending' : ''} — click to copy">${escapeHtml(identifier)}</span></span><span class="card-summary-progress">${jobProgress(job)}</span></summary><div class="card-body"><div class="muted">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')} · ${escapeHtml(resources)}</div><dl class="times"><dt>Submitted</dt><dd>${escapeHtml(localTime(job.submit_at || job.submit_time))}</dd><dt>Launched</dt><dd>${escapeHtml(lifecycle(job, 'launched'))}</dd><dt>Ended</dt><dd>${escapeHtml(lifecycle(job, 'ended'))}</dd>${dependencyLinks(job)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
+  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary><span class="card-summary-title"><span class="name">${escapeHtml(job.name || identifier)}</span><span class="badge job-id${ending ? ' ending' : ''}" role="button" tabindex="0" data-copy="${escapeHtml(identifier)}" title="${escapeHtml(identifier)}${ending ? ' · ending' : ''} — click to copy">${escapeHtml(identifier)}</span></span><span class="card-summary-progress">${jobProgress(job, asOf)}</span></summary><div class="card-body"><div class="muted">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')} · ${escapeHtml(resources)}</div><dl class="times"><dt>Submitted</dt><dd>${escapeHtml(localTime(job.submit_at || job.submit_time))}</dd><dt>Launched</dt><dd>${escapeHtml(lifecycle(job, 'launched'))}</dd><dt>Ended</dt><dd>${escapeHtml(lifecycle(job, 'ended'))}</dd>${dependencyLinks(job)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
 }
 
 /**
@@ -265,6 +335,7 @@ function jobCard(job, archived, disclosures, cancelling = new Set()) {
  * `cancelling` holds ``cluster/job_id`` refs whose End Job request was sent.
  */
 function renderJobs(payload, disclosures = {}, cancelling = new Set()) {
+  const asOf = Date.parse(payload.generated_at || '') || Date.now();
   const ranks = new Map(['RUNNING', 'PENDING', 'COMPLETED', 'FAILED', 'CANCELLED', 'OTHER'].map((name, index) => [name, index]));
   const jobs = [...(payload.jobs || [])].sort((left, right) => {
     const groupDifference = ranks.get(stateGroup(left.state)) - ranks.get(stateGroup(right.state));
@@ -275,10 +346,10 @@ function renderJobs(payload, disclosures = {}, cancelling = new Set()) {
   const rows = [];
   for (const group of ranks.keys()) {
     const grouped = jobs.filter((job) => stateGroup(job.state) === group);
-    if (grouped.length) rows.push(`<details class="job-group" data-disclosure-key="group:active:${group}"${openAttribute(disclosures, `group:active:${group}`, true)}><summary>${labels[group]} (${grouped.length})</summary>${grouped.map((job) => jobCard(job, false, disclosures, cancelling)).join('')}</details>`);
+    if (grouped.length) rows.push(`<details class="job-group" data-disclosure-key="group:active:${group}"${openAttribute(disclosures, `group:active:${group}`, true)}><summary>${labels[group]} (${grouped.length})</summary>${grouped.map((job) => jobCard(job, false, disclosures, cancelling, asOf)).join('')}</details>`);
   }
   const archived = payload.archived_jobs || [];
-  rows.push(`<details class="job-group archive" data-disclosure-key="group:archive"${openAttribute(disclosures, 'group:archive', false)}><summary>Archive (${archived.length})</summary>${archived.length ? archived.map((job) => jobCard(job, true, disclosures, cancelling)).join('') : '<p class="muted">No archived jobs.</p>'}</details>`);
+  rows.push(`<details class="job-group archive" data-disclosure-key="group:archive"${openAttribute(disclosures, 'group:archive', false)}><summary>Archive (${archived.length})</summary>${archived.length ? archived.map((job) => jobCard(job, true, disclosures, cancelling, asOf)).join('') : '<p class="muted">No archived jobs.</p>'}</details>`);
   if (!jobs.length && !archived.length) rows.unshift('<p>No jobs found in the last 24 hours.</p>');
   return document('My Jobs', rows.join(''), payload.generated_at);
 }
@@ -298,11 +369,21 @@ function waitCell(partition, count) {
   return formatDuration(estimate.estimated_wait_seconds);
 }
 
+/** Return a ``data-wait`` attribute so the webview can count a wait estimate down. */
+function waitData(partition, count, asOf) {
+  if (count > (Number(partition.gpus?.total) || 0)) return '';
+  const estimate = (partition.wait_estimates || []).find((row) => Number(row.gpus) === count);
+  const seconds = Number(estimate?.estimated_wait_seconds);
+  if (!estimate || estimate.error || estimate.estimated_wait_seconds == null || !Number.isFinite(seconds)) return '';
+  return ` data-wait="${escapeHtml(JSON.stringify([seconds, asOf]))}"`;
+}
+
 /**
  * Render the stable availability snapshot in cluster-separated tables.
  * `disclosures` maps disclosure keys to remembered open/closed choices.
  */
 function renderStatus(payload, disclosures = {}) {
+  const asOf = Date.parse(payload.generated_at || '') || Date.now();
   const clusters = [];
   for (const cluster of payload.clusters || []) {
     const clusterName = escapeHtml(cluster.name);
@@ -320,7 +401,7 @@ function renderStatus(payload, disclosures = {}) {
       const idle = Number(partition.gpus?.schedulable_idle) || 0;
       const availablePercent = total ? Math.max(0, Math.min(100, idle / total * 100)) : 0;
       const unavailablePercent = total ? 100 - availablePercent : 100;
-      const waits = WAIT_GPU_COUNTS.map((count) => `<td title="Wait for ${count} GPU">${escapeHtml(waitCell(partition, count))}</td>`).join('');
+      const waits = WAIT_GPU_COUNTS.map((count) => `<td title="Wait for ${count} GPU"${waitData(partition, count, asOf)}>${escapeHtml(waitCell(partition, count))}</td>`).join('');
       return `<tr class="${partition.aggregate ? 'aggregate' : ''}"><td>${escapeHtml(partition.name)}${partition.aggregate ? ' (aggregate)' : ''}</td><td>${escapeHtml(profile?.name || '—')}</td><td>${profile?.vram_gb == null ? '—' : `${escapeHtml(profile.vram_gb)}G`}</td><td>${profile?.fp16_bf16_tensor_tflops == null ? '—' : escapeHtml(profile.fp16_bf16_tensor_tflops)}</td><td><div class="availability" title="${idle}/${total} GPUs schedulable and idle"><span class="unavailable" style="width:${unavailablePercent}%"></span><span class="available" style="width:${availablePercent}%"></span></div>${idle}/${total}</td>${waits}<td>${escapeHtml(partition.cpus?.total ?? 0)}</td></tr>`;
     }).join('');
     clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(cluster.resource_error)}</p>` : ''}<div class="table-wrap"><table><thead><tr><th>Partition</th><th>GPU</th><th>VRAM</th><th>TFLOPS/s</th><th>Available</th>${WAIT_GPU_COUNTS.map((count) => `<th>${count}</th>`).join('')}<th>CPU threads</th></tr></thead><tbody>${rows}</tbody></table></div></details>`);
@@ -328,4 +409,4 @@ function renderStatus(payload, disclosures = {}) {
   return document('Cluster Status', clusters.join('') || '<p>No clusters returned.</p>', payload.generated_at);
 }
 
-module.exports = { commandAttributes, escapeHtml, jobRef, openAttribute, parseDependency, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup, waitCell };
+module.exports = { DEFAULT_DATE_FORMAT, localTime, setDateFormat, progressSpec, progressView, commandAttributes, escapeHtml, jobRef, openAttribute, parseDependency, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup, waitCell };

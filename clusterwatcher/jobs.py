@@ -176,7 +176,7 @@ class JobService:
                 cached = self._cache.get(cache_key)
                 if cached:
                     return deepcopy(cached[1])
-            payload = self._collect(selected_names, requested_ids, state, since_value)
+            payload = self._collect(selected_names, requested_ids, state, since_value, default_window=since is None)
             with self._lock:
                 self._cache[cache_key] = (time.monotonic(), payload)
             return deepcopy(payload)
@@ -187,8 +187,15 @@ class JobService:
         requested_ids: tuple[str, ...],
         state_filter: str,
         since: datetime,
+        default_window: bool = False,
     ) -> dict[str, object]:
-        """Collect each selected cluster independently so failures stay local."""
+        """Collect each selected cluster independently so failures stay local.
+
+        For the default 24-hour window, accounting records collected by the
+        status refresh (gated by the queue fingerprint) are reused, so polling
+        clients cause no ``sacct`` queries of their own. Specific job IDs or
+        another ``since`` still query ``sacct`` directly.
+        """
         machines = {machine.name: machine for machine in self.machines}
         statuses = {status.name: status for status in self.status_provider()}
         jobs: list[dict[str, object]] = []
@@ -206,11 +213,14 @@ class JobService:
                 if _matches_requested(str(record["job_id"]), requested_ids)
             }
             accounting_error: str | None = None
-            try:
-                accounting = collect_accounting_jobs(machine, self.timeout, since, requested_ids)
-            except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
-                accounting = []
-                accounting_error = str(exc)
+            if default_window and not requested_ids and status is not None and status.accounting is not None:
+                accounting = deepcopy(status.accounting.records)
+            else:
+                try:
+                    accounting = collect_accounting_jobs(machine, self.timeout, since, requested_ids)
+                except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+                    accounting = []
+                    accounting_error = str(exc)
 
             merged: dict[str, dict[str, object]] = {}
             for record in accounting:

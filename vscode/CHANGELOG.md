@@ -6,10 +6,22 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 - Job card titles sit next to the collapse arrow instead of below it, with the
   progress bar aligned under the title.
+- The job ID badge fits its ID, and the progress label (elapsed time, limit or
+  start estimate) sits to the right of the bar, which makes cards more compact.
+- State groups (Running, Pending, …) and cluster names use the 11px size of
+  the view headings; job titles are slightly smaller.
+- New `clusterWatcher.dateFormat` setting (default `DD.MM.YYYY`); times are
+  shown as 24-hour `HH:mm`.
 - **End Job** sits in the lower-right corner of the card, apart from the other
   actions.
+- The sidebar's Refresh, Start Service, Edit Config, Setup and Settings
+  buttons now appear in the **My Jobs** title bar. They used a proposed VS Code
+  menu that published extensions cannot use, so they were missing before.
 - The Activity Bar icon hides the servers behind the magnifying glass, like
   the Marketplace icon.
+- Refreshes are conditional: unchanged data is answered with `304 Not
+  Modified` and the views are not rebuilt, while progress bars, elapsed times,
+  and wait estimates keep counting locally. Requires `cluster-watcher` 0.1.2.
 
 ## 0.1.1 — 2026-10-06
 

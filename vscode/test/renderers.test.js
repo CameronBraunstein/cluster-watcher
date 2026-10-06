@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { commandAttributes, escapeHtml, renderJobsApiDisabled, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, lifecycle, renderJobs, renderStatus, stateGroup, waitCell } = require('../renderers');
+const { DEFAULT_DATE_FORMAT, localTime, setDateFormat, progressSpec, progressView, commandAttributes, escapeHtml, renderJobsApiDisabled, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, lifecycle, renderJobs, renderStatus, stateGroup, waitCell } = require('../renderers');
 
 test('jobs retain terminal state grouping and lifecycle visibility', () => {
   const jobs = [
@@ -102,10 +102,11 @@ test('openAttribute falls back to the renderer default', () => {
   assert.equal(openAttribute({ key: false }, 'key', true), '');
 });
 
-test('job ID badge is fixed-width and copyable without toggling the card', () => {
+test('job ID badge wraps tightly around the ID and is copyable without toggling the card', () => {
   const html = renderJobs({ jobs: [{ job_id: '2000068_123', name: 'a very long job title indeed', cluster: 'cluster_0', state: 'RUNNING' }] });
   assert.match(html, /<span class="badge job-id" role="button" tabindex="0" data-copy="2000068_123"/);
-  assert.match(html, /\.job-id\{flex:0 0 auto;box-sizing:content-box;width:12ch/);
+  assert.match(html, /\.job-id\{flex:0 0 auto;align-self:flex-start;/);
+  assert.doesNotMatch(html, /\.job-id\{[^}]*width:/);
   assert.match(html, /type: 'copy'/);
   assert.match(html, /event\.stopPropagation\(\)/);
 });
@@ -183,4 +184,74 @@ test('card title sits beside its arrow and End Job is placed bottom right', () =
   assert.match(html, /\.actions>\.end-job\{margin-left:auto\}/);
   // End Job is the last action, so it lands at the right of the bottom row.
   assert.match(html, /<a class="button danger end-job"[^>]*>End Job<\/a><\/div><\/div><\/details>/);
+});
+
+test('running progress keeps advancing from generated_at without new data', () => {
+  const asOf = Date.parse('2026-10-06T10:00:00Z');
+  const spec = progressSpec({ state: 'RUNNING', elapsed_seconds: 600, time_limit_seconds: 3600 }, asOf);
+  const atRender = progressView(spec, asOf);
+  const later = progressView(spec, asOf + 30 * 60 * 1000);
+  assert.match(atRender.label, /^10m \/ 1h/);
+  assert.match(later.label, /^40m \/ 1h/);
+  assert.ok(later.percent > atRender.percent);
+  // Finished jobs keep their recorded elapsed time.
+  const done = progressSpec({ state: 'COMPLETED', elapsed_seconds: 600 }, asOf);
+  assert.match(progressView(done, asOf + 3600 * 1000).label, /^10m elapsed/);
+});
+
+test('pending wait counts down and the webview re-runs the shared code', () => {
+  const asOf = Date.parse('2026-10-06T10:00:00Z');
+  const spec = progressSpec({ state: 'PENDING', submit_at: '2026-10-06T09:00:00Z', expected_start_at: '2026-10-06T11:00:00Z' }, asOf);
+  assert.match(progressView(spec, asOf).label, /^1h until estimated start/);
+  assert.match(progressView(spec, asOf + 30 * 60 * 1000).label, /^30m until estimated start/);
+
+  const html = renderJobs({ generated_at: '2026-10-06T10:00:00Z', jobs: [{ job_id: '1', cluster: 'c', state: 'RUNNING', elapsed_seconds: 1 }] });
+  assert.match(html, /<span class="job-progress" data-progress="\{&quot;group&quot;:&quot;RUNNING&quot;/);
+  assert.match(html, /function progressView\(spec, now\)/);
+  assert.match(html, /setInterval\(tick, 5000\)/);
+  assert.match(html, /<div class="meta" data-updated="2026-10-06T10:00:00Z">/);
+  assert.match(html, /event\.data\?\.type !== 'checked'/);
+});
+
+test('status wait cells carry their estimate and as-of time for counting down', () => {
+  const partition = {
+    name: 'gpu', gpus: { total: 8, schedulable_idle: 0, models: [] },
+    wait_estimates: [{ gpus: 1, estimated_wait_seconds: 900, error: null }, { gpus: 2, estimated_wait_seconds: null, error: 'denied' }],
+  };
+  const html = renderStatus({ generated_at: '2026-10-06T10:00:00Z', clusters: [{ name: 'c', reachable: true, partitions: [partition] }] });
+  assert.match(html, /<td title="Wait for 1 GPU" data-wait="\[900,1791280800000\]">15m<\/td>/);
+  assert.match(html, /<td title="Wait for 2 GPU">ERR<\/td>/);
+});
+
+test('heading sizes: groups and cluster names match the 11px view headings, job titles are smaller', () => {
+  const html = renderJobs({ jobs: [] });
+  assert.match(html, /\.job-group>summary,\.cluster-group>summary\{[^}]*font-size:11px/);
+  assert.doesNotMatch(html, /\.cluster-group>summary\{[^}]*font-size:1\.2rem/);
+  assert.match(html, /\.name\{[^}]*font-size:10\.5px/);
+});
+
+test('progress label sits to the right of the bar', () => {
+  const html = renderJobs({ generated_at: '2026-09-30T15:02:00Z', jobs: [{ job_id: '1', cluster: 'cluster_0', state: 'RUNNING', elapsed_seconds: 60, time_limit_seconds: 3600 }] });
+  assert.match(html, /\.job-progress\{display:flex;/);
+  assert.match(html, /<span class="job-progress"[^>]*><span class="progress">.*?<\/span><\/span><span class="muted progress-label">/);
+});
+
+test('dates use DD.MM.YYYY by default and follow the configured pattern', () => {
+  const value = new Date(2026, 9, 6, 9, 5).toISOString();
+  try {
+    assert.equal(DEFAULT_DATE_FORMAT, 'DD.MM.YYYY');
+    assert.equal(localTime(value), '06.10.2026 09:05');
+    setDateFormat('YYYY-MM-DD');
+    assert.equal(localTime(value), '2026-10-06 09:05');
+    setDateFormat('MM/DD/YY');
+    assert.equal(localTime(value), '10/06/26 09:05');
+    assert.match(renderJobs({ jobs: [] }), /const dateFormat = "MM\/DD\/YY";/);
+    setDateFormat('  ');
+    assert.equal(localTime(value), '06.10.2026 09:05');
+    setDateFormat('</script>DD');
+    assert.doesNotMatch(renderJobs({ jobs: [] }), /"<\/script>/);
+    assert.equal(localTime('not a date'), 'Unavailable');
+  } finally {
+    setDateFormat();
+  }
 });

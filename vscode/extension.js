@@ -5,7 +5,7 @@ const { JobArchive } = require('./archive');
 const { LOG_TAIL_LINES, logDocumentContent, logRequestPath, prependLogPage, virtualLogPath } = require('./logs');
 const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = require('./events');
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
-const { jobRef, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup } = require('./renderers');
+const { jobRef, setDateFormat, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup } = require('./renderers');
 const {
   ExecutableValidationError, jobsApiDisabled, responseError, cliCommand, configurationError, resolveConfigPath, serviceCommand, validateExecutable,
 } = require('./service');
@@ -32,6 +32,7 @@ function configuration() {
     autoStart: config.get('autoStart', false),
     notifications: config.get('notifications', 'all'),
     statusBar: config.get('statusBar', true),
+    dateFormat: config.get('dateFormat', 'DD.MM.YYYY'),
   };
 }
 
@@ -39,6 +40,17 @@ function configuration() {
 class BackendClient {
   async get(path, timeoutMilliseconds = 12000) {
     return this.request(path, { headers: { Accept: 'application/json' } }, timeoutMilliseconds);
+  }
+
+  /**
+   * Conditional GET: sends ``If-None-Match`` when an ETag is known and
+   * resolves ``{ notModified: true }`` on HTTP 304, otherwise
+   * ``{ payload, etag }``. Unchanged data then costs no transfer or render.
+   */
+  async poll(path, etag, timeoutMilliseconds = 12000) {
+    const headers = { Accept: 'application/json' };
+    if (etag) headers['If-None-Match'] = etag;
+    return this.request(path, { headers }, timeoutMilliseconds, true);
   }
 
   /** POST a JSON body; the JSON content type is what the service requires for writes. */
@@ -50,13 +62,14 @@ class BackendClient {
     }, timeoutMilliseconds);
   }
 
-  async request(path, init, timeoutMilliseconds) {
+  async request(path, init, timeoutMilliseconds, conditional = false) {
     const base = new URL(configuration().backendUrl);
     const url = new URL(path.replace(/^\//, ''), base.href.endsWith('/') ? base : `${base.href}/`);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMilliseconds);
     try {
       const response = await fetch(url, { ...init, signal: controller.signal });
+      if (conditional && response.status === 304) return { notModified: true };
       let payload;
       try {
         payload = await response.json();
@@ -64,7 +77,7 @@ class BackendClient {
         throw responseError(response.status, null);
       }
       if (!response.ok) throw responseError(response.status, payload);
-      return payload;
+      return conditional ? { payload, etag: response.headers.get('etag') || undefined } : payload;
     } catch (error) {
       if (error && error.name === 'AbortError') throw new Error('Cluster Watcher service request timed out');
       throw error;
@@ -182,6 +195,9 @@ class SidebarProvider {
     this.view = undefined;
     /** Remembered open/closed state of collapsible sections, keyed by disclosure key. */
     this.disclosures = {};
+    /** The last data received from the service, and whether the view currently shows it. */
+    this.payload = undefined;
+    this.showingData = false;
   }
 
   resolveWebviewView(view) {
@@ -189,7 +205,18 @@ class SidebarProvider {
     // Command URIs stay disabled: buttons post a message and receive() enforces WEBVIEW_COMMANDS.
     view.webview.options = { enableScripts: true };
     view.webview.onDidReceiveMessage((message) => this.receive(message));
-    view.webview.html = renderMessage(this.title(), 'Connecting to the local Cluster Watcher service…');
+    if (this.payload) this.render();
+    else view.webview.html = renderMessage(this.title(), 'Connecting to the local Cluster Watcher service…');
+  }
+
+  /**
+   * A refresh found the service's data unchanged (HTTP 304): keep the page,
+   * which advances its own times, and tell it when the check happened.
+   */
+  checked(at) {
+    if (!this.view) return;
+    if (!this.showingData && this.payload) this.render();
+    else void this.view.webview.postMessage({ type: 'checked', at });
   }
 
   /**
@@ -218,11 +245,18 @@ class SidebarProvider {
   }
 
   update(payload) {
-    if (!this.view) return;
-    this.view.webview.html = this.kind === 'jobs' ? renderJobs(payload, this.disclosures) : renderStatus(payload, this.disclosures);
+    this.payload = payload;
+    this.render();
+  }
+
+  render() {
+    if (!this.view || !this.payload) return;
+    this.showingData = true;
+    this.view.webview.html = renderStatus(this.payload, this.disclosures);
   }
 
   error(error) {
+    this.showingData = false;
     if (!this.view) return;
     const detail = error instanceof Error ? error.message : String(error);
     this.view.webview.html = renderWelcome(this.title(), detail);
@@ -230,6 +264,7 @@ class SidebarProvider {
 
   /** Explain that the service runs without the jobs API and how to restart it. */
   jobsApiDisabled() {
+    this.showingData = false;
     if (!this.view) return;
     this.view.webview.html = renderJobsApiDisabled(this.title(), restartCommandText());
   }
@@ -268,6 +303,7 @@ class JobsSidebarProvider extends SidebarProvider {
 
   render() {
     if (!this.view) return;
+    this.showingData = true;
     this.view.webview.html = renderJobs({
       ...this.payload,
       jobs: this.archiveStore.activeJobs(this.payload.jobs || []),
@@ -450,6 +486,8 @@ class RefreshCoordinator {
     this.jobsProvider = jobsProvider;
     this.statusProvider = statusProvider;
     this.monitor = monitor;
+    /** ETags of the last data rendered per endpoint, for conditional polling. */
+    this.etags = {};
     this.inFlight = undefined;
     this.timer = undefined;
   }
@@ -462,22 +500,35 @@ class RefreshCoordinator {
 
   async run() {
     const [jobs, status] = await Promise.allSettled([
-      this.client.get('/api/v1/jobs'),
-      this.client.get('/api/v1/snapshot'),
+      this.client.poll('/api/v1/jobs', this.etags.jobs),
+      this.client.poll('/api/v1/snapshot', this.etags.status),
     ]);
-    if (jobs.status === 'fulfilled') {
+    const checkedAt = Date.now();
+    if (jobs.status === 'fulfilled' && jobs.value.notModified) {
+      this.jobsProvider.checked(checkedAt);
+    } else if (jobs.status === 'fulfilled') {
+      this.etags.jobs = jobs.value.etag;
       // The monitor reads the cancelling set before the provider prunes it.
-      this.monitor.update(jobs.value, this.jobsProvider.cancelling);
-      this.jobsProvider.update(jobs.value);
+      this.monitor.update(jobs.value.payload, this.jobsProvider.cancelling);
+      this.jobsProvider.update(jobs.value.payload);
     } else if (jobsApiDisabled(jobs.reason)) {
+      this.etags.jobs = undefined;
       this.monitor.jobsApiDisabled();
       this.jobsProvider.jobsApiDisabled();
     } else {
+      this.etags.jobs = undefined;
       this.monitor.offline();
       this.jobsProvider.error(jobs.reason);
     }
-    if (status.status === 'fulfilled') this.statusProvider.update(status.value);
-    else this.statusProvider.error(status.reason);
+    if (status.status === 'fulfilled' && status.value.notModified) {
+      this.statusProvider.checked(checkedAt);
+    } else if (status.status === 'fulfilled') {
+      this.etags.status = status.value.etag;
+      this.statusProvider.update(status.value.payload);
+    } else {
+      this.etags.status = undefined;
+      this.statusProvider.error(status.reason);
+    }
   }
 
   schedule() {
@@ -562,6 +613,7 @@ function reportError(error) {
 
 /** Activate the Cluster Watcher sidebar and service commands. */
 function activate(context) {
+  setDateFormat(configuration().dateFormat);
   const client = new BackendClient();
   const jobsProvider = new JobsSidebarProvider(context.globalState);
   const statusProvider = new SidebarProvider('status');
@@ -613,6 +665,11 @@ function activate(context) {
       } catch (error) { vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error)); }
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration(`${CONFIGURATION_SECTION}.dateFormat`)) {
+        // Unchanged data is answered with 304, so redraw the pages here.
+        setDateFormat(configuration().dateFormat);
+        for (const provider of [jobsProvider, statusProvider]) if (provider.showingData) provider.render();
+      }
       if (event.affectsConfiguration(CONFIGURATION_SECTION)) {
         coordinator.schedule();
         void coordinator.refresh();

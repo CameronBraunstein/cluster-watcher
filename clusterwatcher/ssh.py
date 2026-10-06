@@ -115,9 +115,14 @@ def start_interactive_session(machine: Machine, timeout: int, askpass_environmen
     _mark_activity(machine)
 
 
-def run_remote(machine: Machine, timeout: int, remote_command: str) -> str:
-    """Run one fixed remote command through the system SSH client."""
-    result = _run_remote_process(machine, timeout, remote_command)
+def run_remote(
+    machine: Machine, timeout: int, remote_command: str, process_timeout: float | None = None,
+) -> str:
+    """Run one fixed remote command through the system SSH client.
+
+    ``process_timeout`` bounds the whole call (default: ``timeout`` + 5 s).
+    """
+    result = _run_remote_process(machine, timeout, remote_command, process_timeout)
     return result.stdout
 
 

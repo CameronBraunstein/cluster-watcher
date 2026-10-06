@@ -6,8 +6,13 @@ import re
 import shlex
 import subprocess
 
-from .models import ClusterStatus, Machine
+from copy import deepcopy
+from datetime import timedelta
+import time
+
+from .models import AccountingSnapshot, ClusterStatus, Machine
 from .compute import rank_partitions
+from .remote_batch import Section, run_batch
 from .ssh import run_remote
 
 SINFO_COMMAND = "sinfo --noheader --format='%P|%a|%D|%C|%T'"
@@ -18,6 +23,12 @@ SQUEUE_USER_JOBS_COMMAND = "TZ=UTC squeue --me --array --start --states=RUNNING,
 SQUEUE_RUNNING_END_COMMAND = "TZ=UTC squeue --states=RUNNING --noheader --format='%N|%e'"
 # GresUsed, which reports allocated GPUs, is emitted only in detailed output.
 SCONTROL_NODES_COMMAND = "scontrol show node --oneliner -d"
+# Cheap identity of the user's queue: job IDs and states only, never times.
+SQUEUE_USER_FINGERPRINT_COMMAND = "squeue --me --array --noheader --format='%i|%T'"
+# Recent accounting records are re-fetched at least this often even if the
+# queue fingerprint is unchanged (e.g. to pick up late exit codes).
+ACCOUNTING_REFRESH_SECONDS = 300
+ACCOUNTING_LOOKBACK = timedelta(hours=24)
 
 
 def gpu_count(gres: str) -> int:
@@ -354,8 +365,12 @@ def collect_node_status(machine: Machine, timeout: int) -> list[dict[str, object
     Slurm schedules each MI300A APU as one ``gres/gpu`` resource, so reporting
     it as a GPU here matches the resource users request with ``--gres=gpu``.
     """
+    return parse_node_status(run_remote(machine, timeout, SCONTROL_NODES_COMMAND))
+
+
+def parse_node_status(output: str) -> list[dict[str, object]]:
+    """Parse ``scontrol show node --oneliner -d`` output; see :func:`collect_node_status`."""
     nodes: list[dict[str, object]] = []
-    output = run_remote(machine, timeout, SCONTROL_NODES_COMMAND)
     for line in output.splitlines():
         fields = dict(token.split("=", 1) for token in line.split() if "=" in token)
         name = fields.get("NodeName")
@@ -379,45 +394,138 @@ def collect_node_status(machine: Machine, timeout: int) -> list[dict[str, object
     return nodes
 
 
+def accounting_gate_command(machine: Machine, previous_fingerprint: str | None, force: bool) -> str:
+    """Return a remote command that queries ``sacct`` only when the queue changed.
+
+    The fingerprint is a ``cksum`` of the user's sorted ``squeue`` job IDs and
+    states, computed on the cluster so that the decision costs no extra SSH
+    round trip. Elapsed and remaining times are excluded, so a job that is just
+    running longer is not a change. Output: a ``fingerprint <value>`` line,
+    then either ``unchanged`` or the ``sacct`` records. The query also runs when
+    ``force`` is true or no previous fingerprint is known.
+    """
+    since = datetime.now(timezone.utc) - ACCOUNTING_LOOKBACK
+    previous = shlex.quote(previous_fingerprint or "")
+    return (
+        f"queue=$({SQUEUE_USER_FINGERPRINT_COMMAND}) || exit 1; "
+        "fp=$(printf '%s\\n' \"$queue\" | sort | cksum); "
+        "printf 'fingerprint %s\\n' \"$fp\"; "
+        f"if [ {int(force)} = 0 ] && [ \"$fp\" = {previous} ]; then echo unchanged; exit 0; fi; "
+        f"{accounting_jobs_command(since, (), machine.username)}"
+    )
+
+
+def _accounting_from_section(
+    section: Section, previous: AccountingSnapshot | None,
+) -> tuple[str | None, AccountingSnapshot | None]:
+    """Return the queue fingerprint and the (possibly reused) accounting records."""
+    if section.returncode:
+        return None, None
+    first, _, rest = section.stdout.partition("\n")
+    if not first.startswith("fingerprint "):
+        return None, None
+    fingerprint = first.removeprefix("fingerprint ").strip()
+    if rest.strip() == "unchanged" and previous is not None:
+        return fingerprint, previous
+    now = datetime.now(timezone.utc)
+    return fingerprint, AccountingSnapshot(
+        records=parse_accounting_jobs(rest),
+        fingerprint=fingerprint,
+        since=(now - ACCOUNTING_LOOKBACK).isoformat(),
+        fetched_at=now.isoformat(),
+        fetched_monotonic=time.monotonic(),
+    )
+
+
 def collect_status(
     machine: Machine,
     timeout: int,
     include_jobs: bool,
     include_personal_details: bool = True,
+    *,
+    previous: ClusterStatus | None = None,
+    refresh_capacity: bool = True,
+    include_accounting: bool = False,
 ) -> ClusterStatus:
-    """Collect partition resources and optional personal/job-state details."""
+    """Collect one cluster's status with a single SSH call.
+
+    Capacity data (``sinfo``, node detail, everyone's running-job end times,
+    and the optional queue summary) changes slowly and is large on big
+    clusters, so with ``refresh_capacity=False`` it is copied from
+    ``previous`` and only the user's own jobs are queried. With
+    ``include_accounting``, recent ``sacct`` records are fetched in the same
+    call when the user's queue fingerprint changed (see
+    :func:`accounting_gate_command`) and reused from ``previous`` otherwise.
+    """
     status = ClusterStatus(machine.name, machine.host, machine.username)
+    capacity = refresh_capacity or previous is None or previous.capacity_updated_at is None
+    commands: dict[str, str] = {}
+    if capacity:
+        commands["sinfo"] = SINFO_COMMAND
+        commands["nodes"] = SCONTROL_NODES_COMMAND
+    if include_personal_details:
+        commands["running"] = SQUEUE_USER_RUNNING_COMMAND
+        commands["pending"] = SQUEUE_USER_PENDING_COMMAND
+        if capacity:
+            commands["releases"] = SQUEUE_RUNNING_END_COMMAND
+    if include_jobs and capacity:
+        commands["queue"] = SQUEUE_COMMAND
+    previous_accounting = previous.accounting if previous else None
+    if include_accounting:
+        force = previous_accounting is None or (
+            time.monotonic() - previous_accounting.fetched_monotonic >= ACCOUNTING_REFRESH_SECONDS
+        )
+        commands["accounting"] = accounting_gate_command(
+            machine, previous_accounting.fingerprint if previous_accounting else None, force,
+        )
     try:
-        output = run_remote(machine, timeout, SINFO_COMMAND)
-        status.partitions = []
-        for line in output.splitlines():
-            fields = line.strip().split("|")
-            if len(fields) == 5:
-                partition, available, nodes, cpus, state = fields
-                status.partitions.append({"partition": partition.rstrip("*"), "available": available, "nodes": nodes, "cpus": cpus, "state": state})
+        sections = run_batch(machine, timeout, commands)
+        if capacity:
+            status.partitions = []
+            for line in sections["sinfo"].output().splitlines():
+                fields = line.strip().split("|")
+                if len(fields) == 5:
+                    partition, available, nodes, cpus, state = fields
+                    status.partitions.append({"partition": partition.rstrip("*"), "available": available, "nodes": nodes, "cpus": cpus, "state": state})
+            status.capacity_updated_at = datetime.now(timezone.utc).isoformat()
+        else:
+            assert previous is not None
+            status.partitions = deepcopy(previous.partitions)
+            status.nodes = deepcopy(previous.nodes)
+            status.partition_compute = deepcopy(previous.partition_compute)
+            status.jobs = deepcopy(previous.jobs)
+            status.resource_error = previous.resource_error
+            status.capacity_updated_at = previous.capacity_updated_at
         try:
-            status.nodes = collect_node_status(machine, timeout)
+            if capacity:
+                status.nodes = parse_node_status(sections["nodes"].output())
             if include_personal_details:
-                running_jobs = parse_jobs(run_remote(machine, timeout, SQUEUE_USER_RUNNING_COMMAND))
-                pending_jobs = parse_jobs(run_remote(machine, timeout, SQUEUE_USER_PENDING_COMMAND))
+                running_jobs = parse_jobs(sections["running"].output())
+                pending_jobs = parse_jobs(sections["pending"].output())
                 usage = user_node_usage(running_jobs)
-                releases = node_release_estimates(run_remote(machine, timeout, SQUEUE_RUNNING_END_COMMAND))
-                for node in status.nodes:
+                releases = node_release_estimates(sections["releases"].output()) if capacity else None
+                for node in status.nodes or []:
                     node["my_usage"] = usage.get(str(node["name"]), {"cpus": 0, "gpus": 0})
-                    node["next_release"] = releases.get(str(node["name"]))
+                    if releases is not None:
+                        node["next_release"] = releases.get(str(node["name"]))
                 status.user_jobs = [*running_jobs, *pending_jobs]
             else:
                 status.user_jobs = []
-            status.partition_compute = rank_partitions(machine.name, status.nodes)
+            if capacity:
+                status.partition_compute = rank_partitions(machine.name, status.nodes)
         except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
             # Preserve the basic sinfo partition data when detailed collection fails.
             status.nodes = []
             status.partition_compute = []
             status.user_jobs = []
             status.resource_error = str(exc)
-        if include_jobs:
-            job_output = run_remote(machine, timeout, SQUEUE_COMMAND)
+        if include_jobs and capacity:
+            job_output = sections["queue"].output()
             status.jobs = dict(sorted(Counter(line.strip() for line in job_output.splitlines() if line.strip()).items()))
+        if include_accounting:
+            status.user_jobs_fingerprint, status.accounting = _accounting_from_section(
+                sections["accounting"], previous_accounting,
+            )
     except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
         status.error = str(exc)
     return status

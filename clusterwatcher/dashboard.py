@@ -1,8 +1,11 @@
 """Local HTTP dashboard and periodic status cache."""
 
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import sys
 import threading
+import time
 import webbrowser
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -451,12 +454,23 @@ function recentJobsView(payload, clusters) {
   setCurrentJobs(jobs, warnings, true);
 }
 
+// Conditional GET: unchanged data comes back as 304 and is served from this cache.
+const responseCache = new Map();
+async function fetchUnlessUnchanged(url) {
+  const cached = responseCache.get(url);
+  const response = await fetch(url, { headers: cached ? { 'If-None-Match': cached.etag } : {} });
+  if (response.status === 304 && cached) return { response, payload: cached.payload, notModified: true };
+  const payload = await response.json();
+  const etag = response.headers.get('ETag');
+  if (response.ok && etag) responseCache.set(url, { etag, payload }); else responseCache.delete(url);
+  return { response, payload, notModified: false };
+}
+
 async function refreshJobs(result) {
   if (!result.jobs_api_enabled) { jobsView(result.clusters); return; }
   try {
-    const response = await fetch('/api/v1/jobs');
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    const { response, payload } = await fetchUnlessUnchanged('/api/v1/jobs');
+    if (!response.ok && response.status !== 304) throw new Error(payload.error || `HTTP ${response.status}`);
     recentJobsView(payload, result.clusters);
   } catch (error) {
     jobsView(result.clusters, `<p class="error">Could not load recent jobs: ${escapeHtml(error.message)}</p>`);
@@ -523,20 +537,22 @@ function updateDynamicDisplays() {
 
 async function refresh() {
   document.querySelector('#refresh-label').textContent = 'Refreshing…'; document.querySelector('#refresh-clock-hand').style.transform = 'rotate(0deg)';
-  try { const response = await fetch('/api/status');
+  try { const { response, payload: result, notModified } = await fetchUnlessUnchanged('/api/status');
     if (response.status === 503) {
       const retryAfter = Math.max(1, Number(response.headers.get('Retry-After')) || 1);
       document.querySelector('#updated').textContent = 'Waiting for first result…';
       scheduleRefresh(retryAfter); return;
     }
-    if (!response.ok) throw new Error(await response.text());
-    const result = await response.json(), thresholds = result.wait_threshold_minutes || [5, 30, 60, 120];
+    if (!response.ok && !notModified) throw new Error(result.error || `HTTP ${response.status}`);
+    const thresholds = result.wait_threshold_minutes || [5, 30, 60, 120];
     if (!result.updated_at) { document.querySelector('#updated').textContent = 'Waiting for first result…'; scheduleRefresh(1); return; }
     rememberPartitionDisclosure();
     document.querySelector('#clusters').innerHTML = result.clusters.map(cluster => clusterView(cluster, thresholds)).join('');
     await refreshJobs(result);
-    document.querySelector('#updated').textContent = `Updated ${new Date(result.updated_at).toLocaleTimeString()}`;
-    const collectedAt = new Date(result.updated_at).getTime();
+    const checked = notModified ? ` · checked ${new Date().toLocaleTimeString()}` : '';
+    document.querySelector('#updated').textContent = `Updated ${new Date(result.updated_at).toLocaleTimeString()}${checked}`;
+    // An unchanged (304) answer carries the old updated_at, which must not look overdue.
+    const collectedAt = notModified ? Date.now() : new Date(result.updated_at).getTime();
     const ageSeconds = Number.isFinite(collectedAt) ? Math.max(0, (Date.now() - collectedAt) / 1000) : 0;
     updateDynamicDisplays(); scheduleRefresh(Math.max(1, result.refresh_seconds - ageSeconds), result.refresh_seconds);
   } catch (error) { document.querySelector('#updated').textContent = `Dashboard error: ${error.message}`; scheduleRefresh(15); }
@@ -599,12 +615,40 @@ class StatusStore:
         self._wait_estimates: dict[str, dict[str, list[dict[str, object]]]] = {}
         self._wait_estimates_updated_at: dict[str, str] = {}
         self._updated_at: str | None = None
+        self._capacity_collected: dict[str, float] = {}
         self.job_service = JobService(machines, timeout, refresh_seconds, self.statuses) if jobs_api_enabled else None
         self.command_service = RemoteCommandService(machines, timeout) if command_api_enabled else None
 
     def refresh(self) -> None:
-        # One-at-a-time collection avoids a burst of Slurm controller requests.
-        statuses = [collect_status(machine, self.timeout, self.include_jobs) for machine in self.machines]
+        """Collect every cluster with one SSH call each (see ``collect_status``).
+
+        Capacity data refreshes every :data:`CAPACITY_REFRESH_SECONDS`; the
+        user's jobs (and, with the jobs API, fingerprint-gated accounting)
+        refresh every time. Clusters are collected in parallel: each still
+        receives exactly one SSH call per refresh against its own Slurm
+        controller, so a refresh takes as long as the slowest cluster instead
+        of the sum of all of them.
+        """
+        with self._lock:
+            previous = {status.name: status for status in self._statuses}
+        now = time.monotonic()
+        due = {
+            machine.name: now - self._capacity_collected.get(machine.name, float("-inf")) >= CAPACITY_REFRESH_SECONDS
+            for machine in self.machines
+        }
+
+        def collect(machine: Machine) -> ClusterStatus:
+            return collect_status(
+                machine, self.timeout, self.include_jobs,
+                previous=previous.get(machine.name), refresh_capacity=due[machine.name],
+                include_accounting=self.jobs_api_enabled,
+            )
+
+        with ThreadPoolExecutor(max_workers=max(1, len(self.machines)), thread_name_prefix="collect") as pool:
+            statuses = list(pool.map(collect, self.machines))  # Keeps configuration order.
+        for status in statuses:
+            if due[status.name] and status.error is None:
+                self._capacity_collected[status.name] = now
         with self._lock:
             for status in statuses:
                 status.wait_estimates = self._wait_estimates.get(status.name)
@@ -636,7 +680,10 @@ class StatusStore:
     def payload(self) -> dict[str, object]:
         """Return the dashboard's internal status representation."""
         with self._lock:
-            return {"clusters": [asdict(status) for status in self._statuses], "updated_at": self._updated_at, "refresh_seconds": self.refresh_seconds, "wait_threshold_minutes": self.wait_threshold_minutes, "jobs_api_enabled": self.jobs_api_enabled, "command_api_enabled": self.command_api_enabled}
+            clusters = [asdict(status) for status in self._statuses]
+            for cluster in clusters:
+                cluster.pop("accounting", None)  # Server-internal sacct cache.
+            return {"clusters": clusters, "updated_at": self._updated_at, "refresh_seconds": self.refresh_seconds, "wait_threshold_minutes": self.wait_threshold_minutes, "jobs_api_enabled": self.jobs_api_enabled, "command_api_enabled": self.command_api_enabled}
 
     def statuses(self) -> list[ClusterStatus]:
         """Return the latest per-cluster objects for the personal-job service."""
@@ -667,6 +714,33 @@ class StatusStore:
             else:
                 # Let the normal collector produce its first node snapshot.
                 stop.wait(1)
+
+
+# Partition/node capacity is collected at most this often; the user's own jobs
+# are collected on every refresh. Capacity changes slowly but its node detail
+# can be over a megabyte per refresh on large clusters.
+CAPACITY_REFRESH_SECONDS = 60
+
+# Fields that change on every refresh without anything having happened. They
+# are excluded from ETags so clients can skip unchanged responses; clients
+# extrapolate them from the response's generated_at instead.
+VOLATILE_FIELDS = frozenset({
+    # ``since`` is the moving start of the jobs API's default 24-hour window.
+    "generated_at", "updated_at", "since", "capacity_updated_at", "elapsed", "elapsed_seconds",
+    "time_left", "time_left_seconds", "estimated_wait_seconds",
+})
+
+
+def stable_etag(payload: object) -> str:
+    """Return a strong ETag for ``payload`` that ignores :data:`VOLATILE_FIELDS`."""
+    def strip(value: object) -> object:
+        if isinstance(value, dict):
+            return {key: strip(item) for key, item in value.items() if key not in VOLATILE_FIELDS}
+        if isinstance(value, list):
+            return [strip(item) for item in value]
+        return value
+    digest = hashlib.sha256(json.dumps(strip(payload), sort_keys=True, default=str).encode()).hexdigest()
+    return f'"{digest[:32]}"'
 
 
 def make_handler(store: StatusStore):
@@ -714,6 +788,13 @@ def make_handler(store: StatusStore):
                 extra_headers.update(headers)
             else:
                 body, content_type, code = b"Not found\n", "text/plain; charset=utf-8", 404
+            if code == 200 and path in {"/api/status", "/api/v1/snapshot", "/api/v1/jobs"}:
+                # Let polling clients skip unchanged data with If-None-Match.
+                etag = stable_etag(json.loads(body))
+                extra_headers["ETag"] = etag
+                requested = {value.strip() for value in self.headers.get("If-None-Match", "").split(",")}
+                if etag in requested:
+                    body, code = b"", 304
             self._write_response(body, content_type, code, extra_headers)
 
         def do_POST(self) -> None:  # noqa: N802

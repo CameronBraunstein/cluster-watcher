@@ -97,30 +97,30 @@
       ]
     },
     "menus": {
-      "viewContainer/title": [
+      "view/title": [
         {
           "command": "clusterWatcher.refresh",
-          "when": "viewContainer == clusterWatcher",
+          "when": "view == clusterWatcher.jobs",
           "group": "navigation@1"
         },
         {
           "command": "clusterWatcher.startService",
-          "when": "viewContainer == clusterWatcher",
+          "when": "view == clusterWatcher.jobs",
           "group": "navigation@2"
         },
         {
           "command": "clusterWatcher.editConfig",
-          "when": "viewContainer == clusterWatcher",
+          "when": "view == clusterWatcher.jobs",
           "group": "navigation@3"
         },
         {
           "command": "clusterWatcher.runSetup",
-          "when": "viewContainer == clusterWatcher",
+          "when": "view == clusterWatcher.jobs",
           "group": "config@1"
         },
         {
           "command": "clusterWatcher.openSettings",
-          "when": "viewContainer == clusterWatcher",
+          "when": "view == clusterWatcher.jobs",
           "group": "config@2"
         }
       ],
@@ -149,6 +149,11 @@
           "type": "string",
           "default": "http://127.0.0.1:8080/",
           "description": "Loopback Cluster Watcher service URL used by the sidebar."
+        },
+        "clusterWatcher.dateFormat": {
+          "type": "string",
+          "default": "DD.MM.YYYY",
+          "markdownDescription": "Date format for sidebar times, using the tokens `YYYY`, `YY`, `MM` and `DD` (for example `YYYY-MM-DD` or `MM/DD/YYYY`). Times are always shown as 24-hour `HH:mm` local time."
         },
         "clusterWatcher.refreshSeconds": {
           "type": "integer",

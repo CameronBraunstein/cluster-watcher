@@ -31,6 +31,19 @@ port = 2222
 
 
 
+
+def fake_batch(outputs: dict[str, object]):
+    """Return a ``run_batch`` stand-in: section name -> stdout, or an exception for a failed command."""
+    from clusterwatcher.remote_batch import Section
+
+    def run(_machine, _timeout, commands):
+        sections = {}
+        for name in commands:
+            value = outputs.get(name, "")
+            sections[name] = Section("", str(value), 1) if isinstance(value, Exception) else Section(str(value), "", 0)
+        return sections
+    return run
+
 def installer_function(name: str, *args: object) -> str:
     """Run one helper function defined by install.sh without running the installer."""
     installer = Path(__file__).parents[1] / "install.sh"
@@ -723,10 +736,11 @@ class ClusterWatcherTests(TimedTestCase):
             with self.assertRaisesRegex(ValueError, "strictly increasing"):
                 load_wait_threshold_minutes(path)
 
-    @patch("clusterwatcher.slurm.run_remote")
-    def test_collect_status_parses_sinfo_and_jobs(self, run_remote):
-        run_remote.side_effect = ["debug|up|2|0/64/0/64|idle\n", "", "", "", "", "RUNNING\nPENDING\nRUNNING\n"]
+    @patch("clusterwatcher.slurm.run_batch")
+    def test_collect_status_parses_sinfo_and_jobs(self, run_batch):
+        run_batch.side_effect = fake_batch({"sinfo": "debug|up|2|0/64/0/64|idle\n", "queue": "RUNNING\nPENDING\nRUNNING\n"})
         status = collect_status(Machine("a", "host", "user"), 5, True)
+        self.assertEqual(run_batch.call_count, 1)  # Every command shares one SSH call.
         self.assertIsNone(status.error)
         self.assertEqual(status.partitions, [{"partition": "debug", "available": "up", "nodes": "2", "cpus": "0/64/0/64", "state": "idle"}])
         self.assertEqual(status.jobs, {"PENDING": 1, "RUNNING": 2})
@@ -870,9 +884,9 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertEqual(partition["gpus"]["schedulable_idle"], 1)
         self.assertEqual(partition["gpus"]["models"][0]["name"], "AMD Instinct MI300A")
 
-    @patch("clusterwatcher.slurm.run_remote")
-    def test_detailed_resource_collection_failure_is_reported(self, run_remote):
-        run_remote.side_effect = ["gpu|up|1|0/64/0/64|idle\n", RuntimeError("scontrol denied")]
+    @patch("clusterwatcher.slurm.run_batch")
+    def test_detailed_resource_collection_failure_is_reported(self, run_batch):
+        run_batch.side_effect = fake_batch({"sinfo": "gpu|up|1|0/64/0/64|idle\n", "nodes": RuntimeError("scontrol denied")})
 
         status = collect_status(Machine("a", "host", "user"), 5, False)
 
@@ -940,13 +954,12 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertEqual(ranked[0]["best_gpu"]["name"], "NVIDIA B200")
         self.assertEqual(ranked[0]["best_gpu"]["vram_gb"], 180)
 
-    @patch("clusterwatcher.slurm.run_remote")
-    def test_collector_passes_the_machine_name_to_dashboard_compute_ranking(self, run_remote):
-        run_remote.side_effect = [
-            "gpu|up|16|0/1536/0/1536|idle\n",
-            "NodeName=bnode01 Partitions=gpu State=IDLE CPUAlloc=0 CPUTot=192 Gres=gpu:8 GresUsed=gpu:0\n",
-            "", "", "",
-        ]
+    @patch("clusterwatcher.slurm.run_batch")
+    def test_collector_passes_the_machine_name_to_dashboard_compute_ranking(self, run_batch):
+        run_batch.side_effect = fake_batch({
+            "sinfo": "gpu|up|16|0/1536/0/1536|idle\n",
+            "nodes": "NodeName=bnode01 Partitions=gpu State=IDLE CPUAlloc=0 CPUTot=192 Gres=gpu:8 GresUsed=gpu:0\n",
+        })
 
         status = collect_status(Machine("cluster_2", "host", "user"), 5, False)
 

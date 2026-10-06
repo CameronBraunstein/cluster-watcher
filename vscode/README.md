@@ -51,8 +51,8 @@ refreshes: the webview reports each expand/collapse to the extension, which
 renders the remembered state into every refreshed page (for the current VS Code
 session). Cluster names are collapsible headings in **Cluster Status**. The
 native **My Jobs** and **Cluster Status** view headings replace redundant titles
-inside each webview. Refresh and service-start buttons appear once in the
-Cluster Watcher container toolbar.
+inside each webview. Refresh and service-start buttons appear once, in the
+**My Jobs** view's title bar.
 
 Log documents initially contain the newest 2,000 lines. If more output exists,
 use the upward-arrow **Load 2,000 Older Lines** editor-title action; each click
@@ -74,6 +74,13 @@ buttons, and the status bar shows **jobs API off** rather than offline.
 start it again with `--jobs-api`. Buttons that an older service does not
 support yet ask you to upgrade `cluster-watcher` and restart the service.
 
+Refreshes are conditional: the extension sends the previous response's ETag
+and the service answers `304 Not Modified` when your jobs and the cluster
+status are unchanged, so the views are not rebuilt (no flicker, and scroll and
+hover are kept). Progress bars, elapsed times, and wait estimates still count
+on their own every few seconds, and the "Updated" line shows when data last
+changed and when it was last checked.
+
 Two settings control background feedback:
 
 - `clusterWatcher.notifications` (`all`, `failures`, or `off`; default `all`)
@@ -84,6 +91,11 @@ Two settings control background feedback:
 - `clusterWatcher.statusBar` (default `true`) shows `N running · M pending` in
   the status bar, or a warning-coloured **offline** item when the service is
   unreachable. Click it to reveal **My Jobs**.
+
+`clusterWatcher.dateFormat` (default `DD.MM.YYYY`) sets how sidebar dates are
+shown, using the tokens `YYYY`, `YY`, `MM` and `DD` (for example `YYYY-MM-DD`).
+Times follow as 24-hour `HH:mm` in local time, and a change redraws the
+sidebar immediately.
 
 Webview buttons do not use command links. Each one posts a message, and the
 extension only runs commands from a fixed allowlist (archive, restore, open
