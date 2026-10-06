@@ -2,6 +2,16 @@
 
 All notable changes to the Cluster Watcher VS Code extension.
 
+## 0.1.1 — 2026-10-06
+
+- When the service is running but was started without `--jobs-api`, My Jobs
+  now explains this and offers **Copy restart command** and **Retry**, and the
+  status bar shows "jobs API off" instead of wrongly reporting the service
+  offline.
+- **Start service** warns instead of silently attaching to such a service.
+- Actions unsupported by an older service now suggest upgrading
+  `cluster-watcher` instead of showing a bare HTTP 404.
+
 ## 0.1.0 — 2026-10-06
 
 First public release.

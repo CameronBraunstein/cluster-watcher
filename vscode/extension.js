@@ -5,9 +5,9 @@ const { JobArchive } = require('./archive');
 const { LOG_TAIL_LINES, logDocumentContent, logRequestPath, prependLogPage, virtualLogPath } = require('./logs');
 const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = require('./events');
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
-const { jobRef, renderJobs, renderMessage, renderStatus, renderWelcome, stateGroup } = require('./renderers');
+const { jobRef, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup } = require('./renderers');
 const {
-  ExecutableValidationError, cliCommand, configurationError, resolveConfigPath, serviceCommand, validateExecutable,
+  ExecutableValidationError, jobsApiDisabled, responseError, cliCommand, configurationError, resolveConfigPath, serviceCommand, validateExecutable,
 } = require('./service');
 
 const CONFIGURATION_SECTION = 'clusterWatcher';
@@ -17,6 +17,7 @@ const WEBVIEW_COMMANDS = new Set([
   'clusterWatcher.archiveJob', 'clusterWatcher.restoreJob', 'clusterWatcher.openLog', 'clusterWatcher.openScript',
   'clusterWatcher.cancelJob',
   'clusterWatcher.startService', 'clusterWatcher.runSetup', 'clusterWatcher.editConfig', 'clusterWatcher.openSettings',
+  'clusterWatcher.copyServiceCommand', 'clusterWatcher.refresh',
 ]);
 
 /** Return the current extension configuration. */
@@ -60,9 +61,9 @@ class BackendClient {
       try {
         payload = await response.json();
       } catch (_error) {
-        throw new Error(`Cluster Watcher returned HTTP ${response.status} without JSON`);
+        throw responseError(response.status, null);
       }
-      if (!response.ok) throw new Error(payload.error || `Cluster Watcher returned HTTP ${response.status}`);
+      if (!response.ok) throw responseError(response.status, payload);
       return payload;
     } catch (error) {
       if (error && error.name === 'AbortError') throw new Error('Cluster Watcher service request timed out');
@@ -114,7 +115,18 @@ class ServiceController {
 
   async start() {
     if (await this.client.isClusterWatcherService()) {
-      vscode.window.showInformationMessage('Cluster Watcher attached to the existing local service.');
+      // A service started by hand may lack the jobs API that My Jobs needs.
+      const missingJobsApi = await this.client.get('/api/v1/jobs').then(() => false, jobsApiDisabled);
+      if (missingJobsApi) {
+        const choice = await vscode.window.showWarningMessage(
+          `A Cluster Watcher service is already running at ${configuration().backendUrl}, but without --jobs-api, so My Jobs cannot work. `
+          + 'Stop it (Ctrl-C in its terminal), then start the service again from here or with the copied command.',
+          'Copy Restart Command',
+        );
+        if (choice) await vscode.commands.executeCommand('clusterWatcher.copyServiceCommand');
+      } else {
+        vscode.window.showInformationMessage('Cluster Watcher attached to the existing local service.');
+      }
       await this.refresh();
       return;
     }
@@ -214,6 +226,12 @@ class SidebarProvider {
     if (!this.view) return;
     const detail = error instanceof Error ? error.message : String(error);
     this.view.webview.html = renderWelcome(this.title(), detail);
+  }
+
+  /** Explain that the service runs without the jobs API and how to restart it. */
+  jobsApiDisabled() {
+    if (!this.view) return;
+    this.view.webview.html = renderJobsApiDisabled(this.title(), restartCommandText());
   }
 }
 
@@ -360,6 +378,14 @@ class JobMonitor {
     this.show(settings);
   }
 
+  /** Distinguish a running service without --jobs-api from an unreachable one. */
+  jobsApiDisabled() {
+    this.item.text = '$(warning) Cluster Watcher: jobs API off';
+    this.item.tooltip = 'The Cluster Watcher service is running without --jobs-api. Click to show My Jobs for the fix.';
+    this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+    this.show(configuration());
+  }
+
   /** Reflect an unreachable service without forgetting the known job states. */
   offline() {
     this.item.text = '$(debug-disconnect) Cluster Watcher offline';
@@ -443,6 +469,9 @@ class RefreshCoordinator {
       // The monitor reads the cancelling set before the provider prunes it.
       this.monitor.update(jobs.value, this.jobsProvider.cancelling);
       this.jobsProvider.update(jobs.value);
+    } else if (jobsApiDisabled(jobs.reason)) {
+      this.monitor.jobsApiDisabled();
+      this.jobsProvider.jobsApiDisabled();
     } else {
       this.monitor.offline();
       this.jobsProvider.error(jobs.reason);
@@ -474,6 +503,21 @@ async function cancelJob(client, jobsProvider, coordinator, cluster, jobId, name
   jobsProvider.markCancelling(cluster, jobId);
   vscode.window.showInformationMessage(`Cancellation requested for job ${jobId} on ${cluster}.`);
   void coordinator.refresh();
+}
+
+/** Return the shell command that starts a correctly configured service. */
+function restartCommandText() {
+  try {
+    return serviceCommand(configuration());
+  } catch (_error) {
+    return 'cluster-watcher serve --jobs-api --no-browser';
+  }
+}
+
+/** Copy the service start command so a hand-started service can be replaced. */
+async function copyServiceCommand() {
+  await vscode.env.clipboard.writeText(restartCommandText());
+  vscode.window.showInformationMessage('Copied the Cluster Watcher service command. Stop the running service first, then run it in a terminal.');
 }
 
 /** Run ``cluster-watcher setup`` in a terminal, since the wizard is interactive. */
@@ -545,6 +589,7 @@ function activate(context) {
     vscode.commands.registerCommand('clusterWatcher.restoreJob', async (key) => {
       if (!await jobsProvider.restore(String(key))) vscode.window.showWarningMessage('That archived job could not be found.');
     }),
+    vscode.commands.registerCommand('clusterWatcher.copyServiceCommand', () => copyServiceCommand()),
     vscode.commands.registerCommand('clusterWatcher.runSetup', () => runSetup().catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.editConfig', () => editConfig().catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.openSettings', () => vscode.commands.executeCommand('workbench.action.openSettings', CONFIGURATION_SECTION)),

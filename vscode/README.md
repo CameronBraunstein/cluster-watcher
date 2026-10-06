@@ -65,6 +65,14 @@ The same actions are in the Command Palette and the view's toolbar/overflow
 menu. Saving the configuration from VS Code validates it immediately (via
 `cluster-watcher list`) and reports any error; restart the service to apply it.
 
+If a service is reachable but was started without `--jobs-api` (for example
+by hand as `cluster-watcher serve`), **Cluster Status** still works, while
+**My Jobs** explains the problem with **Copy restart command** and **Retry**
+buttons, and the status bar shows **jobs API off** rather than offline.
+**Start service** warns instead of attaching to such a service. Stop it and
+start it again with `--jobs-api`. Buttons that an older service does not
+support yet ask you to upgrade `cluster-watcher` and restart the service.
+
 Two settings control background feedback:
 
 - `clusterWatcher.notifications` (`all`, `failures`, or `off`; default `all`)

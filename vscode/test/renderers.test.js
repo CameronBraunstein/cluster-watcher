@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { commandAttributes, escapeHtml, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, lifecycle, renderJobs, renderStatus, stateGroup, waitCell } = require('../renderers');
+const { commandAttributes, escapeHtml, renderJobsApiDisabled, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, lifecycle, renderJobs, renderStatus, stateGroup, waitCell } = require('../renderers');
 
 test('jobs retain terminal state grouping and lifecycle visibility', () => {
   const jobs = [
@@ -164,4 +164,12 @@ test('welcome view offers start, setup, config, and settings with escaped detail
 test('every card offers Open script for its job', () => {
   const html = renderJobs({ jobs: [{ job_id: '5', cluster: 'cluster_0', state: 'COMPLETED' }] });
   assert.match(html, /data-command="clusterWatcher\.openScript" data-args="\[&quot;cluster_0&quot;,&quot;5&quot;\]"[^>]*>Open script<\/a>/);
+});
+
+test('jobs-API-disabled view explains the fix and offers copy and retry', () => {
+  const html = renderJobsApiDisabled('My Jobs', "'cluster-watcher' 'serve' '--jobs-api'");
+  assert.match(html, /started without <code>--jobs-api<\/code>/);
+  assert.match(html, /<pre class="command-line">&#39;cluster-watcher&#39; &#39;serve&#39; &#39;--jobs-api&#39;<\/pre>/);
+  assert.match(html, /data-command="clusterWatcher\.copyServiceCommand"/);
+  assert.match(html, /data-command="clusterWatcher\.refresh"/);
 });

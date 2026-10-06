@@ -10,6 +10,36 @@ class ExecutableValidationError extends Error {
   }
 }
 
+/** An HTTP error response from the Cluster Watcher service, keeping its status code. */
+class ServiceResponseError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = 'ServiceResponseError';
+    this.status = status;
+  }
+}
+
+/**
+ * Turn a failed service response into an actionable error. A plain-text 404
+ * comes from a service too old to know the route, so suggest upgrading.
+ */
+function responseError(status, payload) {
+  if (payload && typeof payload.error === 'string') return new ServiceResponseError(payload.error, status);
+  if (status === 404) {
+    return new ServiceResponseError(
+      'The running Cluster Watcher service does not support this request; it is probably an older version. '
+      + 'Upgrade cluster-watcher (re-run install.sh) and restart the service.',
+      status,
+    );
+  }
+  return new ServiceResponseError(`Cluster Watcher returned HTTP ${status}`, status);
+}
+
+/** Whether an error means the service is running but was started without --jobs-api. */
+function jobsApiDisabled(error) {
+  return error instanceof ServiceResponseError && error.status === 404 && /--jobs-api/.test(error.message);
+}
+
 /** Build actionable guidance for an invalid executable setting. */
 function executableError(executable, detail) {
   return new ExecutableValidationError(
@@ -120,5 +150,5 @@ function serviceCommand(settings) {
 }
 
 module.exports = {
-  ExecutableValidationError, cliCommand, configurationError, resolveConfigPath, runCli, serviceCommand, shellQuote, validateExecutable,
+  ExecutableValidationError, ServiceResponseError, jobsApiDisabled, responseError, cliCommand, configurationError, resolveConfigPath, runCli, serviceCommand, shellQuote, validateExecutable,
 };

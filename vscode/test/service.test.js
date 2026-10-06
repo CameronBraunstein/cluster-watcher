@@ -4,7 +4,9 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { cliCommand, serviceCommand, shellQuote, validateExecutable } = require('../service');
+const {
+  ServiceResponseError, cliCommand, jobsApiDisabled, responseError, serviceCommand, shellQuote, validateExecutable,
+} = require('../service');
 const manifest = require('../package.json');
 
 test('service command enables jobs API and preserves paths containing spaces', () => {
@@ -81,4 +83,19 @@ test('manifest declares license, icon, new settings, and no redundant activation
   for (const command of ['clusterWatcher.runSetup', 'clusterWatcher.editConfig', 'clusterWatcher.openSettings']) {
     assert.ok(commands.includes(command), command);
   }
+});
+
+test('a running service without --jobs-api is told apart from other failures', () => {
+  const disabled = responseError(404, { error: 'The personal jobs API is disabled; restart with --jobs-api' });
+  assert.ok(disabled instanceof ServiceResponseError);
+  assert.equal(disabled.status, 404);
+  assert.equal(jobsApiDisabled(disabled), true);
+  assert.equal(jobsApiDisabled(responseError(404, { error: 'Log file does not exist yet' })), false);
+  assert.equal(jobsApiDisabled(new Error('fetch failed')), false);
+});
+
+test('a plain-text 404 suggests upgrading an older service', () => {
+  assert.match(responseError(404, null).message, /older version.*re-run install\.sh/);
+  assert.equal(responseError(502, null).message, 'Cluster Watcher returned HTTP 502');
+  assert.equal(responseError(400, { error: 'bad id' }).message, 'bad id');
 });

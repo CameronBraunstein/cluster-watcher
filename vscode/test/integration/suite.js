@@ -13,7 +13,7 @@ const EXPECTED_COMMANDS = [
   'clusterWatcher.startService', 'clusterWatcher.stopService', 'clusterWatcher.refresh',
   'clusterWatcher.openDashboard', 'clusterWatcher.showServiceTerminal', 'clusterWatcher.loadMoreLog',
   'clusterWatcher.runSetup', 'clusterWatcher.editConfig', 'clusterWatcher.openSettings',
-  'clusterWatcher.archiveJob', 'clusterWatcher.restoreJob', 'clusterWatcher.openLog', 'clusterWatcher.openScript', 'clusterWatcher.cancelJob',
+  'clusterWatcher.copyServiceCommand', 'clusterWatcher.archiveJob', 'clusterWatcher.restoreJob', 'clusterWatcher.openLog', 'clusterWatcher.openScript', 'clusterWatcher.cancelJob',
 ];
 
 /** Entry point called by @vscode/test-electron. */
