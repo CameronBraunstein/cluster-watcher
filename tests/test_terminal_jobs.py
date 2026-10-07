@@ -163,7 +163,8 @@ class TerminalJobsTests(TimedTestCase):
         with patch.dict("clusterwatcher.terminal_ui.os.environ", {"TERM": "dumb"}, clear=True):
             result = run_terminal_job_board(
                 [Machine("CLUSTER_0", "host", "alice")], 15, 7,
-                output=output, collector=collect, sleep=sleep,
+                output=output, input_stream=StringIO(), collector=collect,
+                sleep=sleep,
             )
 
         self.assertEqual(result, 0)
@@ -241,7 +242,8 @@ class TerminalJobsTests(TimedTestCase):
         with self.assertRaisesRegex(RuntimeError, "collector failed"):
             run_terminal_job_board(
                 [Machine("CLUSTER_0", "host", "alice")], 15, 1,
-                output=output, collector=collect, sleep=lambda _seconds: None,
+                output=output, input_stream=StringIO(), collector=collect,
+                sleep=lambda _seconds: None,
             )
 
         self.assertTrue(output.getvalue().endswith("\033[?25h\033[?1049l"))

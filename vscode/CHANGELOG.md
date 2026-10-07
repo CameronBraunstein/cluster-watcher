@@ -82,3 +82,10 @@ First public release.
 - Status bar summary of running and pending jobs (`clusterWatcher.statusBar`).
 - Welcome screen with buttons to start the service, run the setup wizard, or
   edit the configuration; the configuration is validated on save.
+
+## Unreleased
+
+## 0.1.4 — 2026-10-07
+
+- Releases now publish the CI-built VSIX automatically to the VS Code
+  Marketplace using Microsoft Entra workload identity federation.
