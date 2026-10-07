@@ -359,14 +359,39 @@ function bestGpu(partition) {
   return [...(partition.gpus?.models || [])].sort((left, right) => (Number(right.vram_gb) - Number(left.vram_gb)) || (Number(right.fp16_bf16_tensor_tflops) - Number(left.fp16_bf16_tensor_tflops)))[0];
 }
 
-/** Format a terminal-compatible wait cell. */
-function waitCell(partition, count) {
+/**
+ * Short labels for why a wait probe failed (the service's ``error_kind``).
+ * Policy refusals get their own words, so ERR only marks real failures.
+ */
+const WAIT_ERROR_LABELS = { denied: 'DENY', minimum: 'min', limit: 'limit', unavailable: 'n/a', timeout: 'ERR', error: 'ERR', budget: '?' };
+
+/** Classify a probe error from a service too old to send ``error_kind``. */
+function waitErrorKind(estimate) {
+  if (estimate.error_kind) return estimate.error_kind;
+  return /permission denied|invalid account/i.test(estimate.error) ? 'denied' : 'error';
+}
+
+/**
+ * Format a terminal-compatible wait cell: a duration, a failure label,
+ * ``…`` while the cluster's first probes are still running (``pending``),
+ * ``?`` when the shape was not probed, or ``—`` when it cannot fit.
+ */
+function waitCell(partition, count, pending = false) {
   const total = Number(partition.gpus?.total) || 0;
   if (count > total) return '—';
   const estimate = (partition.wait_estimates || []).find((row) => Number(row.gpus) === count);
-  if (!estimate) return '?';
-  if (estimate.error) return /permission denied|access\/permission denied|invalid account/i.test(estimate.error) ? 'DENY' : 'ERR';
+  if (!estimate) return pending ? '…' : '?';
+  if (estimate.error) return WAIT_ERROR_LABELS[waitErrorKind(estimate)] || 'ERR';
   return formatDuration(estimate.estimated_wait_seconds);
+}
+
+/** Return the hover text of a wait cell, including Slurm's message on failure. */
+function waitTitle(partition, count, pending) {
+  const estimate = (partition.wait_estimates || []).find((row) => Number(row.gpus) === count);
+  const label = `Wait for ${count} GPU${count === 1 ? '' : 's'}`;
+  if (estimate?.error) return `${label}: ${estimate.error}`;
+  if (!estimate && pending && count <= (Number(partition.gpus?.total) || 0)) return `${label}: still checking`;
+  return label;
 }
 
 /** Return a ``data-wait`` attribute so the webview can count a wait estimate down. */
@@ -403,6 +428,8 @@ function renderStatus(payload, disclosures = {}) {
       clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary><p class="error">${escapeHtml(cluster.error || 'Cluster is unreachable')}</p>${loginPrompt(cluster)}</details>`);
       continue;
     }
+    // No probe round has finished for this cluster yet (they start with the service).
+    const pending = !cluster.wait_estimates_updated_at;
     const partitions = [...(cluster.partitions || [])].sort((left, right) => (Number(left.rank) || 9999) - (Number(right.rank) || 9999) || String(left.name).localeCompare(String(right.name)));
     const rows = partitions.map((partition) => {
       const profile = bestGpu(partition);
@@ -410,7 +437,7 @@ function renderStatus(payload, disclosures = {}) {
       const idle = Number(partition.gpus?.schedulable_idle) || 0;
       const availablePercent = total ? Math.max(0, Math.min(100, idle / total * 100)) : 0;
       const unavailablePercent = total ? 100 - availablePercent : 100;
-      const waits = WAIT_GPU_COUNTS.map((count) => `<td title="Wait for ${count} GPU"${waitData(partition, count, asOf)}>${escapeHtml(waitCell(partition, count))}</td>`).join('');
+      const waits = WAIT_GPU_COUNTS.map((count) => `<td title="${escapeHtml(waitTitle(partition, count, pending))}"${waitData(partition, count, asOf)}>${escapeHtml(waitCell(partition, count, pending))}</td>`).join('');
       return `<tr class="${partition.aggregate ? 'aggregate' : ''}"><td>${escapeHtml(partition.name)}${partition.aggregate ? ' (aggregate)' : ''}</td><td>${escapeHtml(profile?.name || '—')}</td><td>${profile?.vram_gb == null ? '—' : `${escapeHtml(profile.vram_gb)}G`}</td><td>${profile?.fp16_bf16_tensor_tflops == null ? '—' : escapeHtml(profile.fp16_bf16_tensor_tflops)}</td><td><div class="availability" title="${idle}/${total} GPUs schedulable and idle"><span class="unavailable" style="width:${unavailablePercent}%"></span><span class="available" style="width:${availablePercent}%"></span></div>${idle}/${total}</td>${waits}<td>${escapeHtml(partition.cpus?.total ?? 0)}</td></tr>`;
     }).join('');
     clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(cluster.resource_error)}</p>` : ''}<div class="table-wrap"><table><thead><tr><th>Partition</th><th>GPU</th><th>VRAM</th><th>TFLOPS/s</th><th>Available</th>${WAIT_GPU_COUNTS.map((count) => `<th>${count}</th>`).join('')}<th>CPU threads</th></tr></thead><tbody>${rows}</tbody></table></div></details>`);

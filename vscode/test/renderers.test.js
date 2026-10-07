@@ -220,7 +220,7 @@ test('status wait cells carry their estimate and as-of time for counting down', 
   };
   const html = renderStatus({ generated_at: '2026-10-06T10:00:00Z', clusters: [{ name: 'c', reachable: true, partitions: [partition] }] });
   assert.match(html, /<td title="Wait for 1 GPU" data-wait="\[900,1791280800000\]">15m<\/td>/);
-  assert.match(html, /<td title="Wait for 2 GPU">ERR<\/td>/);
+  assert.match(html, /<td title="Wait for 2 GPUs: denied">ERR<\/td>/);
 });
 
 test('heading sizes: groups and cluster names match the 11px view headings, job titles are smaller', () => {
@@ -263,4 +263,29 @@ test('a closed SSH session offers a login button on the cluster card', () => {
   ] });
   assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;cluster_0&quot;\]"[^>]*>Log in again<\/a>/);
   assert.equal((html.match(/Log in again<\/a>/g) || []).length, 1);
+});
+
+test('wait cells label policy refusals separately from real errors', () => {
+  const rows = [
+    { gpus: 1, error: 'QOSMinGRES', error_kind: 'minimum' },
+    { gpus: 2, error: 'More than 4 gpus per node were requested', error_kind: 'limit' },
+    { gpus: 4, error: 'Requested node configuration is not available', error_kind: 'unavailable' },
+    { gpus: 8, error: 'Slurm probe timed out after 60 seconds', error_kind: 'timeout' },
+    { gpus: 16, error: 'partition wait-probe budget exhausted after 240 seconds', error_kind: 'budget' },
+    { gpus: 32, error: 'Invalid account or account/partition combination specified' },
+  ];
+  const partition = { name: 'gpu', gpus: { total: 64 }, wait_estimates: rows };
+  assert.deepEqual([1, 2, 4, 8, 16, 32, 64].map((count) => waitCell(partition, count)), ['min', 'limit', 'n/a', 'ERR', '?', 'DENY', '?']);
+  const html = renderStatus({ clusters: [{ name: 'cluster_0', reachable: true, wait_estimates_updated_at: '2026-10-06T16:00:00Z', partitions: [partition] }] });
+  assert.match(html, /<td title="Wait for 2 GPUs: More than 4 gpus per node were requested"[^>]*>limit<\/td>/);
+});
+
+test('wait cells show … until the first probe round finishes', () => {
+  const partition = { name: 'gpu', gpus: { total: 8 }, wait_estimates: [] };
+  assert.equal(waitCell(partition, 4, true), '…');
+  assert.equal(waitCell(partition, 16, true), '—');
+  const html = renderStatus({ clusters: [{ name: 'cluster_0', reachable: true, partitions: [partition] }] });
+  assert.match(html, /<td title="Wait for 1 GPU: still checking">…<\/td>/);
+  const done = renderStatus({ clusters: [{ name: 'cluster_0', reachable: true, wait_estimates_updated_at: '2026-10-06T16:00:00Z', partitions: [partition] }] });
+  assert.match(done, /<td title="Wait for 1 GPU">\?<\/td>/);
 });

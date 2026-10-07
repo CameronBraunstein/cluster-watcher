@@ -8,7 +8,7 @@ from typing import Any
 
 from .compute import GPUProfile, profile_for
 from .models import ClusterStatus
-from .wait_probes import WAIT_PROBE_REFRESH_SECONDS
+from .wait_probes import WAIT_PROBE_REFRESH_SECONDS, classify_wait_error
 
 
 SNAPSHOT_SCHEMA_VERSION = "1.0"
@@ -105,6 +105,8 @@ def _wait_estimates(status: ClusterStatus, partition: str, generated_at: str | N
             "expected_start_at": estimate.get("start_time"),
             "estimated_wait_seconds": _wait_seconds(estimate.get("start_time"), generated_at),
             "error": estimate.get("error"),
+            # Additive: denied | minimum | limit | unavailable | timeout | budget | error.
+            "error_kind": estimate.get("error_kind") or classify_wait_error(estimate.get("error")),
         }
         for estimate in raw_estimates
     ]

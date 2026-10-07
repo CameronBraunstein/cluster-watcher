@@ -159,7 +159,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "Show a table per cluster with GPU model/specifications, red/green "
             "availability, CPU threads, and up-to-one-hour wait estimates for 1, 2, "
             "4, 8, 16, 32, and 64 GPUs. Pass SECONDS first for live refresh; "
-            "failed wait probes are marked ERR with their diagnostic below. "
+            "failed wait probes are marked DENY, min, limit, n/a, or ERR (only ERR "
+            "is a real failure) with their diagnostic below. "
             "live mode supports scrolling with Up/Down, Page Up/Page Down, "
             "Home, and End, and q exits."
         ),

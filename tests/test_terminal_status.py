@@ -158,7 +158,7 @@ class TerminalStatusTests(TimedTestCase):
         self.assertGreater(keywords["probe_timeout_seconds"], 9.9)
         self.assertLessEqual(keywords["time_budget_seconds"], TERMINAL_WAIT_PROBE_BUDGET_SECONDS)
         self.assertGreater(keywords["time_budget_seconds"], 0)
-        self.assertTrue(keywords["stop_on_error"])
+        self.assertNotIn("stop_on_error", keywords)  # Batched probes always run every shape.
         self.assertEqual(second["clusters"][0]["partitions"][0]["wait_estimates"][0]["nodes"], 1)
 
     def test_collector_probes_stale_clusters_concurrently(self):

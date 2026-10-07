@@ -81,6 +81,13 @@ hover are kept). Progress bars, elapsed times, and wait estimates still count
 on their own every few seconds, and the "Updated" line shows when data last
 changed and when it was last checked.
 
+In **Cluster Status**, a wait cell without an estimate says why: `DENY` (your
+account may not use the partition), `min` (below its minimum GPU request),
+`limit` (over a limit for your account), `n/a` (no node can run it now, e.g.
+all drained), `ERR` (a real failure, such as Slurm not answering), `?` (not
+probed), or `…` (the first probes are still running). Hover a cell for
+Slurm's message.
+
 Two settings control background feedback:
 
 - `clusterWatcher.notifications` (`all`, `failures`, or `off`; default `all`)

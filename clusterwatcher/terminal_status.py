@@ -14,7 +14,7 @@ from .models import ClusterStatus, Machine
 from .slurm import collect_status
 from .snapshot import build_snapshot
 from .terminal_ui import run_live_board
-from .wait_probes import WAIT_PROBE_REFRESH_SECONDS, collect_wait_estimates
+from .wait_probes import WAIT_PROBE_REFRESH_SECONDS, classify_wait_error, collect_wait_estimates
 
 
 ANSI_RED = "\033[31m"
@@ -65,14 +65,21 @@ def _format_wait(seconds: object) -> str:
     return f"{days:.1f}d" if days < 10 and not days.is_integer() else f"{math.ceil(days)}d"
 
 
-def _permission_denied(error: object) -> bool:
-    """Identify Slurm authorization failures suitable for a distinct cell."""
-    message = str(error or "").casefold()
-    return any(fragment in message for fragment in (
-        "permission denied",
-        "access/permission denied",
-        "invalid account or account/partition combination",
-    ))
+WAIT_ERROR_LABELS = {
+    "denied": "DENY", "minimum": "min", "limit": "limit", "unavailable": "n/a",
+    "timeout": "ERR", "error": "ERR", "budget": "?",
+}
+"""Short wait-cell labels for each ``classify_wait_error`` kind.
+
+Policy refusals get their own words, so ``ERR`` only marks real failures;
+``?`` means the shape was not probed.
+"""
+
+
+def wait_error_label(estimate: dict[str, object]) -> str:
+    """Return the wait-cell label of a failed estimate."""
+    kind = estimate.get("error_kind") or classify_wait_error(str(estimate.get("error") or ""))
+    return WAIT_ERROR_LABELS.get(str(kind), "ERR")
 
 
 def _availability_bar(idle: int, total: int, use_color: bool, width: int = 8) -> tuple[str, str]:
@@ -125,7 +132,7 @@ def _wait_cells(partition: dict[str, object]) -> list[str]:
             continue
         estimate = estimates.get(count)
         if estimate and estimate.get("error"):
-            cells.append("DENY" if _permission_denied(estimate["error"]) else "ERR")
+            cells.append(wait_error_label(estimate))
         else:
             cells.append(_format_wait(estimate.get("estimated_wait_seconds")) if estimate else "?")
     return cells
@@ -143,7 +150,8 @@ def _wait_error_lines(partitions: list[dict[str, object]]) -> list[str]:
             grouped.setdefault(error, []).append(int(estimate.get("gpus", 0)))
         for error, counts in grouped.items():
             gpu_counts = ",".join(str(count) for count in counts)
-            label = "WAIT DENIED" if _permission_denied(error) else "WAIT ERROR"
+            short = wait_error_label({"error": error})
+            label = "WAIT DENIED" if short == "DENY" else "WAIT ERROR" if short == "ERR" else f"WAIT {short.upper()}"
             lines.append(f"{label} {partition.get('name', 'unknown')} [{gpu_counts} GPU]: {error}")
     return lines
 
@@ -315,7 +323,6 @@ class StatusBoardCollector:
                         maximum_gpus=max(WAIT_GPU_COUNTS),
                         probe_timeout_seconds=TERMINAL_WAIT_PROBE_TIMEOUT_SECONDS,
                         time_budget_seconds=TERMINAL_WAIT_PROBE_BUDGET_SECONDS,
-                        stop_on_error=True,
                     )
                     for machine, status in stale
                 }

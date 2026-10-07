@@ -15,6 +15,9 @@ remote command output cannot predict:
 ``<token>><name> <rc>``  stdout ends, with the command's exit status
 ``<token>!<name>``        stderr follows (only when stderr is non-empty)
 ``<token>.<name>``        stderr ends
+
+With a time budget, commands that would start after the budget has passed
+are not run; their section reports :data:`BUDGET_EXHAUSTED` as stderr.
 """
 
 from __future__ import annotations
@@ -29,6 +32,9 @@ from .models import Machine
 from .ssh import run_remote
 
 _NAME_PATTERN = re.compile(r"[a-z][a-z0-9_]*")
+
+BUDGET_EXHAUSTED = "batch time budget exhausted"
+"""stderr of a section skipped because the batch's time budget had passed."""
 
 
 @dataclass
@@ -46,17 +52,26 @@ class Section:
         return self.stdout
 
 
-def batch_script(commands: dict[str, str], token: str) -> str:
-    """Return the ``sh`` script that runs ``commands`` in order with framing."""
+def batch_script(commands: dict[str, str], token: str, budget_seconds: float | None = None) -> str:
+    """Return the ``sh`` script that runs ``commands`` in order with framing.
+
+    ``budget_seconds`` skips every command that would start after that many
+    seconds (measured with ``date +%s``) since the script began.
+    """
     if any(not _NAME_PATTERN.fullmatch(name) for name in commands):
         raise ValueError("batch section names must be lowercase identifiers")
+    budget = "" if budget_seconds is None else str(max(0, int(budget_seconds)))
     lines = [
         f"T={token}",
+        f"B={budget}",
+        "S=$(date +%s)",
         'E=$(mktemp) || exit 97',
         "trap 'rm -f \"$E\"' EXIT",
         # The blank line before each closing marker guarantees it starts a line;
         # the parser removes exactly that one added newline again.
-        's() { printf \'%s<%s\\n\' "$T" "$1"; sh -c "$2" 2>"$E"; r=$?; '
+        's() { if [ -n "$B" ] && [ $(( $(date +%s) - S )) -ge "$B" ]; then '
+        f'printf \'%s<%s\\n\\n%s>%s 1\\n%s!%s\\n{BUDGET_EXHAUSTED}\\n%s.%s\\n\' "$T" "$1" "$T" "$1" "$T" "$1" "$T" "$1"; return; fi; '
+        'printf \'%s<%s\\n\' "$T" "$1"; sh -c "$2" 2>"$E"; r=$?; '
         'printf \'\\n%s>%s %s\\n\' "$T" "$1" "$r"; '
         'if [ -s "$E" ]; then printf \'%s!%s\\n\' "$T" "$1"; cat "$E"; printf \'\\n%s.%s\\n\' "$T" "$1"; fi; }',
     ]
@@ -109,18 +124,27 @@ def batch_process_timeout(timeout: int) -> float:
     return timeout * 2 + 5
 
 
-def run_batch(machine: Machine, timeout: int, commands: dict[str, str]) -> dict[str, Section]:
+def run_batch(
+    machine: Machine,
+    timeout: int,
+    commands: dict[str, str],
+    *,
+    budget_seconds: float | None = None,
+    process_timeout: float | None = None,
+) -> dict[str, Section]:
     """Run ``commands`` (name -> shell command) in one SSH call, in order.
 
     Raises ``RuntimeError``/``OSError`` only when the SSH call itself fails,
     with a short message for a timeout; individual command failures are
-    reported per section.
+    reported per section. ``budget_seconds`` is passed to
+    :func:`batch_script`; ``process_timeout`` replaces the default deadline
+    of :func:`batch_process_timeout` for batches of slow commands.
     """
     if not commands:
         return {}
     token = f"@@CW{secrets.token_hex(8)}@@"
-    script = batch_script(commands, token)
-    deadline = batch_process_timeout(timeout)
+    script = batch_script(commands, token, budget_seconds)
+    deadline = batch_process_timeout(timeout) if process_timeout is None else process_timeout
     try:
         output = run_remote(machine, timeout, f"sh -c {shlex.quote(script)}", deadline)
     except subprocess.TimeoutExpired as exc:

@@ -232,9 +232,11 @@ function requestedRuntime(minutes) {
   return `${Math.floor(minutes / 60)}h${minutes % 60}m`;
 }
 
+// Why a probe failed (see wait_probes.classify_wait_error).
+const waitErrorLabels = { denied: 'access denied', minimum: 'below the minimum request', limit: 'over a limit', unavailable: 'no node can run it now', timeout: 'Slurm did not answer in time', budget: 'not checked', error: 'error' };
 function waitChart(estimates, partition, updatedAt) {
   const rows = estimates?.[partition];
-  if (!rows?.length) return '';
+  if (!rows?.length) return updatedAt ? '' : '<p>Checking queue waits…</p>';
   const byGpus = new Map();
   const durationMinutes = row => row.walltime_minutes ?? Math.round(row.walltime_hours * 60);
   for (const row of rows) { const values = byGpus.get(row.gpus) || new Map(); values.set(durationMinutes(row), row); byGpus.set(row.gpus, values); }
@@ -246,7 +248,7 @@ function waitChart(estimates, partition, updatedAt) {
       const waitHours = start && !Number.isNaN(start.getTime()) ? Math.max(0, (start.getTime() - Date.now()) / 3600000) : null;
       const unavailable = waitHours === null, capped = waitHours !== null && waitHours > 24;
       const height = unavailable ? 0 : Math.max(.8, Math.min(100, waitHours / 24 * 100));
-      const waitText = unavailable ? `unavailable${row?.error ? `: ${row.error}` : ''}` : `${waitHours.toFixed(1)} hours${capped ? ' (chart capped at 24)' : ''}`;
+      const waitText = unavailable ? `unavailable${row?.error_kind ? ` (${waitErrorLabels[row.error_kind] || row.error_kind})` : ''}${row?.error ? `: ${row.error}` : ''}` : `${waitHours.toFixed(1)} hours${capped ? ' (chart capped at 24)' : ''}`;
       const title = `${gpus} GPU${gpus === 1 ? '' : 's'}, ${requestedRuntime(duration)} runtime: ${waitText}`;
       return `<span class="wait-bar wait-series-${index % 3}${unavailable ? ' unavailable' : ''}${capped ? ' capped' : ''}" style="height:${height}%" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></span>`;
     }).join('');
@@ -662,25 +664,34 @@ class StatusStore:
             self._updated_at = datetime.now(timezone.utc).isoformat()
 
     def refresh_wait_estimates(self) -> bool:
-        """Refresh slow hypothetical-job probes independently of status polling."""
+        """Refresh slow hypothetical-job probes independently of status polling.
+
+        Clusters are probed concurrently (each partition is one SSH call; see
+        ``collect_wait_estimates``), so the first estimates appear after the
+        slowest cluster rather than after all of them in turn.
+        """
         with self._lock:
             statuses = list(self._statuses)
         if not statuses:
             return False
-        for status in statuses:
-            if status.error or not status.nodes:
-                continue
-            machine = next(machine for machine in self.machines if machine.name == status.name)
-            estimates = collect_wait_estimates(machine, status.nodes, self.timeout)
-            updated_at = datetime.now(timezone.utc).isoformat()
-            with self._lock:
-                self._wait_estimates[status.name] = estimates
-                self._wait_estimates_updated_at[status.name] = updated_at
-                for current in self._statuses:
-                    if current.name == status.name:
-                        current.wait_estimates = estimates
-                        current.wait_estimates_updated_at = updated_at
+        probed = [status for status in statuses if not status.error and status.nodes]
+        if probed:
+            with ThreadPoolExecutor(max_workers=len(probed), thread_name_prefix="wait-probe") as pool:
+                list(pool.map(self._probe_cluster, probed))
         return True
+
+    def _probe_cluster(self, status: ClusterStatus) -> None:
+        """Probe one cluster's wait estimates and publish them."""
+        machine = next(machine for machine in self.machines if machine.name == status.name)
+        estimates = collect_wait_estimates(machine, status.nodes, self.timeout)
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._wait_estimates[status.name] = estimates
+            self._wait_estimates_updated_at[status.name] = updated_at
+            for current in self._statuses:
+                if current.name == status.name:
+                    current.wait_estimates = estimates
+                    current.wait_estimates_updated_at = updated_at
 
     def payload(self) -> dict[str, object]:
         """Return the dashboard's internal status representation."""

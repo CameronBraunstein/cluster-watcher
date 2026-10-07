@@ -525,29 +525,24 @@ Wait cells are obtained from non-submitting `sbatch --test-only` requests with
 a runtime of up to one hour. The actual request is the smaller of one hour and
 the partition maximum configured in `clusters.toml`, so development partitions
 can be estimated using their permitted 15-minute runtime. `now` means Slurm
-predicts immediate placement, `?` means an estimate has not been observed yet,
-`ERR` identifies an explicit probe failure, `DENY` identifies a permission or
-invalid account/partition denial, and `—` means that partition does not have
-enough GPUs for the request. Diagnostics appear beneath the table as
-`WAIT ERROR` or `WAIT DENIED` lines with the affected GPU counts.
+predicts immediate placement, and `—` means that partition does not have
+enough GPUs for the request. Failed probes use the labels described in
+[Why a wait cell has no estimate](#why-a-wait-cell-has-no-estimate) (`DENY`,
+`min`, `limit`, `n/a`, `ERR`, `?`). Diagnostics appear beneath the table as
+`WAIT DENIED`, `WAIT MIN`, `WAIT LIMIT`, `WAIT N/A`, or `WAIT ERROR` lines with
+the affected GPU counts.
 
 Requests larger than one node use a job-wide GPU count and the minimum number
 of highest-capacity nodes whose combined inventory can satisfy it; for example,
 64 GPUs on eight-GPU nodes is probed as an eight-node job, not as 64 GPUs per
-node. Cluster Watcher first uses the broadly supported `--gres=gpu:N` form. If
-a partition's submission filter reports that GRES did not request GPUs, the
-same probe is retried using job-wide `--gpus=N`. The successful syntax is reused
-only within that partition, preventing one partition's policy from contaminating
-another. Because GRES is a per-node request, multi-node probes round up to
-enough GPUs per node to meet the displayed job-wide count.
+node. The request form (GRES first, job-wide `--gpus=N` when a site asks for
+it) is described under [Hypothetical GPU-job wait estimates](#hypothetical-gpu-job-wait-estimates).
 
 To prevent a slow or unsupported `sbatch --test-only` implementation from
-blocking the board, partitions are probed concurrently. Each partition worker
-has its own ten-second budget and uses a ten-second limit for an individual
-probe. Shapes within a partition remain sequential so that if an N-GPU request
-fails, larger GPU counts with the same walltime can be marked with that error
-without being probed. Unfinished cells become `ERR` instead of delaying every
-remaining shape. Clusters that need refreshing are also processed concurrently.
+blocking the board, partitions are probed concurrently, each in one SSH call.
+In live terminal mode each partition has a ten-second budget and each probe a
+ten-second limit; shapes the budget did not reach show `?`. Clusters that need
+refreshing are also processed concurrently.
 Successful estimates are cached for ten minutes in live mode; failures are
 retried after 30 seconds. Actual capacity continues to refresh at the interval
 requested on the command line. The initial capacity inventories for configured
@@ -603,7 +598,9 @@ session. The service therefore:
    long as the slowest cluster. Measured on four clusters, a refresh dropped
    from about 38 s to 2.5-4.3 s. A batch may take up to twice `--timeout` plus
    5 s; a cluster that does not answer in time is reported as "no response
-   from the cluster within N s".
+   from the cluster within N s". Wait-time probes are batched the same way,
+   one call per partition every ten minutes (see
+   [Hypothetical GPU-job wait estimates](#hypothetical-gpu-job-wait-estimates)).
 2. **Refreshes capacity every 60 s and your jobs every refresh.** Partition
    and node detail (`sinfo`, `scontrol show node -d`, which is over 1 MB on
    large clusters, and everyone's running-job end times) changes slowly; your
@@ -841,7 +838,7 @@ Each partition contains:
 | `reported_nodes`, `node_states` | Slurm node count and current state distribution. |
 | `cpus` | Total, allocated, and idle CPU threads. |
 | `gpus` | Total, allocated, idle, schedulable-idle, unavailable-idle, maximum GPUs per node, and model inventory. |
-| `wait_estimates` | Hypothetical job-wide GPU and derived node counts, host-memory request, walltime, expected start, computed wait in seconds, and any probe error. |
+| `wait_estimates` | Hypothetical job-wide GPU and derived node counts, host-memory request, walltime, expected start, computed wait in seconds, any probe error, and its `error_kind` (see [Why a wait cell has no estimate](#why-a-wait-cell-has-no-estimate)). |
 | `nodes` | Per-node state, resources, GPU types/specifications, and earliest visible release time. |
 
 `gpus.idle` means physically unallocated. `gpus.schedulable_idle` is the safer
@@ -900,7 +897,7 @@ A shortened response looks like this:
             "models": [{"name": "NVIDIA H100 80 GB", "vram_gb": 80, "fp16_bf16_tensor_tflops": 989.0}]
           },
           "wait_estimates": [
-            {"gpus": 1, "memory_mb": 1024, "walltime_seconds": 3600, "expected_start_at": "2026-09-22T10:30:00", "estimated_wait_seconds": 1800, "error": null}
+            {"gpus": 1, "memory_mb": 1024, "walltime_seconds": 3600, "expected_start_at": "2026-09-22T10:30:00", "estimated_wait_seconds": 1800, "error": null, "error_kind": null}
           ]
         }
       ]
@@ -1287,22 +1284,30 @@ partition, it derives the available node GPU capacities and probes 1, 2, 4,
 and subsequent powers of two. Shapes normally use 1-hour, 12-hour, and 24-hour
 walltimes because backfill's expected start depends on the requested duration;
 each runtime is capped by that partition's configured maximum, with duplicate
-capped durations probed only once. Each probe requests one task and the fewest
-nodes that can provide the GPU total, with 1024 MiB of host memory per GPU on
-each node. This is sent
+capped durations probed only once. Requests larger than one node (up to 64
+GPUs, the tables' last column) are probed only for the shortest walltime, which
+is the one the tables show, to keep scheduler queries few. Each probe requests
+the fewest nodes that can provide the GPU total, one task per node
+(`--ntasks-per-node=1`; with a single task Slurm would silently shrink a
+multi-node request to one node), and 1024 MiB of host memory per GPU on each
+node. This is sent
 as an explicit per-node `--mem` limit because several site submission filters
 do not treat `--mem-per-gpu` as satisfying their shared-job memory requirement.
 The deliberately small allocation keeps this metric focused on GPU pressure.
 
 The requested GPUs normally use Slurm's `--gres=gpu:N` syntax. If a partition's
-submission filter says that this did not request GPUs, Cluster Watcher retries
-with job-wide `--gpus=N` and remembers that choice for the remainder of that
-partition's probe pass. The requested memory is displayed in the dashboard and
+submission filter says that this did not request GPUs, the probe is retried
+with job-wide `--gpus=N` on the cluster, in the same SSH call. A "More than N
+gpus per node" refusal is a per-node policy limit rather than a syntax problem,
+so it is not retried. The requested memory is displayed in the dashboard and
 returned as `memory_mb` by the API.
 
-Partition probes run concurrently, each with an independent deadline. Requests
-within one partition remain sequential, which limits scheduler traffic and lets
-a smaller failed request suppress unnecessary larger requests.
+All shapes of one partition run in order in a single SSH call (see
+[How refreshes are kept cheap](#how-refreshes-are-kept-cheap)); partitions and
+clusters are probed concurrently. Each `sbatch --test-only` may take up to 60
+seconds, because a busy controller can need tens of seconds to answer, and a
+partition starts no further probes after 240 seconds. The first round starts
+with the service, and tables show `…` until a cluster's round has finished.
 
 The chart groups bars by requested GPU count and colors them by requested
 walltime; its key identifies the 1-hour, 12-hour, and 24-hour series. The
@@ -1314,11 +1319,26 @@ These probes run in a separate cache no more often than every ten minutes;
 they are deliberately independent from the normal dashboard refresh interval.
 The result reflects your current account, QOS, fairshare, and queue state, but
 is only Slurm's current projection. Cluster Watcher parses successful Slurm
-messages from both stdout and stderr. An unavailable marker means the cluster did
-not return an expected start time, rejected the representative request, or
-timed out; hover the cell to see the recorded error. Once a request shape fails,
-larger GPU counts with the same walltime inherit its error without additional
-Slurm calls. Subsequent scheduled refreshes can try the probes again.
+messages from both stdout and stderr. Hover a cell or bar to see Slurm's
+recorded message. Subsequent scheduled refreshes try every probe again.
+
+### Why a wait cell has no estimate
+
+Each failed probe carries Slurm's message (`error`) and its classification
+(`error_kind` in the API), shown with these labels:
+
+| Label | `error_kind` | Meaning |
+|---|---|---|
+| `DENY` | `denied` | Your account may not use the partition. |
+| `min` | `minimum` | Below the partition's minimum GPU request (`QOSMinGRES`); larger requests may work. |
+| `limit` | `limit` | Over a QOS, association, per-node GPU, or time limit for your account. |
+| `n/a` | `unavailable` | No node can run it now, for example because all are drained or powered down. |
+| `ERR` | `timeout`, `error` | A real failure: Slurm did not answer within 60 seconds, or another error. |
+| `?` | `budget` | Not probed: the partition's time budget ran out first. |
+| `…` | — | The cluster's first round of probes has not finished yet. |
+
+Only `ERR` is worth investigating; the others describe your account's policy
+or the cluster's state.
 
 ## VS Code extension: use, test, and publish
 
@@ -1340,7 +1360,10 @@ Cluster Watcher Activity Bar container with two sidebar views:
 - **Cluster Status** follows `cluster-watcher status`: partitions are separated
   by collapsible cluster headings and show the strongest GPU model, per-GPU
   VRAM and Tensor throughput, schedulable GPU availability, one-hour wait
-  estimates for 1–64 GPUs, and CPU threads.
+  estimates for 1–64 GPUs, and CPU threads. A wait cell without an estimate is
+  labelled as described in
+  [Why a wait cell has no estimate](#why-a-wait-cell-has-no-estimate); hover it
+  for Slurm's message.
 
 The redundant in-webview **My Jobs** and **Cluster Status** titles are omitted;
 the native collapsible VS Code view headings provide those labels. The

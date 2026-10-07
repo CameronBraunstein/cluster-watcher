@@ -16,6 +16,11 @@ All notable changes to the Cluster Watcher VS Code extension.
   runs the new `cluster-watcher login` command, asks for a shared password
   once per credential group, and skips clusters that are still connected.
   Shared sessions now send keepalives, so they close less often.
+- Wait estimates: 16-, 32- and 64-GPU requests are now probed (as multi-node
+  jobs), refusals show why (`DENY`, `min`, `limit`, `n/a`; `ERR` is now only a
+  real failure, with Slurm's message on hover), and cells show `…` until the
+  first probes finish. Requires cluster-watcher 0.1.2, which also probes each
+  partition in one SSH call and allows slow Slurm controllers 60 s per probe.
 - **End Job** sits in the lower-right corner of the card, apart from the other
   actions.
 - The sidebar's Refresh, Start Service, Edit Config, Setup and Settings
