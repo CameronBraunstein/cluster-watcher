@@ -64,6 +64,10 @@ class SetupWizardTests(TimedTestCase):
         self.assertEqual(find_editor({"VISUAL": "code --wait", "EDITOR": "vim"}), ["code", "--wait"])
         self.assertEqual(find_editor({"EDITOR": "emacs"}), ["emacs"])
         self.assertEqual(find_editor({}, lambda name: name if name == "vi" else None), ["vi"])
+        self.assertEqual(
+            find_editor({}, lambda name: name if name == "notepad" else None, system_name="nt"),
+            ["notepad"],
+        )
         with self.assertRaisesRegex(RuntimeError, "EDITOR"):
             find_editor({}, lambda _name: None)
 

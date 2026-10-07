@@ -1,6 +1,6 @@
-# Publish a GitHub Release when a version tag such as v0.1.0 is pushed:
-# Linux executables for x86_64 and aarch64, the VS Code extension VSIX,
-# install.sh, and SHA256SUMS (which install.sh verifies before installing).
+# Publish native Linux, macOS, and Windows executables plus the VSIX whenever a
+# matching semantic version tag is pushed. Signing is enabled when the
+# repository's protected release environment provides the documented secrets.
 name: Release
 
 on:
@@ -12,36 +12,101 @@ permissions:
 
 jobs:
   check-version:
-    name: Check tag matches versions
+    name: Check tag and platform manifest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Compare tag with pyproject.toml and vscode/package.json
+      - name: Compare tag with package versions
         run: |
           tag="${GITHUB_REF_NAME#v}"
           python_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           extension_version="$(node -p 'require("./vscode/package.json").version')"
           echo "tag=$tag pyproject=$python_version extension=$extension_version"
           test "$tag" = "$python_version" && test "$tag" = "$extension_version"
+          python3 -m json.tool release-platforms.json >/dev/null
 
   standalone:
-    name: Standalone build (${{ matrix.arch }})
+    name: Build ${{ matrix.artifact }}
     needs: check-version
     runs-on: ${{ matrix.runner }}
+    environment: release
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, runner: ubuntu-latest }
-          - { arch: aarch64, runner: ubuntu-24.04-arm }
+          - { runner: ubuntu-latest, artifact: cluster-watcher-linux-x86_64, linux_arch: x86_64 }
+          - { runner: ubuntu-24.04-arm, artifact: cluster-watcher-linux-aarch64, linux_arch: aarch64 }
+          - { runner: macos-15-intel, artifact: cluster-watcher-macos-x86_64, linux_arch: "" }
+          - { runner: macos-15, artifact: cluster-watcher-macos-aarch64, linux_arch: "" }
+          - { runner: windows-2022, artifact: cluster-watcher-windows-x86_64.exe, linux_arch: "" }
+          - { runner: windows-11-arm, artifact: cluster-watcher-windows-aarch64.exe, linux_arch: "" }
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/build-standalone
         with:
-          arch: ${{ matrix.arch }}
+          artifact: ${{ matrix.artifact }}
+          linux-arch: ${{ matrix.linux_arch }}
+
+      - name: Sign and notarize macOS executable
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [[ -z "$MACOS_CERTIFICATE_P12" || -z "$MACOS_SIGNING_IDENTITY" ]]; then
+            echo "macOS signing secrets are absent; publishing an unsigned executable"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/cluster-watcher-signing.keychain-db"
+          certificate="$RUNNER_TEMP/cluster-watcher-signing.p12"
+          trap 'security delete-keychain "$keychain" 2>/dev/null || true; rm -f "$certificate"' EXIT
+          python3 -c 'import base64, os, pathlib; pathlib.Path(os.environ["RUNNER_TEMP"], "cluster-watcher-signing.p12").write_bytes(base64.b64decode(os.environ["MACOS_CERTIFICATE_P12"]))'
+          security create-keychain -p "$MACOS_CERTIFICATE_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$MACOS_CERTIFICATE_PASSWORD" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$MACOS_CERTIFICATE_PASSWORD" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          codesign --force --options runtime --timestamp --sign "$MACOS_SIGNING_IDENTITY" "dist/${{ matrix.artifact }}"
+          codesign --verify --strict --verbose=2 "dist/${{ matrix.artifact }}"
+          if [[ -n "$APPLE_ID" && -n "$APPLE_TEAM_ID" && -n "$APPLE_APP_PASSWORD" ]]; then
+            ditto -c -k --keepParent "dist/${{ matrix.artifact }}" "$RUNNER_TEMP/${{ matrix.artifact }}.zip"
+            xcrun notarytool submit "$RUNNER_TEMP/${{ matrix.artifact }}.zip" \
+              --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_APP_PASSWORD" --wait
+          fi
+
+      - name: Sign Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE_PFX) {
+            Write-Host "Windows signing secrets are absent; publishing an unsigned executable"
+            exit 0
+          }
+          $certificate = Join-Path $env:RUNNER_TEMP "cluster-watcher-signing.pfx"
+          [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX))
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse |
+            Where-Object FullName -Match '\\x64\\signtool\.exe$' | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signTool) { throw "signtool.exe was not found" }
+          & $signTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certificate /p $env:WINDOWS_CERTIFICATE_PASSWORD "dist/${{ matrix.artifact }}"
+          if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed" }
+          & $signTool.FullName verify /pa /v "dist/${{ matrix.artifact }}"
+          if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed" }
+          Remove-Item -LiteralPath $certificate -Force
+
       - uses: actions/upload-artifact@v4
         with:
-          name: cluster-watcher-linux-${{ matrix.arch }}
-          path: dist/cluster-watcher-linux-${{ matrix.arch }}
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
           if-no-files-found: error
 
   vsix:
@@ -73,19 +138,29 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           path: assets
           merge-multiple: true
-      - name: Collect assets and checksums
+      - name: Collect installers, metadata, and checksums
         run: |
-          cp install.sh uninstall.sh clusters.example.toml assets/
-          chmod 0755 assets/cluster-watcher-linux-*
+          cp install.sh uninstall.sh install.ps1 uninstall.ps1 clusters.example.toml assets/
+          cp release-platforms.json assets/PLATFORMS.json
+          chmod 0755 assets/cluster-watcher-linux-* assets/cluster-watcher-macos-*
           cd assets
           sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
+      - name: Attest native executable provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            assets/cluster-watcher-linux-*
+            assets/cluster-watcher-macos-*
+            assets/cluster-watcher-windows-*.exe
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}

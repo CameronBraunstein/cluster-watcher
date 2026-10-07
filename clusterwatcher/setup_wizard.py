@@ -126,7 +126,7 @@ def run_setup(
         output("Setup cancelled; the existing configuration was not changed.")
         return 1
     machines: list[dict[str, object]] = []
-    default_username = environ.get("USER", "")
+    default_username = environ.get("USER") or environ.get("USERNAME", "")
     while True:
         output(f"\nMachine #{len(machines) + 1}")
         machine = _ask_machine(prompt, output, {str(item["name"]) for item in machines}, default_username)
@@ -161,16 +161,21 @@ def _write_validated(path: Path, text: str) -> None:
         raise
 
 
-def find_editor(environ: Mapping[str, str] = os.environ, which: Callable[[str], str | None] = shutil.which) -> list[str]:
+def find_editor(
+    environ: Mapping[str, str] = os.environ,
+    which: Callable[[str], str | None] = shutil.which,
+    system_name: str = os.name,
+) -> list[str]:
     """Return the user's editor command from ``$VISUAL``/``$EDITOR`` or a fallback."""
     for variable in ("VISUAL", "EDITOR"):
         value = environ.get(variable, "").strip()
         if value:
             return value.split()
-    for candidate in ("nano", "vim", "vi"):
+    candidates = ("notepad", "code") if system_name == "nt" else ("nano", "vim", "vi")
+    for candidate in candidates:
         if which(candidate):
             return [candidate]
-    raise RuntimeError("no editor found; set $EDITOR (for example `export EDITOR=nano`)")
+    raise RuntimeError("no editor found; set VISUAL or EDITOR to an installed editor")
 
 
 def edit_config(

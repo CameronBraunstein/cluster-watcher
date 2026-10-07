@@ -12,10 +12,11 @@ import time
 from typing import Mapping
 
 from .models import Machine, RemoteCommandResult
+from .platforms import runtime_directory, supports_ssh_multiplexing, user_runtime_token
 
 
-_runtime_directory = Path(os.environ.get("XDG_RUNTIME_DIR", tempfile.gettempdir()))
-CONTROL_SOCKET_DIRECTORY = _runtime_directory / f"cluster-watcher-{os.getuid()}" / "ssh"
+CONTROL_SOCKET_DIRECTORY = runtime_directory() / f"cluster-watcher-{user_runtime_token()}" / "ssh"
+SSH_MULTIPLEXING_SUPPORTED = supports_ssh_multiplexing()
 SERVER_ALIVE_INTERVAL_SECONDS = 30
 SERVER_ALIVE_COUNT_MAX = 4
 _activity_lock = threading.Lock()
@@ -37,7 +38,7 @@ def control_socket_path() -> Path:
     except OSError:
         # Containers sometimes expose XDG_RUNTIME_DIR read-only. Keep the
         # fallback user-specific and private rather than disabling multiplexing.
-        directory = Path(tempfile.gettempdir()) / f"cluster-watcher-{os.getuid()}" / "ssh"
+        directory = Path(tempfile.gettempdir()) / f"cluster-watcher-{user_runtime_token()}" / "ssh"
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         directory.chmod(0o700)
     return directory / "%C"
@@ -46,12 +47,14 @@ def control_socket_path() -> Path:
 def _connection_options(machine: Machine, timeout: int, batch_mode: bool) -> list[str]:
     """Build shared OpenSSH options for a regular or multiplexed connection."""
     command = ["-o", f"BatchMode={'yes' if batch_mode else 'no'}", "-o", f"ConnectTimeout={timeout}"]
+    if SSH_MULTIPLEXING_SUPPORTED:
+        command.extend([
+            "-o", "ControlMaster=auto", "-o", f"ControlPersist={machine.control_persist}",
+            "-o", f"ControlPath={control_socket_path()}",
+        ])
     command.extend([
-        "-o", "ControlMaster=auto", "-o", f"ControlPersist={machine.control_persist}",
-        "-o", f"ControlPath={control_socket_path()}",
-        # Keepalives stop firewalls from dropping an idle shared session (which
-        # would mean entering the password and OTP again) and let a broken one
-        # exit within about two minutes instead of hanging refreshes.
+        # Keepalives stop firewalls from silently dropping an idle connection
+        # and let a broken one fail within about two minutes.
         "-o", f"ServerAliveInterval={SERVER_ALIVE_INTERVAL_SECONDS}",
         "-o", f"ServerAliveCountMax={SERVER_ALIVE_COUNT_MAX}",
     ])
@@ -73,19 +76,25 @@ def existing_session_ssh_command(
     remote_command: str | None = None,
     allocate_tty: bool = False,
 ) -> list[str]:
-    """Build an SSH command that can only use an existing control master.
+    """Build a safe command using a master, or direct key authentication.
 
     ``ProxyCommand=false`` deliberately makes the direct-connection fallback
     fail. OpenSSH ignores it when the configured control socket is available,
     but it prevents a race from unexpectedly starting a new authenticated
-    connection after the service has checked the master.
+    connection after the service has checked the master. Native Windows lacks
+    ControlMaster, so its equivalent is a fresh ``BatchMode=yes`` connection.
     """
-    command = [
-        "ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={min(timeout, 30)}",
-        "-o", "ControlMaster=no", "-o", f"ControlPath={control_socket_path()}",
-        "-o", "ProxyCommand=false",
-    ]
-    if machine.port != 22:
+    if SSH_MULTIPLEXING_SUPPORTED:
+        command = [
+            "ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={min(timeout, 30)}",
+            "-o", "ControlMaster=no", "-o", f"ControlPath={control_socket_path()}",
+            "-o", "ProxyCommand=false",
+        ]
+    else:
+        # Native Windows OpenSSH has no ControlMaster. Key/agent-authenticated
+        # commands remain non-interactive and make a fresh connection.
+        command = ["ssh", *_connection_options(machine, min(timeout, 30), batch_mode=True)]
+    if SSH_MULTIPLEXING_SUPPORTED and machine.port != 22:
         command.extend(["-p", str(machine.port)])
     if allocate_tty:
         command.append("-t")
@@ -104,6 +113,11 @@ def start_interactive_session(machine: Machine, timeout: int, askpass_environmen
     """
     if not machine.interactive_auth:
         return
+    if not SSH_MULTIPLEXING_SUPPORTED:
+        raise RuntimeError(
+            "reusable password/OTP sessions require OpenSSH ControlMaster; "
+            "use an SSH key/agent or run Cluster Watcher in WSL"
+        )
     command = ["ssh", *_connection_options(machine, timeout, batch_mode=False), "-N", "-f", f"{machine.username}@{machine.host}"]
     run_options: dict[str, object] = {}
     if askpass_environment is not None:
@@ -238,7 +252,9 @@ def _read_last_activity(machine: Machine) -> datetime | None:
 
 
 def control_check_command(machine: Machine) -> list[str]:
-    """Build a local-only OpenSSH control-master health check."""
+    """Build a non-interactive SSH availability check for this platform."""
+    if not SSH_MULTIPLEXING_SUPPORTED:
+        return ssh_command(machine, 5, "true")
     command = ["ssh", "-o", f"ControlPath={control_socket_path()}", "-O", "check"]
     if machine.port != 22:
         command.extend(["-p", str(machine.port)])
@@ -247,17 +263,19 @@ def control_check_command(machine: Machine) -> list[str]:
 
 
 def session_status(machine: Machine, timeout: int = 5) -> dict[str, object]:
-    """Return verified control-master state and estimated persistence time.
+    """Return verified SSH availability and optional persistence time.
 
     OpenSSH reports whether the master is running but not its idle deadline.
     The remaining value is therefore an estimate based on activity observed by
     Cluster Watcher processes; it is ``None`` when no observation is available
-    or persistence is unlimited.
+    or persistence is unlimited. Native Windows instead probes a direct
+    non-interactive key/agent connection and reports ``connection_mode=direct``.
     """
-    persist_seconds = parse_control_persist(machine.control_persist)
+    persist_seconds = parse_control_persist(machine.control_persist) if SSH_MULTIPLEXING_SUPPORTED else None
     try:
         result = subprocess.run(
-            control_check_command(machine), text=True, capture_output=True,
+            control_check_command(machine) if SSH_MULTIPLEXING_SUPPORTED else ssh_command(machine, timeout, "true"),
+            text=True, capture_output=True,
             timeout=max(1, min(timeout, 5)), check=False,
         )
         message = (result.stdout or result.stderr).strip()
@@ -277,11 +295,17 @@ def session_status(machine: Machine, timeout: int = 5) -> dict[str, object]:
         "username": machine.username,
         "available": session_open,
         "session_open": session_open,
-        "pid": int(pid_match.group(1)) if pid_match else None,
+        "pid": int(pid_match.group(1)) if SSH_MULTIPLEXING_SUPPORTED and pid_match else None,
+        "connection_mode": "multiplexed" if SSH_MULTIPLEXING_SUPPORTED else "direct",
         "control_persist_seconds": persist_seconds,
         "estimated_remaining_seconds": remaining,
         "last_activity_at": last_activity.isoformat() if last_activity else None,
-        "error": None if session_open else (message or "No open SSH control master"),
+        "error": None if session_open else (
+            message or (
+                "No open SSH control master" if SSH_MULTIPLEXING_SUPPORTED
+                else "No non-interactive SSH connection; configure an SSH key or agent"
+            )
+        ),
     }
 
 

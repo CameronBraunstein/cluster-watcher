@@ -28,7 +28,7 @@ function responseError(status, payload) {
   if (status === 404) {
     return new ServiceResponseError(
       'The running Cluster Watcher service does not support this request; it is probably an older version. '
-      + 'Upgrade cluster-watcher (re-run install.sh) and restart the service.',
+      + 'Upgrade cluster-watcher with the installer for this platform and restart the service.',
       status,
     );
   }
@@ -91,8 +91,9 @@ function validateExecutable(executable, timeoutMilliseconds = 5000) {
   });
 }
 
-/** Quote one argument for the POSIX shell used by the integrated terminal. */
-function shellQuote(value) {
+/** Quote one argument for a POSIX shell or PowerShell command line. */
+function shellQuote(value, platform = process.platform) {
+  if (platform === 'win32') return `'${String(value).replaceAll("'", "''")}'`;
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
@@ -102,8 +103,18 @@ function configArguments(settings) {
 }
 
 /** Build a shell-quoted ``cluster-watcher`` command line for an integrated terminal. */
-function cliCommand(settings, args) {
-  return [settings.executable, ...configArguments(settings), ...args].map(shellQuote).join(' ');
+function cliCommand(settings, args, platform = process.platform) {
+  return [settings.executable, ...configArguments(settings), ...args]
+    .map((argument) => shellQuote(argument, platform)).join(' ');
+}
+
+/** Build a shell-independent integrated terminal running the CLI directly. */
+function cliTerminalOptions(name, settings, args) {
+  return {
+    name,
+    shellPath: settings.executable,
+    shellArgs: [...configArguments(settings), ...args],
+  };
 }
 
 /**
@@ -112,8 +123,9 @@ function cliCommand(settings, args) {
  * the terminal closes itself after a successful login and stays open to show
  * an error otherwise.
  */
-function loginCommand(settings, machine) {
-  return `${cliCommand(settings, ['login', ...(machine ? [String(machine)] : [])])} && exit`;
+function loginCommand(settings, machine, platform = process.platform) {
+  const command = cliCommand(settings, ['login', ...(machine ? [String(machine)] : [])], platform);
+  return platform === 'win32' ? `${command}; if ($?) { exit }` : `${command} && exit`;
 }
 
 /** Run the executable directly (no shell) and resolve with stdout/stderr and exit code. */
@@ -144,21 +156,26 @@ async function configurationError(settings) {
   return (result.stderr.trim().split('\n').pop() || `cluster-watcher list exited with status ${result.code}`).replace(/^.*?error: /, '');
 }
 
-/** Build the safe loopback service command launched by the extension. */
-function serviceCommand(settings) {
+/** Return safe CLI arguments for the configured loopback service. */
+function serviceArguments(settings) {
   const backend = new URL(settings.backendUrl);
   const loopbackNames = new Set(['127.0.0.1', '::1', '[::1]', 'localhost']);
   if (backend.protocol !== 'http:' || !loopbackNames.has(backend.hostname)) {
     throw new Error('Starting a service requires an http:// loopback backendUrl');
   }
   const port = backend.port ? Number(backend.port) : 80;
-  return cliCommand(settings, [
+  return [
     'serve', '--host', backend.hostname, '--port', String(port),
     '--timeout', String(settings.sshTimeoutSeconds), '--refresh', String(settings.refreshSeconds),
     '--jobs-api', '--no-browser',
-  ]);
+  ];
+}
+
+/** Build the safe loopback service command launched by the extension. */
+function serviceCommand(settings) {
+  return cliCommand(settings, serviceArguments(settings));
 }
 
 module.exports = {
-  ExecutableValidationError, ServiceResponseError, jobsApiDisabled, responseError, cliCommand, configurationError, loginCommand, resolveConfigPath, runCli, serviceCommand, shellQuote, validateExecutable,
+  ExecutableValidationError, ServiceResponseError, jobsApiDisabled, responseError, cliCommand, cliTerminalOptions, configurationError, loginCommand, resolveConfigPath, runCli, serviceArguments, serviceCommand, shellQuote, validateExecutable,
 };

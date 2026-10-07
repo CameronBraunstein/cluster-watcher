@@ -1,35 +1,54 @@
-# Build dist/cluster-watcher-linux-<arch> and prove it starts on glibc 2.17.
-#
-# A python-build-standalone interpreter (installed by uv) is used instead of the
-# runner's Python: it ships a shared libpython built against glibc 2.17, so the
-# PyInstaller executable runs on old cluster login nodes, not just on the
-# runner's recent Ubuntu.
+# Build and smoke-test one native PyInstaller executable.
 name: Build standalone executable
-description: Build and smoke-test the PyInstaller executable for one architecture.
+description: Build one native Cluster Watcher release artifact.
 inputs:
-  arch:
-    description: Expected architecture suffix (x86_64 or aarch64).
+  artifact:
+    description: Exact release filename expected from cluster-watcher.spec.
     required: true
+  linux-arch:
+    description: manylinux architecture (x86_64 or aarch64); empty off Linux.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
     - uses: astral-sh/setup-uv@v6
-    - name: Build with PyInstaller
+
+    - name: Build on Linux or macOS
+      if: runner.os != 'Windows'
       shell: bash
+      env:
+        # The interpreter's own deployment target remains the effective floor;
+        # this prevents project-built objects from accidentally requiring newer macOS.
+        MACOSX_DEPLOYMENT_TARGET: "12.0"
       run: |
         uv python install 3.12
         uv venv --python 3.12 --managed-python .build-venv
         uv pip install --python .build-venv 'pyinstaller>=6.0,<7'
         .build-venv/bin/python -m PyInstaller --noconfirm --clean cluster-watcher.spec
-        test -x "dist/cluster-watcher-linux-${{ inputs.arch }}"
-    - name: Smoke-test on the runner
+        test -x "dist/${{ inputs.artifact }}"
+        "dist/${{ inputs.artifact }}" --help
+        "dist/${{ inputs.artifact }}" --config clusters.example.toml list
+
+    - name: Prove Linux compatibility with glibc 2.17
+      if: runner.os == 'Linux'
       shell: bash
       run: |
-        binary="dist/cluster-watcher-linux-${{ inputs.arch }}"
-        "$binary" --help
-        "$binary" --config clusters.example.toml list
-    - name: Smoke-test on glibc 2.17 (manylinux2014)
-      shell: bash
+        docker run --rm -v "$PWD:/work" -w /work \
+          "quay.io/pypa/manylinux2014_${{ inputs.linux-arch }}" \
+          "dist/${{ inputs.artifact }}" --config clusters.example.toml list
+
+    - name: Build on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
       run: |
-        docker run --rm -v "$PWD:/work" -w /work "quay.io/pypa/manylinux2014_${{ inputs.arch }}" \
-          "dist/cluster-watcher-linux-${{ inputs.arch }}" --config clusters.example.toml list
+        uv python install 3.12
+        uv venv --python 3.12 --managed-python .build-venv
+        uv pip install --python .build-venv 'pyinstaller>=6.0,<7'
+        & .build-venv/Scripts/python.exe -m PyInstaller --noconfirm --clean cluster-watcher.spec
+        $binary = "dist/${{ inputs.artifact }}"
+        if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw "missing $binary" }
+        & $binary --help | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "standalone help smoke test failed" }
+        & $binary --config clusters.example.toml list
+        if ($LASTEXITCODE -ne 0) { throw "standalone configuration smoke test failed" }

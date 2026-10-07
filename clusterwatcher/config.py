@@ -3,12 +3,14 @@
 from pathlib import Path
 from pathlib import PurePosixPath
 import re
+import sys
 import tomllib
 
 from .models import Machine
+from .platforms import standalone_default_config
 from .ssh import parse_control_persist
 
-DEFAULT_CONFIG = Path("clusters.toml")
+DEFAULT_CONFIG = standalone_default_config(Path(sys.executable)) if getattr(sys, "frozen", False) else Path("clusters.toml")
 DEFAULT_WAIT_THRESHOLD_MINUTES = (5, 30, 60, 120)
 
 

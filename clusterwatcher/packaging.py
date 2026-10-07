@@ -5,12 +5,7 @@ from __future__ import annotations
 import platform
 import re
 
-
-_ARCHITECTURE_ALIASES = {
-    "amd64": "x86_64",
-    "x64": "x86_64",
-    "arm64": "aarch64",
-}
+from .platforms import normalized_architecture, normalized_system
 
 
 def _safe_component(value: str) -> str:
@@ -26,7 +21,9 @@ def standalone_artifact_name(system: str | None = None, machine: str | None = No
     and ``aarch64`` spellings so builds made by differently configured Python
     runtimes still receive the same public filename.
     """
-    system_name = _safe_component(system if system is not None else platform.system())
-    machine_name = _safe_component(machine if machine is not None else platform.machine())
-    architecture = _ARCHITECTURE_ALIASES.get(machine_name, machine_name)
-    return f"cluster-watcher-{system_name}-{architecture}"
+    system_name = _safe_component(normalized_system(system if system is not None else platform.system()))
+    architecture = _safe_component(
+        normalized_architecture(machine if machine is not None else platform.machine())
+    )
+    suffix = ".exe" if system_name == "windows" else ""
+    return f"cluster-watcher-{system_name}-{architecture}{suffix}"

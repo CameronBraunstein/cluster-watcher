@@ -7,7 +7,7 @@ const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = req
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
 const { jobRef, setDateFormat, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup } = require('./renderers');
 const {
-  ExecutableValidationError, jobsApiDisabled, responseError, cliCommand, configurationError, loginCommand, resolveConfigPath, serviceCommand, validateExecutable,
+  ExecutableValidationError, jobsApiDisabled, responseError, cliTerminalOptions, configurationError, resolveConfigPath, serviceArguments, serviceCommand, validateExecutable,
 } = require('./service');
 
 const CONFIGURATION_SECTION = 'clusterWatcher';
@@ -149,9 +149,11 @@ class ServiceController {
     }
     const settings = configuration();
     await validateExecutable(settings.executable);
-    this.terminal = vscode.window.createTerminal({ name: 'Cluster Watcher Service' });
+    this.terminal = vscode.window.createTerminal(cliTerminalOptions(
+      'Cluster Watcher Service', settings,
+      serviceArguments(settings),
+    ));
     this.terminal.show();
-    this.terminal.sendText(serviceCommand(settings), true);
     vscode.window.showInformationMessage('Cluster Watcher is starting; complete any password and OTP prompts in its terminal.');
     setTimeout(() => void this.refresh(), 1000);
   }
@@ -575,9 +577,8 @@ async function copyServiceCommand() {
 async function runSetup() {
   const settings = configuration();
   await validateExecutable(settings.executable);
-  const terminal = vscode.window.createTerminal({ name: 'Cluster Watcher Setup' });
+  const terminal = vscode.window.createTerminal(cliTerminalOptions('Cluster Watcher Setup', settings, ['setup']));
   terminal.show();
-  terminal.sendText(cliCommand(settings, ['setup']), true);
 }
 
 /**
@@ -588,14 +589,17 @@ async function runSetup() {
 async function login(machine, refresh) {
   const settings = configuration();
   await validateExecutable(settings.executable);
-  const terminal = vscode.window.createTerminal({ name: machine ? `Cluster Watcher Login: ${machine}` : 'Cluster Watcher Login' });
+  const terminal = vscode.window.createTerminal(cliTerminalOptions(
+    machine ? `Cluster Watcher Login: ${machine}` : 'Cluster Watcher Login',
+    settings,
+    ['login', ...(typeof machine === 'string' ? [machine] : [])],
+  ));
   const closed = vscode.window.onDidCloseTerminal((closedTerminal) => {
     if (closedTerminal !== terminal) return;
     closed.dispose();
     void refresh();
   });
   terminal.show();
-  terminal.sendText(loginCommand(settings, typeof machine === 'string' ? machine : undefined), true);
 }
 
 /** Open the CLI's configuration file in an editor tab, offering setup when it is missing. */

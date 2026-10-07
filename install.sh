@@ -27,8 +27,14 @@ REPOSITORY="${CLUSTER_WATCHER_REPO:-CameronBraunstein/cluster-watcher}"
 VERSION="latest"
 FROM_SOURCE=0
 BIN_DIR="${XDG_BIN_HOME:-${HOME}/.local/bin}"
-CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/cluster-watcher"
-STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/cluster-watcher"
+HOST_SYSTEM="$(uname -s)"
+if [[ "${HOST_SYSTEM}" == "Darwin" ]]; then
+    CONFIG_DIR="${HOME}/Library/Application Support/Cluster Watcher"
+    STATE_DIR="${HOME}/Library/Application Support/Cluster Watcher/state"
+else
+    CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/cluster-watcher"
+    STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/cluster-watcher"
+fi
 ADD_TO_PATH=0
 FORCE=0
 WORK_DIR=""
@@ -38,7 +44,7 @@ usage() {
 Usage: ./install.sh [OPTIONS]    or    curl -fsSL <raw install.sh URL> | bash -s -- [OPTIONS]
 
 Install the standalone Cluster Watcher for the current user. By default the
-prebuilt Linux executable is downloaded from GitHub Releases and checked
+prebuilt Linux or macOS executable is downloaded from GitHub Releases and checked
 against the release's SHA256SUMS.
 
 Options:
@@ -75,10 +81,15 @@ cleanup() {
 }
 # Return the platform-qualified executable name; mirrors
 # clusterwatcher.packaging.standalone_artifact_name.
+# shellcheck disable=SC2120  # Tests pass explicit synthetic platform values.
 platform_artifact_name() {
     local system machine
     system="$(printf '%s' "${1:-$(uname -s)}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.]+/-/g; s/^[-.]+//; s/[-.]+$//')"
     machine="$(printf '%s' "${2:-$(uname -m)}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.]+/-/g; s/^[-.]+//; s/[-.]+$//')"
+    case "${system}" in
+        darwin) system="macos" ;;
+        win32) system="windows" ;;
+    esac
     case "${machine}" in
         amd64|x64) machine="x86_64" ;;
         arm64) machine="aarch64" ;;
@@ -219,6 +230,11 @@ validate_destination "binary directory" "${BIN_DIR}"
 validate_destination "configuration directory" "${CONFIG_DIR}"
 validate_destination "state directory" "${STATE_DIR}"
 [[ "$(id -u)" -ne 0 ]] || fail "run this installer as your normal user, not root"
+if [[ "${HOST_SYSTEM}" == "Darwin" ]]; then
+    macos_major="$(sw_vers -productVersion | cut -d. -f1)"
+    [[ "${macos_major}" =~ ^[0-9]+$ && "${macos_major}" -ge 12 ]] \
+        || fail "macOS 12 or newer is required"
+fi
 
 for command in ssh install mktemp grep sed awk tr uname cp mv chmod date; do
     command -v "${command}" >/dev/null 2>&1 || fail "required command not found: ${command}"
@@ -232,6 +248,7 @@ else
     command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || fail "sha256sum or shasum is required"
 fi
 
+# shellcheck disable=SC2119  # Normal installation intentionally probes this host.
 ARTIFACT_NAME="$(platform_artifact_name)"
 [[ "${ARTIFACT_NAME}" == cluster-watcher-*-* && "${ARTIFACT_NAME}" != */* ]] || fail "could not determine a safe standalone artifact name"
 
@@ -329,7 +346,7 @@ else
     fetch_release_binary "${ARTIFACT_NAME}" "${BUILT_BINARY}"
 fi
 "${BUILT_BINARY}" --help >/dev/null \
-    || fail "the executable failed its startup check (release builds need glibc 2.17 or newer; try --from-source)"
+    || fail "the executable failed its startup check (check the supported OS version, or try --from-source)"
 
 if [[ "${FORCE}" -eq 1 && "${OWNED_INSTALL}" -ne 1 ]]; then
     BACKUP_DIR="${STATE_DIR}/install-backup-$(date -u +%Y%m%dT%H%M%SZ).$$"

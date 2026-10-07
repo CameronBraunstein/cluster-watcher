@@ -117,9 +117,9 @@ they never modify Slurm jobs.
 
 ## Install
 
-**Prebuilt Linux executable (recommended).** Needs only `bash`, `curl` (or
-`wget`), and OpenSSH; no Python. It downloads the executable for your CPU
-(x86_64 or aarch64, glibc 2.17 or newer) from the latest
+**Prebuilt executable (recommended).** Linux and macOS need only `bash`,
+`curl` (or `wget`), and OpenSSH; no Python. The installer downloads the native
+executable for the operating system and CPU from the latest
 [GitHub Release](https://github.com/CameronBraunstein/cluster-watcher/releases),
 verifies its SHA-256 checksum, and installs `cluster-watcher` in `~/.local/bin`:
 
@@ -133,6 +133,37 @@ Pin a release with `--version v0.1.0`. From a clone, `./install.sh` does the
 same, and `./install.sh --from-source` builds the executable locally with
 PyInstaller instead (Python 3.11+). Remove it again with `./uninstall.sh`
 (also attached to every release).
+
+Windows 10 build 1809 or newer uses the PowerShell installer (Windows ARM64
+requires Windows 11):
+
+```powershell
+$installer = Join-Path $env:TEMP "cluster-watcher-install.ps1"
+Invoke-WebRequest https://raw.githubusercontent.com/CameronBraunstein/cluster-watcher/master/install.ps1 -OutFile $installer
+& $installer -AddToPath
+cluster-watcher setup
+```
+
+Download and run the matching uninstaller when needed:
+
+```powershell
+$uninstaller = Join-Path $env:TEMP "cluster-watcher-uninstall.ps1"
+Invoke-WebRequest https://raw.githubusercontent.com/CameronBraunstein/cluster-watcher/master/uninstall.ps1 -OutFile $uninstaller
+& $uninstaller
+```
+
+Native Windows supports clusters authenticated with SSH keys or `ssh-agent`.
+Microsoft's native OpenSSH does not implement
+the `ControlMaster` connection sharing required to retain password/OTP
+sessions, so use Cluster Watcher inside WSL for those clusters. Install and run
+the VS Code extension on the WSL side as well. Windows OpenSSH Client must be
+installed as an optional Windows feature.
+
+Release binaries cover Linux glibc 2.17+ and macOS 12+ on x86-64 and ARM64,
+Windows 10 1809+ on x86-64, and Windows 11+ on ARM64. Alpine/musl Linux is not
+currently prebuilt; install from source there. Exact targets and minimums are
+published in [`release-platforms.json`](release-platforms.json) and attached to
+each release as `PLATFORMS.json`.
 
 **With Python 3.11+.** The package has no dependencies, so it can also be
 installed as an ordinary Python application:
@@ -156,7 +187,8 @@ An existing file is only replaced after confirmation and is kept as
 `clusters.toml.bak`.
 
 Run `cluster-watcher config` to open the same file in `$VISUAL`, `$EDITOR`, or
-the first of `nano`/`vim`/`vi` found. After the editor exits the file is
+a native fallback (`nano`/`vim`/`vi` on Unix, Notepad or VS Code on Windows).
+After the editor exits the file is
 validated, and an invalid file can be re-opened immediately. If no file exists
 yet, `config` offers to start `setup`. (`--config PATH` still only selects which
 file every command uses, so the two can be combined.)
@@ -364,19 +396,24 @@ python3 -m PyInstaller --noconfirm --clean cluster-watcher.spec
 ```
 
 The example command above is for 64-bit Intel/AMD Linux. Every distributable is
-named `cluster-watcher-<os>-<architecture>`; common Linux results are
-`cluster-watcher-linux-x86_64` and `cluster-watcher-linux-aarch64`. Copy the
+named `cluster-watcher-<os>-<architecture>` (with `.exe` on Windows). Published
+names include `cluster-watcher-linux-x86_64`,
+`cluster-watcher-macos-aarch64`, and
+`cluster-watcher-windows-x86_64.exe`. Copy the
 matching executable and your `clusters.toml` (or run `setup` there) to the
-target machine. The
-bundled application still defaults to `clusters.toml` in its current working
-directory, and reads an optional `gpu_profiles.toml` beside it. Passwords
+target machine. A bundled application defaults to the native per-user
+configuration directory: XDG on Linux,
+`~/Library/Application Support/Cluster Watcher` on macOS, and
+`%APPDATA%\ClusterWatcher` on Windows. It reads an optional
+`gpu_profiles.toml` beside `clusters.toml`. Passwords
 and OTPs are never embedded. In a frozen build, the executable securely
 re-enters itself as the OpenSSH askpass client, so grouped MFA authentication
 does not depend on a separate Python interpreter or `askpass.py` file.
 
 PyInstaller output is specific to the operating system and CPU architecture on
-which it is built, and it requires at least the glibc version of the Python it
-bundles. Release builds therefore use a python-build-standalone interpreter
+which it is built. Release CI builds each target natively because PyInstaller
+is not a cross-compiler. Linux additionally requires at least the glibc version
+of the Python it bundles, so Linux release builds use a python-build-standalone interpreter
 (installed with `uv`), whose shared `libpython` targets glibc 2.17, and CI
 proves each executable starts inside a `manylinux2014` (glibc 2.17) container.
 A local `--from-source` build instead inherits your Python's requirements. The target still needs the system `ssh` command and network access to
@@ -384,8 +421,8 @@ the configured login hosts—PyInstaller replaces the Python requirement, not
 OpenSSH or the remote Slurm installation. Generated `build/` and `dist/`
 directories are ignored by Git.
 
-For a complete per-user installation, use the checked installer instead of
-running the PyInstaller steps manually:
+For a complete per-user Linux or macOS installation, use the checked installer
+instead of running the PyInstaller steps manually:
 
 ```bash
 ./install.sh --add-to-path                 # download the release executable
@@ -409,9 +446,9 @@ cluster-watcher-linux-x86_64
 cluster-watcher
 ```
 
-The `cluster-watcher` shim passes
-`~/.config/cluster-watcher/clusters.toml` automatically and selects the correct
-platform executable, which is why the stable command works from any directory.
+The `cluster-watcher` shim passes the native per-user `clusters.toml`
+automatically and selects the correct platform executable, which is why the
+stable command works from any directory.
 On the first installation, a personal `clusters.toml` beside `install.sh` is
 copied there with user-only permissions; without one, the installer asks you to
 run `cluster-watcher setup`. Later installer runs preserve that copy so local edits
@@ -430,6 +467,15 @@ ensures that separately opened terminals also inherit the command. Omit the
 option if the profile is already configured or if you prefer to edit your shell
 setup yourself. Custom destinations are available through `--bin-dir`,
 `--config-dir`, and `--state-dir`; run `./install.sh --help` for details.
+
+`install.ps1` provides the equivalent Windows flow. It verifies the same
+`SHA256SUMS`, installs both the architecture-qualified executable and stable
+`cluster-watcher.exe` under `%LOCALAPPDATA%\Programs\ClusterWatcher`, preserves
+configuration, and changes only the current user's PATH when `-AddToPath` is
+specified. `-Version`, `-FromSource`, `-Force`, `-BinDir`, `-ConfigDir`, and
+`-StateDir` mirror the Unix installer options. A private sidecar beside the
+executable keeps a custom `-ConfigDir` effective when the command is launched
+from any working directory.
 
 Some managed systems prohibit direct edits to `.bashrc` or `.zshrc` and source
 a user-owned private file instead. When the standard profile actively
@@ -491,6 +537,10 @@ When custom installation directories were used, supply the same `--bin-dir`,
 `--config-dir`, and `--state-dir` values to `uninstall.sh`. The uninstaller
 refuses unknown manifests, symbolic links, root execution, and paths outside
 the recorded installation, so it stops instead of guessing what to delete.
+
+On Windows, run `uninstall.ps1`; add `-PurgeConfig` to recoverably remove the
+configuration too, or `-KeepPath` to retain the user PATH entry. Like the Unix
+uninstaller, it moves managed files to a timestamped state-directory backup.
 
 ### Terminal capacity board
 
@@ -1526,10 +1576,11 @@ python3 -m unittest discover -s tests -v
 ## Continuous integration and releases
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to
-`master` and on pull requests: the Python suite on 3.11–3.13, the extension unit
-tests and VS Code integration test (under Xvfb), and the standalone build for
-x86_64 and aarch64 (native ARM runner), each smoke-tested on the runner and in a
-glibc 2.17 `manylinux2014` container. The build steps live in the shared
+`master` and on pull requests: the Python suite on 3.11–3.13 on Linux plus
+macOS and native-Windows policy coverage, the extension unit and integration
+tests, and six standalone builds covering Linux, macOS, and Windows on x86-64
+and ARM64. Linux artifacts are additionally smoke-tested in a glibc 2.17
+`manylinux2014` container. The build steps live in the shared
 [`build-standalone`](.github/actions/build-standalone/action.yml) action.
 
 [`.github/workflows/release.yml`](.github/workflows/release.yml) publishes a
@@ -1542,11 +1593,20 @@ git push origin v0.1.0
 ```
 
 It first fails unless the tag matches both versions, then builds and smoke-tests
-both executables, runs the extension tests and packages the VSIX, and creates a
-GitHub Release containing `cluster-watcher-linux-x86_64`,
-`cluster-watcher-linux-aarch64`, `cluster-watcher-<version>.vsix`,
-`install.sh`, `uninstall.sh`, `clusters.example.toml`, and the `SHA256SUMS`
-file that `install.sh` verifies. Marketplace publishing stays a manual step.
+all six native executables, runs the extension tests, packages the
+platform-neutral VSIX, attests executable provenance, and creates a GitHub
+Release. Alongside the binaries it includes `install.sh`, `uninstall.sh`,
+`install.ps1`, `uninstall.ps1`, `clusters.example.toml`, `PLATFORMS.json`, and
+the shared `SHA256SUMS`. Marketplace publishing stays a manual step.
+
+Release-environment secrets optionally enable platform trust before checksums
+are generated: `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD`, and
+`MACOS_SIGNING_IDENTITY` sign macOS binaries; `APPLE_ID`, `APPLE_TEAM_ID`, and
+`APPLE_APP_PASSWORD` additionally notarize them. `WINDOWS_CERTIFICATE_PFX` and
+`WINDOWS_CERTIFICATE_PASSWORD` Authenticode-sign and timestamp Windows
+executables. Certificate values are base64-encoded PKCS#12/PFX files and must
+be protected GitHub secrets. Builds remain checksum-verified but unsigned when
+the corresponding signing secret is absent.
 
 ## Agent integration
 

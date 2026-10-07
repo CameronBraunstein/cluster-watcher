@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "targets": [
+    {
+      "system": "linux",
+      "architecture": "x86_64",
+      "abi": "glibc>=2.17",
+      "artifact": "cluster-watcher-linux-x86_64"
+    },
+    {
+      "system": "linux",
+      "architecture": "aarch64",
+      "abi": "glibc>=2.17",
+      "artifact": "cluster-watcher-linux-aarch64"
+    },
+    {
+      "system": "macos",
+      "architecture": "x86_64",
+      "minimum_version": "12.0",
+      "artifact": "cluster-watcher-macos-x86_64"
+    },
+    {
+      "system": "macos",
+      "architecture": "aarch64",
+      "minimum_version": "12.0",
+      "artifact": "cluster-watcher-macos-aarch64"
+    },
+    {
+      "system": "windows",
+      "architecture": "x86_64",
+      "minimum_version": "10.0.17763",
+      "artifact": "cluster-watcher-windows-x86_64.exe",
+      "authentication": "ssh-key-or-agent"
+    },
+    {
+      "system": "windows",
+      "architecture": "aarch64",
+      "minimum_version": "10.0.22000",
+      "artifact": "cluster-watcher-windows-aarch64.exe",
+      "authentication": "ssh-key-or-agent"
+    }
+  ]
+}

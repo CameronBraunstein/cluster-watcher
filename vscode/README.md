@@ -9,7 +9,7 @@ MFA, Slurm queries, and refresh scheduling.
 
 - The **`cluster-watcher` command-line program** must be installed on the
   machine running the extension (the remote host under Remote SSH). The
-  extension does not bundle it. Install the prebuilt Linux executable with
+  extension does not bundle it. On Linux or macOS, install the prebuilt executable with
 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/CameronBraunstein/cluster-watcher/master/install.sh | bash -s -- --add-to-path
@@ -17,6 +17,10 @@ MFA, Slurm queries, and refresh scheduling.
 
   (or `pipx install git+https://github.com/CameronBraunstein/cluster-watcher`),
   then run `cluster-watcher setup` once to describe your clusters.
+  On native Windows, install it with the repository's `install.ps1`; SSH
+  key/agent clusters are supported there. Password/OTP clusters require the
+  complete Unix OpenSSH multiplexing path, so run both the executable and this
+  workspace extension inside WSL for those clusters.
 - SSH access to each Slurm cluster from that machine.
 - If `cluster-watcher` is not on `PATH`, set `clusterWatcher.executable` to its
   absolute path.

@@ -78,6 +78,7 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertNotIn("gpu_profiles.toml", specification)  # Personal config, never bundled.
         self.assertNotIn("COLLECT(", specification)  # EXE receives data directly in one-file mode.
 
+    @unittest.skipIf(os.name == "nt", "POSIX installer is tested on Linux and macOS")
     def test_install_script_is_executable_safe_and_has_working_help(self):
         """Keep the per-user standalone installer syntactically valid and guarded."""
         installer = Path(__file__).parents[1] / "install.sh"
@@ -132,8 +133,11 @@ class ClusterWatcherTests(TimedTestCase):
 
         self.assertEqual(standalone_artifact_name("Linux", "AMD64"), "cluster-watcher-linux-x86_64")
         self.assertEqual(standalone_artifact_name("Linux", "arm64"), "cluster-watcher-linux-aarch64")
+        self.assertEqual(standalone_artifact_name("Darwin", "arm64"), "cluster-watcher-macos-aarch64")
+        self.assertEqual(standalone_artifact_name("Windows", "AMD64"), "cluster-watcher-windows-x86_64.exe")
         self.assertEqual(standalone_artifact_name("Free BSD", "riscv64"), "cluster-watcher-free-bsd-riscv64")
 
+    @unittest.skipIf(os.name == "nt", "POSIX installer is tested on Linux and macOS")
     def test_installer_uses_site_private_profile_and_marked_block(self):
         """Honor a site-managed shell profile's delegated private file."""
         with tempfile.TemporaryDirectory() as directory:
@@ -154,17 +158,22 @@ class ClusterWatcherTests(TimedTestCase):
                 managed_path_block(home / ".local" / "bin"),
             )
 
+    @unittest.skipIf(os.name == "nt", "POSIX installer is tested on Linux and macOS")
     def test_installer_artifact_name_matches_python_packaging(self):
         """The release asset chosen by install.sh must be the one CI publishes."""
         from clusterwatcher.packaging import standalone_artifact_name
 
-        for system, machine in (("Linux", "x86_64"), ("Linux", "AMD64"), ("Linux", "arm64"), ("Free BSD", "riscv64")):
+        for system, machine in (
+            ("Linux", "x86_64"), ("Linux", "AMD64"), ("Linux", "arm64"),
+            ("Darwin", "arm64"), ("Free BSD", "riscv64"),
+        ):
             with self.subTest(system=system, machine=machine):
                 self.assertEqual(
                     installer_function("platform_artifact_name", system, machine),
                     standalone_artifact_name(system, machine),
                 )
 
+    @unittest.skipIf(os.name == "nt", "POSIX installer is tested on Linux and macOS")
     def test_installer_downloads_and_verifies_a_release(self):
         """Install from a local file:// release; refuse a checksum mismatch."""
         from clusterwatcher.packaging import standalone_artifact_name
@@ -203,9 +212,14 @@ class ClusterWatcherTests(TimedTestCase):
                 self.assertIn("cluster-watcher setup", result.stdout)
                 self.assertEqual(installed.read_bytes(), binary.read_bytes())
                 shim = (home / ".local" / "bin" / "cluster-watcher").read_text()
-                self.assertIn(f"--config '{home}/.config/cluster-watcher/clusters.toml'", shim)
-                self.assertFalse((home / ".config" / "cluster-watcher" / "clusters.toml").exists())
+                if sys.platform == "darwin":
+                    config = home / "Library" / "Application Support" / "Cluster Watcher" / "clusters.toml"
+                else:
+                    config = home / ".config" / "cluster-watcher" / "clusters.toml"
+                self.assertIn(f"--config '{config}'", shim)
+                self.assertFalse(config.exists())
 
+    @unittest.skipIf(os.name == "nt", "POSIX uninstaller is tested on Linux and macOS")
     def test_uninstall_script_preserves_config_and_reverses_managed_path(self):
         """Uninstall both current and legacy managed PATH blocks safely."""
         root = Path(__file__).parents[1]
@@ -265,6 +279,7 @@ class ClusterWatcherTests(TimedTestCase):
                 self.assertTrue((backups[0] / marker.name).is_file())
                 self.assertTrue((backups[0] / profile.name).is_file())
 
+    @unittest.skipIf(os.name == "nt", "POSIX uninstaller is tested on Linux and macOS")
     def test_uninstall_script_can_back_up_and_purge_configuration(self):
         """Treat configuration deletion as an explicit, recoverable operation."""
         root = Path(__file__).parents[1]

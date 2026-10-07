@@ -12,6 +12,7 @@ import threading
 
 from .models import Machine
 from .askpass import ASKPASS_MODE_ENVIRONMENT_VARIABLE
+from .platforms import supports_ssh_multiplexing, user_runtime_token
 from .ssh import session_status, start_interactive_session
 
 
@@ -49,7 +50,7 @@ class CredentialBroker:
     def __enter__(self) -> CredentialBroker:
         """Create a private socket and start serving askpass requests."""
         try:
-            self._directory = tempfile.TemporaryDirectory(prefix=f"cluster-watcher-auth-{os.getuid()}-")
+            self._directory = tempfile.TemporaryDirectory(prefix=f"cluster-watcher-auth-{user_runtime_token()}-")
             directory = Path(self._directory.name)
             directory.chmod(0o700)
             self.socket_path = directory / "askpass.sock"
@@ -224,6 +225,12 @@ def establish_interactive_sessions(machines: list[Machine], timeout: int) -> lis
         machine for machine in machines
         if machine.interactive_auth and not session_status(machine, timeout)["session_open"]
     ]
+    if machines and not supports_ssh_multiplexing():
+        error = RuntimeError(
+            "native Windows OpenSSH cannot keep reusable password/OTP sessions; "
+            "use SSH keys/agent or run Cluster Watcher in WSL"
+        )
+        return [(machine, error) for machine in machines]
     errors: list[tuple[Machine, RuntimeError]] = []
     completed_groups: set[str] = set()
     for machine in machines:

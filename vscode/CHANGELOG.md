@@ -2,6 +2,12 @@
 
 All notable changes to the Cluster Watcher VS Code extension.
 
+## Unreleased
+
+- Integrated CLI terminals now launch the executable and arguments directly,
+  so service startup, setup, and login work without POSIX shell quoting on
+  native Windows as well as Linux and macOS.
+
 ## 0.1.2 — 2026-10-07
 
 - Job card titles sit next to the collapse arrow instead of below it, with the

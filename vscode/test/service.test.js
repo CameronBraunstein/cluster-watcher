@@ -5,7 +5,7 @@ const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const {
-  ServiceResponseError, cliCommand, jobsApiDisabled, loginCommand, responseError, serviceCommand, shellQuote, validateExecutable,
+  ServiceResponseError, cliCommand, cliTerminalOptions, jobsApiDisabled, loginCommand, responseError, serviceArguments, serviceCommand, shellQuote, validateExecutable,
 } = require('../service');
 const manifest = require('../package.json');
 
@@ -22,6 +22,13 @@ test('service command enables jobs API and preserves paths containing spaces', (
   assert.match(command, /'--config' '\/home\/alice\/My Clusters.toml'/);
   assert.match(command, /'--host' '127.0.0.1' '--port' '8123'/);
   assert.match(command, /'--jobs-api' '--no-browser'$/);
+  assert.deepEqual(serviceArguments({
+    executable: 'ignored', configPath: '', backendUrl: 'http://127.0.0.1:8123/',
+    sshTimeoutSeconds: 20, refreshSeconds: 30,
+  }), [
+    'serve', '--host', '127.0.0.1', '--port', '8123', '--timeout', '20',
+    '--refresh', '30', '--jobs-api', '--no-browser',
+  ]);
 });
 
 test('service command refuses a non-loopback or TLS endpoint', () => {
@@ -34,6 +41,7 @@ test('service command refuses a non-loopback or TLS endpoint', () => {
 
 test('shell quoting cannot split a configured executable argument', () => {
   assert.equal(shellQuote("it's safe"), "'it'\\''s safe'");
+  assert.equal(shellQuote("it's safe", 'win32'), "'it''s safe'");
 });
 
 test('extension runs beside the workspace so remote sessions remain reusable', () => {
@@ -73,6 +81,11 @@ test('CLI helper commands reuse the configured executable and config path', () =
   const settings = { executable: 'cluster-watcher', configPath: '/home/a b/clusters.toml' };
   assert.equal(cliCommand(settings, ['setup']), "'cluster-watcher' '--config' '/home/a b/clusters.toml' 'setup'");
   assert.equal(cliCommand({ ...settings, configPath: '' }, ['config', '--path']), "'cluster-watcher' 'config' '--path'");
+  assert.deepEqual(cliTerminalOptions('Setup', settings, ['setup']), {
+    name: 'Setup',
+    shellPath: 'cluster-watcher',
+    shellArgs: ['--config', '/home/a b/clusters.toml', 'setup'],
+  });
 });
 
 test('manifest declares license, icon, new settings, and no redundant activation events', () => {
@@ -98,7 +111,7 @@ test('a running service without --jobs-api is told apart from other failures', (
 });
 
 test('a plain-text 404 suggests upgrading an older service', () => {
-  assert.match(responseError(404, null).message, /older version.*re-run install\.sh/);
+  assert.match(responseError(404, null).message, /older version.*installer for this platform/);
   assert.equal(responseError(502, null).message, 'Cluster Watcher returned HTTP 502');
   assert.equal(responseError(400, { error: 'bad id' }).message, 'bad id');
 });
@@ -108,6 +121,7 @@ test('login runs the CLI for one machine, or all, and closes the terminal on suc
   assert.equal(loginCommand(settings, 'cluster_0'), "'cluster-watcher' 'login' 'cluster_0' && exit");
   assert.equal(loginCommand(settings), "'cluster-watcher' 'login' && exit");
   assert.match(loginCommand(settings, "x'; rm -rf ~"), /'x'\\''; rm -rf ~' && exit$/);
+  assert.equal(loginCommand(settings, 'cluster_0', 'win32'), "'cluster-watcher' 'login' 'cluster_0'; if ($?) { exit }");
   const commands = manifest.contributes.commands.map((command) => command.command);
   assert.ok(commands.includes('clusterWatcher.login'));
   assert.match(readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8'), /'clusterWatcher\.refresh', 'clusterWatcher\.login',/);

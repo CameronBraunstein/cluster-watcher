@@ -5,8 +5,13 @@ set -Eeuo pipefail
 
 PROGRAM_NAME="${0##*/}"
 BIN_DIR="${XDG_BIN_HOME:-${HOME}/.local/bin}"
-CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/cluster-watcher"
-STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/cluster-watcher"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    CONFIG_DIR="${HOME}/Library/Application Support/Cluster Watcher"
+    STATE_DIR="${HOME}/Library/Application Support/Cluster Watcher/state"
+else
+    CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/cluster-watcher"
+    STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/cluster-watcher"
+fi
 PURGE_CONFIG=0
 KEEP_PATH=0
 
