@@ -249,6 +249,7 @@ class ClusterWatcherTests(TimedTestCase):
                         f"export PATH='{bin_dir}':\"$PATH\""
                     )
                 profile.write_text(f"export EDITOR=vi\n\n{path_block}\n")
+                profile.chmod(0o640)
                 marker.write_text(
                     "version=2\n"
                     f"binary={binary}\ncommand={command}\nconfig={config}\nprofile={profile}\n"
@@ -272,6 +273,7 @@ class ClusterWatcherTests(TimedTestCase):
                 self.assertFalse(marker.exists())
                 self.assertEqual(config.read_text(), "user configuration")
                 self.assertEqual(profile.read_text(), "export EDITOR=vi\n\n")
+                self.assertEqual(profile.stat().st_mode & 0o777, 0o640)
                 backups = list(state_dir.glob("uninstall-backup-*"))
                 self.assertEqual(len(backups), 1)
                 self.assertTrue((backups[0] / binary.name).is_file())

@@ -13,6 +13,7 @@ jobs:
   python:
     name: Python ${{ matrix.python }} tests (${{ matrix.os }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:

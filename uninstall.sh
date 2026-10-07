@@ -84,7 +84,7 @@ for directory in "${BIN_DIR}" "${CONFIG_DIR}" "${STATE_DIR}"; do
     [[ ! -L "${directory}" ]] || fail "refusing to use a symbolic-link directory: ${directory}"
 done
 
-for command in awk cp chmod date mkdir mktemp mv; do
+for command in awk cp date mkdir mktemp mv; do
     command -v "${command}" >/dev/null 2>&1 || fail "required command not found: ${command}"
 done
 
@@ -166,6 +166,10 @@ if [[ "${KEEP_PATH}" -eq 0 && -n "${manifest_profile}" ]]; then
         LEGACY_PATH_COMMENT='# Added by Cluster Watcher install.sh'
         PATH_LINE="export PATH='${BIN_DIR}':\"\$PATH\""
         PROFILE_TEMP="$(mktemp "${PROFILE_PATH}.cluster-watcher-uninstall.XXXXXX")"
+        # Preserve the profile's mode portably. GNU chmod has --reference, but
+        # the BSD chmod shipped by macOS does not. Redirecting below truncates
+        # the copied file without changing the mode inherited from cp -p.
+        cp -p -- "${PROFILE_PATH}" "${PROFILE_TEMP}"
         set +e
         awk \
             -v block_start="${PATH_BLOCK_START}" \
@@ -204,7 +208,6 @@ if [[ "${KEEP_PATH}" -eq 0 && -n "${manifest_profile}" ]]; then
         set -e
         if [[ "${awk_status}" -eq 0 ]]; then
             cp -p -- "${PROFILE_PATH}" "${BACKUP_DIR}/${PROFILE_PATH##*/}"
-            chmod --reference="${PROFILE_PATH}" "${PROFILE_TEMP}"
             mv -f -- "${PROFILE_TEMP}" "${PROFILE_PATH}"
             printf 'Removed the managed PATH entry from %s\n' "${PROFILE_PATH}"
         elif [[ "${awk_status}" -eq 3 ]]; then

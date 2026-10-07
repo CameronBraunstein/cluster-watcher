@@ -40,6 +40,16 @@ case "$FAKE_MODE" in
 esac
 """
 
+FAKE_TIMEOUT = """#!/bin/sh
+duration="$1"
+shift
+if [ "$FAKE_MODE" = slow ]; then
+  sleep "$duration"
+  exit 124
+fi
+exec "$@"
+"""
+
 
 def run_locally(_machine, _timeout, command, _process_timeout=None):
     """Execute what would be sent over SSH with the local shell instead."""
@@ -64,6 +74,9 @@ class FakeClusterTestCase(TimedTestCase):
         sbatch = Path(directory.name) / "sbatch"
         sbatch.write_text(FAKE_SBATCH)
         sbatch.chmod(0o755)
+        timeout = Path(directory.name) / "timeout"
+        timeout.write_text(FAKE_TIMEOUT)
+        timeout.chmod(0o755)
         self.log = Path(directory.name) / "calls.log"
         self.log.touch()
         environment = patch.dict(os.environ, {

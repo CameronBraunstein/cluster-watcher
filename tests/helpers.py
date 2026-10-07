@@ -15,9 +15,10 @@ configure_gpu_profiles(TEST_GPU_PROFILES)
 class TimedTestCase(unittest.TestCase):
     """A ``TestCase`` that fails a test that runs longer than its deadline.
 
-    ``unittest`` has no built-in per-test timeout. The project test suite runs
-    on Linux, where ``SIGALRM`` can interrupt a stuck test in the main thread.
-    The signal handler is restored after each test so it cannot affect another
+    ``unittest`` has no built-in per-test timeout. POSIX hosts use ``SIGALRM``
+    to interrupt a stuck test in the main thread. Platforms without interval
+    timers, notably Windows, run normally and rely on the CI job timeout. The
+    signal handler is restored after each test so it cannot affect another
     test or the test runner.
     """
 
@@ -27,7 +28,11 @@ class TimedTestCase(unittest.TestCase):
         """Run one test with a deadline, preserving the prior alarm handler."""
         # CLI tests repoint the catalog at their temporary config; start each test clean.
         configure_gpu_profiles(TEST_GPU_PROFILES)
-        if threading.current_thread() is not threading.main_thread():
+        signal_deadline_supported = all(
+            hasattr(signal, attribute)
+            for attribute in ("SIGALRM", "ITIMER_REAL", "getitimer", "setitimer")
+        )
+        if threading.current_thread() is not threading.main_thread() or not signal_deadline_supported:
             return super().run(result)
 
         previous_handler = signal.getsignal(signal.SIGALRM)

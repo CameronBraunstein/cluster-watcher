@@ -1565,8 +1565,11 @@ not performed by `install.sh` or the repository test suite.
 
 ## Tests
 
-Each unit test has a five-second watchdog. A stuck test is interrupted and
-reported as an error instead of allowing the suite to run indefinitely.
+Each unit test has a five-second signal watchdog on POSIX hosts. A stuck test
+is interrupted and reported as an error instead of allowing the suite to run
+indefinitely. Windows lacks the required interval-timer signals, so its
+targeted platform tests rely on the ten-minute GitHub Actions job deadline
+instead.
 Run the complete suite from the repository root with:
 
 ```bash

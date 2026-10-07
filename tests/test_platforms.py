@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import unittest
 from unittest.mock import patch
 
 from clusterwatcher.credentials import establish_interactive_sessions
@@ -32,6 +33,15 @@ class PlatformTests(TimedTestCase):
         self.assertTrue(supports_ssh_multiplexing("Darwin"))
         self.assertFalse(supports_ssh_multiplexing("Windows"))
         self.assertTrue(user_runtime_token())
+
+    def test_test_case_runs_without_posix_interval_timers(self):
+        """Let Windows execute tests even though it has no ``SIGALRM``."""
+        case = TimedTestCase()
+        result = unittest.TestResult()
+        with patch("helpers.hasattr", return_value=False, create=True), \
+                patch.object(unittest.TestCase, "run", return_value=result) as base_run:
+            self.assertIs(case.run(result), result)
+        base_run.assert_called_once_with(result)
 
     def test_frozen_config_uses_native_user_directories(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(
