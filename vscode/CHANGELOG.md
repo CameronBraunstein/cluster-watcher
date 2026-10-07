@@ -2,7 +2,7 @@
 
 All notable changes to the Cluster Watcher VS Code extension.
 
-## Unreleased
+## 0.1.2 — 2026-10-07
 
 - Job card titles sit next to the collapse arrow instead of below it, with the
   progress bar aligned under the title.

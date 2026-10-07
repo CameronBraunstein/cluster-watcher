@@ -11,6 +11,7 @@ clusters.toml
 clusters.toml.bak
 gpu_profiles.toml
 AGENTS.md
+PUBLISHING_INSTRUCTIONS.md
 
 # Build and packaging by-products.
 .build-venv/
