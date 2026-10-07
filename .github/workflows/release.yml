@@ -111,7 +111,7 @@ jobs:
 
   vsix:
     name: VS Code extension package
-    needs: check-version
+    needs: [check-version, standalone]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -125,11 +125,20 @@ jobs:
           cache-dependency-path: vscode/package-lock.json
       - run: npm ci
       - run: npm test
-      - run: npx vsce package --out "cluster-watcher-${GITHUB_REF_NAME#v}.vsix"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cluster-watcher-*
+          path: vscode/backend-assets
+          merge-multiple: true
+      - name: Embed exact-version backend checksums
+        run: node scripts/create-backend-manifest.js ../release-platforms.json backend-assets backend-manifest.json
+      - run: npm run package -- --out "cluster-watcher-${GITHUB_REF_NAME#v}.vsix"
       - uses: actions/upload-artifact@v4
         with:
           name: vsix
-          path: vscode/*.vsix
+          path: |
+            vscode/*.vsix
+            vscode/backend-manifest.json
           if-no-files-found: error
 
   release:

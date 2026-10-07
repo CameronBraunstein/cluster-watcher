@@ -99,6 +99,10 @@ test('manifest declares license, icon, new settings, and no redundant activation
   for (const command of ['clusterWatcher.runSetup', 'clusterWatcher.editConfig', 'clusterWatcher.openSettings']) {
     assert.ok(commands.includes(command), command);
   }
+  assert.ok(commands.includes('clusterWatcher.manageBackend'));
+  assert.equal(manifest.capabilities.untrustedWorkspaces.supported, false);
+  assert.match(manifest.scripts.package, /vsce package --no-dependencies/);
+  assert.match(manifest.scripts.publish, /vsce publish --no-dependencies/);
 });
 
 test('a running service without --jobs-api is told apart from other failures', () => {

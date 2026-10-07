@@ -4,6 +4,14 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
+- First-use backend installation can now download the exact native release for
+  the extension host, verify its embedded SHA-256 checksum, and either expose
+  it only inside VS Code or add it to the user's PATH.
+- New **Manage Backend Installation** command switches reversibly between the
+  managed and an existing executable, manages PATH, repairs/updates the
+  managed copy, and uninstalls only extension-owned files.
+- Backend choices are local to each local, WSL, SSH, or container extension
+  host, and Workspace Trust is required before native execution.
 - Integrated CLI terminals now launch the executable and arguments directly,
   so service startup, setup, and login work without POSIX shell quoting on
   native Windows as well as Linux and macOS.

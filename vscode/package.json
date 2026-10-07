@@ -20,6 +20,12 @@
   "extensionKind": [
     "workspace"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Cluster Watcher downloads and runs a native backend and opens SSH sessions, so the workspace must be trusted."
+    }
+  },
   "categories": [
     "Other"
   ],
@@ -75,6 +81,10 @@
       {
         "command": "clusterWatcher.openSettings",
         "title": "Cluster Watcher: Open Extension Settings"
+      },
+      {
+        "command": "clusterWatcher.manageBackend",
+        "title": "Cluster Watcher: Manage Backend Installation"
       }
     ],
     "viewsContainers": {
@@ -126,6 +136,11 @@
           "command": "clusterWatcher.openSettings",
           "when": "view == clusterWatcher.jobs",
           "group": "config@2"
+        },
+        {
+          "command": "clusterWatcher.manageBackend",
+          "when": "view == clusterWatcher.jobs",
+          "group": "config@3"
         }
       ],
       "editor/title": [
@@ -142,7 +157,7 @@
         "clusterWatcher.executable": {
           "type": "string",
           "default": "cluster-watcher",
-          "description": "Cluster Watcher executable name on PATH or absolute executable path. Set this in VS Code Settings/settings.json; do not edit the extension package.json."
+          "description": "Fallback executable name or path used before a backend is selected. Use 'Cluster Watcher: Manage Backend Installation' to change the active backend later."
         },
         "clusterWatcher.configPath": {
           "type": "string",
@@ -204,8 +219,8 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "test:integration": "node test/integration/run.js",
-    "package": "vsce package",
-    "publish": "node scripts/check-publish.js && vsce publish"
+    "package": "node scripts/check-publish.js && vsce package --no-dependencies",
+    "publish": "node scripts/check-publish.js && vsce publish --no-dependencies"
   },
   "devDependencies": {
     "@vscode/test-electron": "^3.1.0",

@@ -6,3 +6,4 @@ package-lock.json
 scripts/**
 media/icon-source.svg
 .vscode-test/**
+backend-assets/**

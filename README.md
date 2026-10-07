@@ -174,7 +174,8 @@ pipx install git+https://github.com/CameronBraunstein/cluster-watcher
 
 **VS Code extension.** Install the `.vsix` attached to the release with
 **Extensions: Install from VSIX…** (or from the Marketplace once published).
-It needs the `cluster-watcher` command from one of the options above; see
+It can use a command installed by one of the options above, or download its
+matching native backend on first use; see
 [VS Code extension](#vs-code-extension-use-test-and-publish).
 
 ## Configure
@@ -1446,20 +1447,45 @@ started:
 cluster-watcher serve --jobs-api --no-browser
 ```
 
+On first use, if no executable is available on the extension host, the
+extension offers **Install and Add to PATH**, **Use Only in VS Code**, and
+**Choose Existing Executable**. Managed installation downloads the native
+Linux, macOS, or Windows artifact for the extension host's architecture. The
+download is pinned to the extension's exact version, bounded in size, and
+checked against a SHA-256 digest embedded in the VSIX before it is smoke-tested
+and atomically installed. Unsupported architectures, macOS/Windows versions,
+and Linux glibc versions are rejected before download.
+
+Use **Cluster Watcher: Manage Backend Installation** at any time to switch
+between the managed and an existing executable, add or remove the managed bin
+directory from the user PATH, repair/update it, or uninstall it. Switching
+does not delete the other choice. **Use Only in VS Code** contributes the
+managed directory to new integrated terminals without persistently changing
+PATH; **Install and Add to PATH** also makes `cluster-watcher` available to new
+system terminals. Only the exact Unix profile block or Windows user-PATH entry
+recorded in the ownership manifest is removed later. Backend uninstall keeps
+all Cluster Watcher configuration, and uninstalling the VS Code extension
+does not silently remove a backend deliberately exposed to normal terminals.
+
 If no service exists, run **Cluster Watcher: Start Service & SSH Sessions**
 from the Command Palette or sidebar title. It launches the configured
-`clusterWatcher.executable` in an integrated terminal with `serve --jobs-api`,
-so password and OTP prompts work like they do in a normal terminal. Set an
-absolute executable path and optional `clusterWatcher.configPath` in VS Code
-settings when they are not available through the extension host's normal
-environment. Automatic startup is deliberately disabled by default so opening
-VS Code does not unexpectedly request MFA; opt in with
-`clusterWatcher.autoStart`. Before opening the service terminal, the extension
-runs the configured executable's `--help` command. A missing, non-executable,
-or broken value produces a visible error with an **Open Executable Setting**
-button. Set `clusterWatcher.executable` in user or workspace `settings.json`;
-`vscode/package.json` declares the setting and should not be edited after the
-extension is installed.
+backend in an integrated terminal with `serve --jobs-api`, so password and OTP
+prompts work like they do in a normal terminal. Set optional
+`clusterWatcher.configPath` when the normal configuration should not be used.
+`clusterWatcher.executable` is retained as a fallback for existing settings;
+new executable choices are made through the backend management command.
+Automatic startup is deliberately disabled by default so opening VS Code does
+not unexpectedly request MFA; opt in with `clusterWatcher.autoStart`. Every
+managed or selected executable is checked with `--help` before use. A broken
+choice produces a visible error with a **Manage Backend** button.
+
+Managed backends live outside VS Code extension storage, under
+`~/.local/share/cluster-watcher/vscode-backend` on Linux,
+`~/Library/Application Support/Cluster Watcher/vscode-backend` on macOS, or
+`%LOCALAPPDATA%\Programs\ClusterWatcher\vscode-backend` on Windows. This is
+host-local state: local, WSL, Remote SSH, and container extension hosts can
+each make a different choice. The extension requires Workspace Trust because
+it downloads and runs a native program and opens SSH sessions.
 
 The extension does not implement a second SSH client. Its terminal launches
 the normal Cluster Watcher executable, which uses the same user-private
@@ -1527,13 +1553,17 @@ directory:
 cd vscode
 npm install
 npm test
-npx vsce package
+cp /path/to/release/backend-manifest.json .
+npm run package
 code --install-extension cluster-watcher-0.1.0.vsix
 ```
 
 You can also choose **Extensions: Install from VSIX…** in VS Code. Packaging
-does not bundle Python or Cluster Watcher; users still install the standalone
-executable and point the extension at it.
+does not bundle all six native programs. A released VSIX instead contains the
+exact-version URLs, sizes, and SHA-256 digests and downloads only the artifact
+needed by the extension host. A development checkout without the generated
+`vscode/backend-manifest.json` can still select an existing executable, but
+`npm run package` and `npm run publish` refuse to create a release package.
 
 ### Publish to the VS Code Marketplace
 
@@ -1545,10 +1575,14 @@ installs would start with an empty job archive.
 1. For each release, bump the version in both `vscode/package.json` and
    `pyproject.toml` and add a dated entry to `vscode/CHANGELOG.md`.
 2. Tag the release (`git tag vX.Y.Z && git push origin vX.Y.Z`) so GitHub
-   Actions attaches the matching binaries and VSIX. `npm run publish` runs
-   `scripts/check-publish.js` first and refuses to publish while placeholder
-   metadata remains. The code is licensed GPL-3.0-or-later (`LICENSE`); the
-   icons keep their CC0-1.0 dedication.
+   Actions builds all six matching binaries first, generates
+   `backend-manifest.json` from their actual bytes, embeds it in the VSIX, and
+   attaches both files to the release. Download that generated manifest beside
+   `vscode/package.json` before a separate local Marketplace publish.
+   `npm run package` and `npm run publish` run `scripts/check-publish.js` first
+   and refuse stale, missing, or incomplete backend metadata. The code is
+   licensed GPL-3.0-or-later (`LICENSE`); the icons keep their CC0-1.0
+   dedication.
 3. Choose Marketplace authentication following the current
    [official publishing guide](https://code.visualstudio.com/api/working-with-extensions/publishing-extension).
    Interactive `vsce login` currently accepts an Azure DevOps personal access
@@ -1556,7 +1590,7 @@ installs would start with an empty job archive.
    prefer Microsoft Entra ID for durable automated publishing.
 4. If using the currently supported interactive flow, run `npx vsce login
    <publisher-id>` from `vscode/` and provide the token.
-5. Run `npm test`, `npm run test:integration`, `npx vsce package`,
+5. Run `npm test`, `npm run test:integration`, `npm run package`,
    inspect/install the resulting VSIX, and finally run `npm run publish`
    from `vscode/`.
 

@@ -1,7 +1,9 @@
 'use strict';
 
 const vscode = require('vscode');
+const extensionManifest = require('./package.json');
 const { JobArchive } = require('./archive');
+const { BackendManager } = require('./backend');
 const { LOG_TAIL_LINES, logDocumentContent, logRequestPath, prependLogPage, virtualLogPath } = require('./logs');
 const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = require('./events');
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
@@ -11,20 +13,22 @@ const {
 } = require('./service');
 
 const CONFIGURATION_SECTION = 'clusterWatcher';
+let backendManager;
 
 /** The only commands a webview button may ask the extension to run. */
 const WEBVIEW_COMMANDS = new Set([
   'clusterWatcher.archiveJob', 'clusterWatcher.restoreJob', 'clusterWatcher.openLog', 'clusterWatcher.openScript',
   'clusterWatcher.cancelJob',
   'clusterWatcher.startService', 'clusterWatcher.runSetup', 'clusterWatcher.editConfig', 'clusterWatcher.openSettings',
-  'clusterWatcher.copyServiceCommand', 'clusterWatcher.refresh', 'clusterWatcher.login',
+  'clusterWatcher.copyServiceCommand', 'clusterWatcher.refresh', 'clusterWatcher.login', 'clusterWatcher.manageBackend',
 ]);
 
 /** Return the current extension configuration. */
 function configuration() {
   const config = vscode.workspace.getConfiguration(CONFIGURATION_SECTION);
+  const configuredExecutable = config.get('executable', 'cluster-watcher');
   return {
-    executable: config.get('executable', 'cluster-watcher'),
+    executable: backendManager?.executable(configuredExecutable) || configuredExecutable,
     configPath: config.get('configPath', ''),
     backendUrl: config.get('backendUrl', 'http://127.0.0.1:8080/'),
     refreshSeconds: config.get('refreshSeconds', 15),
@@ -114,9 +118,10 @@ class BackendClient {
 
 /** Own a service terminal while allowing attachment to a separately run service. */
 class ServiceController {
-  constructor(client, refresh) {
+  constructor(client, refresh, manager) {
     this.client = client;
     this.refresh = refresh;
+    this.manager = manager;
     this.terminal = undefined;
     this.closeSubscription = vscode.window.onDidCloseTerminal((terminal) => {
       if (terminal === this.terminal) {
@@ -147,6 +152,8 @@ class ServiceController {
       this.terminal.show();
       return;
     }
+    const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
+    await this.manager.ensureAvailable(configured);
     const settings = configuration();
     await validateExecutable(settings.executable);
     this.terminal = vscode.window.createTerminal(cliTerminalOptions(
@@ -163,6 +170,13 @@ class ServiceController {
       vscode.window.showInformationMessage('The extension did not start the current service, so it was left running.');
       return;
     }
+    this.terminal.dispose();
+    this.terminal = undefined;
+  }
+
+  /** Stop only a service terminal owned by the extension before replacing its executable. */
+  async stopForBackendChange() {
+    if (!this.terminal) return;
     this.terminal.dispose();
     this.terminal = undefined;
   }
@@ -184,9 +198,9 @@ async function reportStartError(error) {
     vscode.window.showErrorMessage(message);
     return;
   }
-  const action = await vscode.window.showErrorMessage(message, 'Open Executable Setting');
-  if (action === 'Open Executable Setting') {
-    await vscode.commands.executeCommand('workbench.action.openSettings', 'clusterWatcher.executable');
+  const action = await vscode.window.showErrorMessage(message, 'Manage Backend');
+  if (action === 'Manage Backend') {
+    await vscode.commands.executeCommand('clusterWatcher.manageBackend');
   }
 }
 
@@ -575,6 +589,8 @@ async function copyServiceCommand() {
 
 /** Run ``cluster-watcher setup`` in a terminal, since the wizard is interactive. */
 async function runSetup() {
+  const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
+  await backendManager.ensureAvailable(configured);
   const settings = configuration();
   await validateExecutable(settings.executable);
   const terminal = vscode.window.createTerminal(cliTerminalOptions('Cluster Watcher Setup', settings, ['setup']));
@@ -587,6 +603,8 @@ async function runSetup() {
  * service reuses the re-opened session on its next refresh.
  */
 async function login(machine, refresh) {
+  const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
+  await backendManager.ensureAvailable(configured);
   const settings = configuration();
   await validateExecutable(settings.executable);
   const terminal = vscode.window.createTerminal(cliTerminalOptions(
@@ -604,6 +622,8 @@ async function login(machine, refresh) {
 
 /** Open the CLI's configuration file in an editor tab, offering setup when it is missing. */
 async function editConfig() {
+  const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
+  await backendManager.ensureAvailable(configured);
   const path = await resolveConfigPath(configuration());
   try {
     await vscode.workspace.fs.stat(vscode.Uri.file(path));
@@ -641,7 +661,11 @@ function activate(context) {
   const statusProvider = new SidebarProvider('status');
   const monitor = new JobMonitor();
   const coordinator = new RefreshCoordinator(client, jobsProvider, statusProvider, monitor);
-  const controller = new ServiceController(client, () => coordinator.refresh());
+  let controller;
+  backendManager = new BackendManager(vscode, context, extensionManifest.version, {
+    onWillChange: () => controller?.stopForBackendChange(),
+  });
+  controller = new ServiceController(client, () => coordinator.refresh(), backendManager);
   const logProvider = new JobLogDocumentProvider(client);
   const scriptProvider = new JobScriptDocumentProvider(client);
 
@@ -667,6 +691,7 @@ function activate(context) {
     vscode.commands.registerCommand('clusterWatcher.runSetup', () => runSetup().catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.login', (machine) => login(machine, () => coordinator.refresh()).catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.editConfig', () => editConfig().catch(reportError)),
+    vscode.commands.registerCommand('clusterWatcher.manageBackend', () => backendManager.manage().catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.openSettings', () => vscode.commands.executeCommand('workbench.action.openSettings', CONFIGURATION_SECTION)),
     vscode.workspace.onDidSaveTextDocument((document) => void validateSavedConfig(document)),
     vscode.commands.registerCommand('clusterWatcher.cancelJob', async (cluster, jobId, name) => {
@@ -705,7 +730,16 @@ function activate(context) {
   );
   coordinator.schedule();
   void coordinator.refresh();
-  if (configuration().autoStart) void controller.start().catch(reportStartError);
+  const initialization = backendManager.initialize();
+  if (configuration().autoStart) {
+    void initialization.then(() => controller.start()).catch(reportStartError);
+  } else {
+    void initialization.then(async () => {
+      if (await client.isClusterWatcherService()) return;
+      const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
+      await backendManager.offerFirstUse(configured);
+    }).catch(reportError);
+  }
 }
 
 /** VS Code disposes all registered resources through the extension context. */

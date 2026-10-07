@@ -5,6 +5,8 @@ vscode/node_modules/
 vscode/*.vsix
 vscode/*.tgz
 vscode/.vscode-test/
+vscode/backend-assets/
+vscode/backend-manifest.json
 
 # Personal files kept locally, never published.
 clusters.toml

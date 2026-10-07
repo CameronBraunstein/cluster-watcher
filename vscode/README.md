@@ -7,9 +7,15 @@ MFA, Slurm queries, and refresh scheduling.
 
 ## Requirements
 
-- The **`cluster-watcher` command-line program** must be installed on the
-  machine running the extension (the remote host under Remote SSH). The
-  extension does not bundle it. On Linux or macOS, install the prebuilt executable with
+- On first use, the extension looks for an existing **`cluster-watcher`**
+  command on the machine running the extension (the remote host under Remote
+  SSH). If it cannot run one, choose **Install and Add to PATH**, **Use Only in
+  VS Code**, or **Choose Existing Executable**. The first two choices download
+  the exact backend version paired with the extension and verify its embedded
+  SHA-256 checksum before running it. You can change the choice at any time
+  with **Cluster Watcher: Manage Backend Installation**.
+- A manual installation remains supported. On Linux or macOS, install the
+  prebuilt executable with
 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/CameronBraunstein/cluster-watcher/master/install.sh | bash -s -- --add-to-path
@@ -22,8 +28,9 @@ MFA, Slurm queries, and refresh scheduling.
   complete Unix OpenSSH multiplexing path, so run both the executable and this
   workspace extension inside WSL for those clusters.
 - SSH access to each Slurm cluster from that machine.
-- If `cluster-watcher` is not on `PATH`, set `clusterWatcher.executable` to its
-  absolute path.
+- If an existing executable is not on `PATH`, select it through **Manage
+  Backend Installation**. `clusterWatcher.executable` remains a fallback for
+  settings created before the managed installer was introduced.
 
 **My Jobs** uses collapsible state groups instead of terminal-style banners.
 Each job is another collapsible card whose compact form contains its name, ID,
@@ -69,6 +76,28 @@ reported by `cluster-watcher config --path` in an editor tab), and **Settings**.
 The same actions are in the Command Palette and the view's toolbar/overflow
 menu. Saving the configuration from VS Code validates it immediately (via
 `cluster-watcher list`) and reports any error; restart the service to apply it.
+
+The extension-managed backend is installed per user on the extension host:
+
+- Linux: `~/.local/share/cluster-watcher/vscode-backend/bin`
+- macOS: `~/Library/Application Support/Cluster Watcher/vscode-backend/bin`
+- Windows: `%LOCALAPPDATA%\Programs\ClusterWatcher\vscode-backend\bin`
+
+**Use Only in VS Code** exposes that directory to new integrated terminals
+through VS Code's terminal environment API without changing the system PATH.
+**Install and Add to PATH** additionally writes one marked block to the
+current Unix shell profile, or one entry to the Windows user PATH. Open a new
+terminal after changing PATH. The ownership manifest records the exact change;
+**Manage Backend Installation** can add or remove it later without touching a
+pre-existing PATH entry.
+
+The same management command can switch between the managed and an existing
+executable, repair/update the managed copy, or uninstall it. Switching to an
+external executable keeps the managed copy available for a later switch.
+Uninstalling the managed backend removes only extension-owned files and PATH
+changes and preserves Cluster Watcher configuration. Removing the VS Code
+extension itself intentionally leaves a standalone managed backend in place;
+use the management command first if it should also be removed.
 
 If a service is reachable but was started without `--jobs-api` (for example
 by hand as `cluster-watcher serve`), **Cluster Status** still works, while
@@ -127,20 +156,21 @@ terminal closes after a successful login, and the card recovers on the next
 refresh. **Cluster Watcher: Log In Again to Closed SSH Sessions** in the
 Command Palette does the same for every closed cluster.
 
-The `cluster-watcher` executable must be installed on the machine running the
-VS Code extension host. Set `clusterWatcher.executable` to an absolute path if
-it is not on that host's `PATH`, and set `clusterWatcher.configPath` when the
-normal configuration location should not be used.
+The `cluster-watcher` executable is resolved on the machine running the VS Code
+extension host. Set `clusterWatcher.configPath` when the normal configuration
+location should not be used.
 
-The extension validates that setting with `<executable> --help` before opening
-the service terminal. If validation fails, use the notification's **Open
-Executable Setting** button and set `clusterWatcher.executable` in VS Code
-`settings.json`. The extension's `package.json` only declares the setting; it
-is not the user configuration file.
+The extension validates every managed or selected executable with
+`<executable> --help` before opening the service terminal. If validation fails,
+use the notification's **Manage Backend** button to repair the managed copy or
+choose another executable.
 
 The extension is declared as a workspace extension. Under VS Code Remote SSH,
 install it on the remote side so its process, the executable, and reusable SSH
-control sockets all live on that remote development host.
+control sockets all live on that remote development host. Backend selection is
+independent for local, WSL, Remote SSH, and container extension hosts.
+Workspace Trust is required because the extension downloads/runs a native
+executable and opens SSH sessions.
 
 The extension is licensed GPL-3.0-or-later (`LICENSE`). The original Activity
 Bar icon and the Marketplace icon (`media/icon.png`, rendered from
