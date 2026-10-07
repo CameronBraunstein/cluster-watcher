@@ -174,3 +174,64 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" assets/* --title "Cluster Watcher $GITHUB_REF_NAME" --generate-notes --verify-tag
+
+  marketplace:
+    name: Publish VS Code Marketplace extension
+    needs: [release, vsix]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: vscode
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+          path: vscode/marketplace-assets
+      - name: Check Marketplace identity configuration
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          missing=()
+          [[ -n "$AZURE_CLIENT_ID" ]] || missing+=(AZURE_CLIENT_ID)
+          [[ -n "$AZURE_TENANT_ID" ]] || missing+=(AZURE_TENANT_ID)
+          [[ -n "$AZURE_SUBSCRIPTION_ID" ]] || missing+=(AZURE_SUBSCRIPTION_ID)
+          if (( ${#missing[@]} )); then
+            echo "::error::Add these secrets to the protected release environment: ${missing[*]}"
+            exit 1
+          fi
+      - name: Sign in to Azure with GitHub OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Report the Marketplace publisher member ID
+        shell: bash
+        run: |
+          profile_id="$(az rest \
+            --url https://app.vssps.visualstudio.com/_apis/profile/profiles/me \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 \
+            --query id --output tsv)"
+          [[ -n "$profile_id" ]]
+          echo "Marketplace publisher member ID: $profile_id" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Publish the CI-built VSIX
+        shell: bash
+        run: |
+          npx --no-install vsce publish \
+            --azure-credential \
+            --packagePath "marketplace-assets/cluster-watcher-${GITHUB_REF_NAME#v}.vsix" \
+            --skip-duplicate

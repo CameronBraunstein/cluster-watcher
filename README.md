@@ -1572,30 +1572,49 @@ The extension is published as `CameronBraunstein.cluster-watcher` (publisher
 extension ID; changing either creates a different extension, and local
 installs would start with an empty job archive.
 
-1. For each release, bump the version in both `vscode/package.json` and
-   `pyproject.toml` and add a dated entry to `vscode/CHANGELOG.md`.
-2. Tag the release (`git tag vX.Y.Z && git push origin vX.Y.Z`) so GitHub
-   Actions builds all six matching binaries first, generates
-   `backend-manifest.json` from their actual bytes, embeds it in the VSIX, and
-   attaches both files to the release. Download that generated manifest beside
-   `vscode/package.json` before a separate local Marketplace publish.
-   `npm run package` and `npm run publish` run `scripts/check-publish.js` first
-   and refuse stale, missing, or incomplete backend metadata. The code is
-   licensed GPL-3.0-or-later (`LICENSE`); the icons keep their CC0-1.0
-   dedication.
-3. Choose Marketplace authentication following the current
-   [official publishing guide](https://code.visualstudio.com/api/working-with-extensions/publishing-extension).
-   Interactive `vsce login` currently accepts an Azure DevOps personal access
-   token, but global PATs are scheduled for retirement on December 1, 2026;
-   prefer Microsoft Entra ID for durable automated publishing.
-4. If using the currently supported interactive flow, run `npx vsce login
-   <publisher-id>` from `vscode/` and provide the token.
-5. Run `npm test`, `npm run test:integration`, `npm run package`,
-   inspect/install the resulting VSIX, and finally run `npm run publish`
-   from `vscode/`.
+Marketplace publication is part of the tag-triggered release workflow. It
+waits for the GitHub Release, downloads the `vsix` artifact produced earlier
+in that same workflow run, and gives that exact file to `vsce`. There is no
+local download/re-upload step and no second package build. `--skip-duplicate`
+makes a rerun safe after a partially successful release.
 
-Marketplace publication is an external release action and is intentionally
-not performed by `install.sh` or the repository test suite.
+Configure its passwordless Microsoft Entra identity once:
+
+1. Create a user-assigned managed identity in Azure, grant it the Reader role,
+   and record its client ID, tenant ID, and subscription ID.
+2. Add a federated credential for this GitHub repository, scoped to the
+   protected `release` environment. Use the GitHub Actions scenario in the
+   Azure portal so Azure creates the correct issuer, subject, and
+   `api://AzureADTokenExchange` audience.
+3. Add `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID` as
+   secrets on the repository's `release` environment. Protect that environment
+   with required reviewers; if deployment refs are restricted, allow `master`
+   for the setup workflow and version tags for real releases.
+4. Run **Marketplace identity setup** from the repository's Actions page. Copy
+   the `Marketplace publisher member ID` from its job summary, add that ID as a
+   member of publisher `CameronBraunstein` in the
+   [Marketplace management page](https://marketplace.visualstudio.com/manage/publishers/),
+   and give it the Contributor role.
+
+After that one-time setup, each release only requires matching version updates
+in `pyproject.toml`, `vscode/package.json`, and `vscode/package-lock.json`, a
+dated `vscode/CHANGELOG.md` entry, and a pushed `vX.Y.Z` tag. The workflow runs
+the tests, builds all six native programs, generates and embeds
+`backend-manifest.json`, creates the GitHub Release, and publishes the same
+VSIX as `CameronBraunstein.cluster-watcher`. The three Azure values identify
+the workload but are kept as environment secrets; GitHub OIDC supplies a new
+short-lived token for each run, so no Marketplace PAT is stored.
+
+For source-checkout packaging only, place the generated manifest beside
+`vscode/package.json` first. `npm run package` and the emergency local
+`npm run publish` command run `scripts/check-publish.js` and deliberately
+refuse stale, missing, or incomplete release metadata. The normal automated
+release does not invoke the local publish script. The code is licensed
+GPL-3.0-or-later (`LICENSE`); the icons keep their CC0-1.0 dedication.
+
+See the current [VS Code secure automated publishing guide](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)
+and [GitHub's Azure OIDC guide](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-azure)
+for the identity model and security details.
 
 ## Tests
 
@@ -1634,7 +1653,10 @@ all six native executables, runs the extension tests, packages the
 platform-neutral VSIX, attests executable provenance, and creates a GitHub
 Release. Alongside the binaries it includes `install.sh`, `uninstall.sh`,
 `install.ps1`, `uninstall.ps1`, `clusters.example.toml`, `PLATFORMS.json`, and
-the shared `SHA256SUMS`. Marketplace publishing stays a manual step.
+the shared `SHA256SUMS`. After the GitHub Release succeeds, the Marketplace job
+uses Microsoft Entra workload identity federation to publish the exact VSIX
+artifact from the same run. Configure that identity with the one-time steps in
+[Publish to the VS Code Marketplace](#publish-to-the-vs-code-marketplace).
 
 Release-environment secrets optionally enable platform trust before checksums
 are generated: `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD`, and

@@ -35,3 +35,33 @@ test('publish check rejects missing, stale, or incomplete backend metadata', asy
   assert.ok(problems.some((problem) => /version/.test(problem)));
   assert.ok(problems.some((problem) => /six/.test(problem)));
 });
+
+test('release workflow publishes the CI-built VSIX with short-lived credentials', async () => {
+  const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'release.yml');
+  const workflow = await fs.readFile(workflowPath, 'utf8');
+  const marketplaceJob = workflow.match(/\n  marketplace:\n([\s\S]+)$/)?.[1];
+
+  assert.ok(marketplaceJob, 'release workflow must define a Marketplace job');
+  assert.match(marketplaceJob, /needs: \[release, vsix\]/);
+  assert.match(marketplaceJob, /environment: release/);
+  assert.match(marketplaceJob, /id-token: write/);
+  assert.match(marketplaceJob, /uses: azure\/login@v3/);
+  assert.match(marketplaceJob, /name: vsix/);
+  assert.match(marketplaceJob, /--azure-credential/);
+  assert.match(marketplaceJob, /--packagePath "marketplace-assets\/cluster-watcher-\$\{GITHUB_REF_NAME#v\}\.vsix"/);
+  assert.match(marketplaceJob, /--skip-duplicate/);
+});
+
+test('Marketplace identity can be verified before publishing a release', async () => {
+  const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'marketplace-identity.yml');
+  const workflow = await fs.readFile(workflowPath, 'utf8');
+
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /environment: release/);
+  assert.match(workflow, /id-token: write/);
+  assert.match(workflow, /uses: azure\/login@v3/);
+  assert.match(workflow, /app\.vssps\.visualstudio\.com\/_apis\/profile\/profiles\/me/);
+  for (const name of ['AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID']) {
+    assert.match(workflow, new RegExp(`secrets\\.${name}`));
+  }
+});

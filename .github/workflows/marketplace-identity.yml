@@ -1,0 +1,50 @@
+# Run this once while configuring Marketplace publishing. It verifies the
+# GitHub-to-Azure OIDC trust and reports the identity ID that must be added to
+# the Visual Studio Marketplace publisher as a Contributor.
+name: Marketplace identity setup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  identity:
+    name: Verify and report publisher identity
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check identity configuration
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          missing=()
+          [[ -n "$AZURE_CLIENT_ID" ]] || missing+=(AZURE_CLIENT_ID)
+          [[ -n "$AZURE_TENANT_ID" ]] || missing+=(AZURE_TENANT_ID)
+          [[ -n "$AZURE_SUBSCRIPTION_ID" ]] || missing+=(AZURE_SUBSCRIPTION_ID)
+          if (( ${#missing[@]} )); then
+            echo "::error::Add these secrets to the protected release environment: ${missing[*]}"
+            exit 1
+          fi
+      - name: Sign in to Azure with GitHub OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Report the Marketplace publisher member ID
+        shell: bash
+        run: |
+          profile_id="$(az rest \
+            --url https://app.vssps.visualstudio.com/_apis/profile/profiles/me \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 \
+            --query id --output tsv)"
+          [[ -n "$profile_id" ]]
+          echo "Marketplace publisher member ID: $profile_id" | tee -a "$GITHUB_STEP_SUMMARY"

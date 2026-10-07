@@ -2,7 +2,7 @@
   "name": "cluster-watcher",
   "displayName": "Cluster Watcher",
   "description": "Monitor Cluster Watcher Slurm jobs and partition capacity from the VS Code sidebar.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "CameronBraunstein",
   "license": "GPL-3.0-or-later",
   "icon": "media/icon.png",
