@@ -52,13 +52,18 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   );
   // viewContainer/title is a proposed API that published extensions cannot use.
   assert.equal(manifest.contributes.menus['viewContainer/title'], undefined);
-  for (const item of manifest.contributes.menus['view/title']) {
-    assert.equal(item.when, 'view == clusterWatcher.jobs');
-  }
+  assert.deepEqual(manifest.contributes.menus['view/title'], [{
+    command: 'clusterWatcher.showMenu', when: 'view == clusterWatcher.jobs', group: 'navigation@1',
+  }]);
   assert.match(manifest.contributes.menus['editor/title'][0].when, /cluster-watcher-log/);
   const commands = new Map(manifest.contributes.commands.map((command) => [command.command, command]));
   assert.equal(commands.get('clusterWatcher.refresh').icon, '$(refresh)');
   assert.equal(commands.get('clusterWatcher.startService').icon, '$(play)');
+  assert.equal(commands.get('clusterWatcher.showMenu').icon, '$(menu)');
+  const extensionSource = readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  assert.match(extensionSource, /this\.view\.description = viewFreshness\(this\.updatedAt, this\.checkedAt\)/);
+  assert.match(extensionSource, /this\.jobsProvider\.update\(jobs\.value\.payload, checkedAt\)/);
+  assert.match(extensionSource, /this\.statusProvider\.update\(status\.value\.payload, checkedAt\)/);
 });
 
 test('executable validation accepts a program and explains a missing setting', async () => {

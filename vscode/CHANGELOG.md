@@ -26,6 +26,11 @@ All notable changes to the Cluster Watcher VS Code extension.
   browser dashboard.
 - Job-ID badges now use rectangular corners, while compact cards use less
   internal padding and tighter spacing between cards.
+- Pending cards now omit `.err` and `.out`. Archived pending jobs continue to
+  refresh and gain both log actions as soon as their Slurm state advances.
+- **My Jobs** and **Cluster Status** now show compact updated/checked timestamps
+  beside their native headings. One menu button beside **My Jobs** replaces the
+  separate title actions with a shared action picker.
 
 ## 0.1.3 — 2026-10-07
 

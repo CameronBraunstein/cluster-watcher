@@ -699,7 +699,10 @@ sort by cluster and then partition, while resources sort by GPU, CPU, and node
 counts. Group and card disclosure state is retained across automatic browser
 refreshes while that page remains open.
 
-An expanded card has **Archive**, **Open .err**, and **Open .out** buttons.
+An expanded non-pending card has **Archive**, **Open .err**, and **Open .out**
+buttons. Pending cards omit both log actions. Archived snapshots continue to
+receive refreshed job state, so the actions appear in place if an archived
+pending job later starts or finishes.
 The log controls retrieve a bounded 100-line tail only when clicked and show
 the remote path and whether the result was truncated. Archived cards move into
 the collapsed **Archive** group at the bottom and offer **Restore**. Both lists
@@ -1425,7 +1428,8 @@ Cluster Watcher Activity Bar container with two sidebar views:
   `DD`) followed by 24-hour `HH:mm` local time. Expanded cards show resource
   requests, state-relevant lifecycle times, any dependency (each referenced
   job ID jumps to its card), archive controls, stdout/stderr and batch-script
-  actions, and, for running or pending jobs, an **End** button that confirms
+  actions (stdout/stderr are hidden while pending), and, for running or pending
+  jobs, an **End** button that confirms
   before cancelling the job. The detail timestamps and compact action row
   remain on one line: archive uses an icon and the open actions use **.err**,
   **.out**, and **script** labels.
@@ -1438,9 +1442,10 @@ Cluster Watcher Activity Bar container with two sidebar views:
   for Slurm's message.
 
 The redundant in-webview **My Jobs** and **Cluster Status** titles are omitted;
-the native collapsible VS Code view headings provide those labels. The
-**Refresh Sidebar** and **Start Service & SSH Sessions** actions appear once, in
-the **My Jobs** view's title bar, rather than once on each view.
+the native collapsible VS Code view headings provide those labels. Each heading
+has a compact `Updated <date and time> · Checked <time>` description. One menu
+button beside **My Jobs** opens all service, dashboard, configuration, settings,
+and backend actions instead of displaying separate title buttons.
 
 The Activity Bar SVG depicts three server boxes with a magnifying glass over
 their upper-right corner. It was created specifically for this project and is

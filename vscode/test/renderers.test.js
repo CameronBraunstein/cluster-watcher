@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { DEFAULT_DATE_FORMAT, localTime, setDateFormat, progressSpec, progressView, commandAttributes, escapeHtml, renderJobsApiDisabled, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, lifecycle, renderJobs, renderStatus, stateGroup, waitCell } = require('../renderers');
+const { DEFAULT_DATE_FORMAT, localTime, setDateFormat, progressSpec, progressView, commandAttributes, escapeHtml, renderJobsApiDisabled, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
 
 test('jobs retain terminal state grouping and lifecycle visibility', () => {
   const jobs = [
@@ -175,6 +175,17 @@ test('every card offers a compact script action for its job', () => {
   assert.match(html, /data-command="clusterWatcher\.openScript" data-args="\[&quot;cluster_0&quot;,&quot;5&quot;\]"[^>]*>script<\/a>/);
 });
 
+test('pending jobs hide log actions until a refreshed archived snapshot leaves pending', () => {
+  const pending = { job_id: '7', name: 'pending', cluster: 'cluster_0', state: 'PENDING', submit_at: '2026-10-01T10:00:00Z' };
+  const completedArchive = { ...pending, name: 'archived-completed', state: 'COMPLETED', end_at: '2026-10-01T10:05:00Z' };
+  const html = renderJobs({ jobs: [pending], archived_jobs: [completedArchive] });
+  const card = name => html.match(new RegExp(`<summary data-full-name="${name}">.*?</details>`, 's'))[0];
+
+  assert.doesNotMatch(card('pending'), /clusterWatcher\.openLog/);
+  assert.match(card('pending'), /clusterWatcher\.openScript/);
+  assert.equal((card('archived-completed').match(/clusterWatcher\.openLog/g) || []).length, 2);
+});
+
 test('jobs-API-disabled view explains the fix and offers copy and retry', () => {
   const html = renderJobsApiDisabled('My Jobs', "'cluster-watcher' 'serve' '--jobs-api'");
   assert.match(html, /started without <code>--jobs-api<\/code>/);
@@ -229,7 +240,7 @@ test('pending wait counts down and the webview re-runs the shared code', () => {
   assert.match(html, /<span class="job-progress" data-progress="\{&quot;group&quot;:&quot;RUNNING&quot;/);
   assert.match(html, /function progressView\(spec, now\)/);
   assert.match(html, /setInterval\(tick, 5000\)/);
-  assert.match(html, /<div class="meta" data-updated="2026-10-06T10:00:00Z">/);
+  assert.doesNotMatch(html, /<div class="meta"/);
   assert.match(html, /event\.data\?\.type !== 'checked'/);
 });
 
@@ -331,6 +342,14 @@ test('dates use DD.MM.YYYY by default and follow the configured pattern', () => 
   } finally {
     setDateFormat();
   }
+});
+
+test('view freshness combines the updated date/time with the latest check time', () => {
+  const updated = new Date(2026, 9, 8, 14, 5, 0).toISOString();
+  const checked = new Date(2026, 9, 8, 14, 6, 7).getTime();
+  assert.equal(viewFreshness(updated, checked), 'Updated 08.10.2026 14:05 · Checked 14:06:07');
+  assert.equal(viewFreshness(updated), 'Updated 08.10.2026 14:05');
+  assert.equal(viewFreshness(undefined, checked), 'Checked 14:06:07');
 });
 
 test('a closed SSH session offers a login button on the cluster card', () => {

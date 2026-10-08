@@ -5,9 +5,10 @@ const extensionManifest = require('./package.json');
 const { JobArchive } = require('./archive');
 const { BackendManager } = require('./backend');
 const { LOG_TAIL_LINES, logDocumentContent, logRequestPath, prependLogPage, virtualLogPath } = require('./logs');
+const { showSidebarMenu } = require('./menu');
 const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = require('./events');
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
-const { isFailureGroup, jobRef, setDateFormat, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup } = require('./renderers');
+const { isFailureGroup, jobRef, setDateFormat, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness } = require('./renderers');
 const {
   ExecutableValidationError, jobsApiDisabled, responseError, cliTerminalOptions, configurationError, resolveConfigPath, serviceArguments, serviceCommand, validateExecutable,
 } = require('./service');
@@ -214,10 +215,13 @@ class SidebarProvider {
     /** The last data received from the service, and whether the view currently shows it. */
     this.payload = undefined;
     this.showingData = false;
+    this.updatedAt = undefined;
+    this.checkedAt = undefined;
   }
 
   resolveWebviewView(view) {
     this.view = view;
+    this.updateDescription();
     // Command URIs stay disabled: buttons post a message and receive() enforces WEBVIEW_COMMANDS.
     view.webview.options = { enableScripts: true };
     view.webview.onDidReceiveMessage((message) => this.receive(message));
@@ -230,6 +234,8 @@ class SidebarProvider {
    * which advances its own times, and tell it when the check happened.
    */
   checked(at) {
+    this.checkedAt = at;
+    this.updateDescription();
     if (!this.view) return;
     if (!this.showingData && this.payload) this.render();
     else void this.view.webview.postMessage({ type: 'checked', at });
@@ -260,8 +266,22 @@ class SidebarProvider {
     return this.kind === 'jobs' ? 'My Jobs' : 'Cluster Status';
   }
 
-  update(payload) {
+  /** Refresh the stable, visible view description with collection/check times. */
+  updateDescription() {
+    if (!this.view) return;
+    this.view.description = viewFreshness(this.updatedAt, this.checkedAt) || undefined;
+  }
+
+  /** Record when the current payload changed and when the request completed. */
+  recordRefresh(payload, checkedAt) {
     this.payload = payload;
+    this.updatedAt = payload.generated_at || payload.updated_at;
+    this.checkedAt = checkedAt;
+    this.updateDescription();
+  }
+
+  update(payload, checkedAt = Date.now()) {
+    this.recordRefresh(payload, checkedAt);
     this.render();
   }
 
@@ -301,8 +321,8 @@ class JobsSidebarProvider extends SidebarProvider {
     this.render();
   }
 
-  update(payload) {
-    this.payload = payload;
+  update(payload, checkedAt = Date.now()) {
+    this.recordRefresh(payload, checkedAt);
     const stillActive = new Set((payload.jobs || [])
       .filter((job) => ['RUNNING', 'PENDING'].includes(stateGroup(job.state)))
       .map(jobRef));
@@ -528,7 +548,7 @@ class RefreshCoordinator {
       this.etags.jobs = jobs.value.etag;
       // The monitor reads the cancelling set before the provider prunes it.
       this.monitor.update(jobs.value.payload, this.jobsProvider.cancelling);
-      this.jobsProvider.update(jobs.value.payload);
+      this.jobsProvider.update(jobs.value.payload, checkedAt);
     } else if (jobsApiDisabled(jobs.reason)) {
       this.etags.jobs = undefined;
       this.monitor.jobsApiDisabled();
@@ -542,7 +562,7 @@ class RefreshCoordinator {
       this.statusProvider.checked(checkedAt);
     } else if (status.status === 'fulfilled') {
       this.etags.status = status.value.etag;
-      this.statusProvider.update(status.value.payload);
+      this.statusProvider.update(status.value.payload, checkedAt);
     } else {
       this.etags.status = undefined;
       this.statusProvider.error(status.reason);
@@ -681,6 +701,7 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('clusterWatcher.stopService', () => controller.stop()),
     vscode.commands.registerCommand('clusterWatcher.refresh', () => coordinator.refresh()),
+    vscode.commands.registerCommand('clusterWatcher.showMenu', () => showSidebarMenu(vscode)),
     vscode.commands.registerCommand('clusterWatcher.openDashboard', () => vscode.env.openExternal(vscode.Uri.parse(configuration().backendUrl))),
     vscode.commands.registerCommand('clusterWatcher.showServiceTerminal', () => controller.showTerminal()),
     vscode.commands.registerCommand('clusterWatcher.archiveJob', async (key) => {

@@ -13,7 +13,7 @@ const EXPECTED_COMMANDS = [
   'clusterWatcher.startService', 'clusterWatcher.stopService', 'clusterWatcher.refresh',
   'clusterWatcher.openDashboard', 'clusterWatcher.showServiceTerminal', 'clusterWatcher.loadMoreLog',
   'clusterWatcher.runSetup', 'clusterWatcher.editConfig', 'clusterWatcher.openSettings',
-  'clusterWatcher.manageBackend',
+  'clusterWatcher.manageBackend', 'clusterWatcher.showMenu',
   'clusterWatcher.copyServiceCommand', 'clusterWatcher.archiveJob', 'clusterWatcher.restoreJob', 'clusterWatcher.openLog', 'clusterWatcher.openScript', 'clusterWatcher.cancelJob',
 ];
 

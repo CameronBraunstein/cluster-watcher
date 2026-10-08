@@ -58,8 +58,10 @@ on one line at that width. Expand a card to see details and to:
 
 - select the archive-box icon and move it into the collapsed **Archive** group
   at the bottom, or **Restore** it later;
-- select **.err** or **.out** to open that stream as a read-only VS Code
-  document;
+- once a job has left the pending group, select **.err** or **.out** to open
+  that stream as a read-only VS Code document. Pending cards omit both actions;
+  an archived pending card receives refreshed state and gains them when it
+  starts or finishes;
 - select **script** to view the Slurm batch script the job ran, as a
   read-only, shell-highlighted document. For queued and running jobs this is
   Slurm's exact copy of the submitted script. Slurm usually discards that copy
@@ -80,8 +82,9 @@ refreshes: the webview reports each expand/collapse to the extension, which
 renders the remembered state into every refreshed page (for the current VS Code
 session). Cluster names are collapsible headings in **Cluster Status**. The
 native **My Jobs** and **Cluster Status** view headings replace redundant titles
-inside each webview. Refresh and service-start buttons appear once, in the
-**My Jobs** view's title bar.
+inside each webview. Each heading displays `Updated <date and time> · Checked
+<time>`. A single menu button beside **My Jobs** opens refresh, service,
+dashboard, configuration, settings, and backend-management actions.
 
 Log documents initially contain the newest 2,000 lines. If more output exists,
 use the upward-arrow **Load 2,000 Older Lines** editor-title action; each click
@@ -129,8 +132,8 @@ Refreshes are conditional: the extension sends the previous response's ETag
 and the service answers `304 Not Modified` when your jobs and the cluster
 status are unchanged, so the views are not rebuilt (no flicker, and scroll and
 hover are kept). Progress bars, elapsed times, and wait estimates still count
-on their own every few seconds, and the "Updated" line shows when data last
-changed and when it was last checked.
+on their own every few seconds. The view-heading description shows when data
+last changed and when it was last checked.
 
 In **Cluster Status**, a wait cell without an estimate says why: `DENY` (your
 account may not use the partition), `min` (below its minimum GPU request),

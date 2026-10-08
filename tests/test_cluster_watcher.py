@@ -1038,6 +1038,7 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertIn("/api/v1/jobs/", PAGE)
         self.assertIn("data-log-stream=\"err\"", PAGE)
         self.assertIn("data-log-stream=\"out\"", PAGE)
+        self.assertIn("jobsApiEnabled && group !== 'PENDING'", PAGE)
         self.assertIn("Loading .${stream} tail", PAGE)
         self.assertIn("data-running-progress", PAGE)
         self.assertIn("data-pending-progress", PAGE)

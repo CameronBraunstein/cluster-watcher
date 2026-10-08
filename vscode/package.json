@@ -53,6 +53,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "clusterWatcher.showMenu",
+        "title": "Cluster Watcher Actions",
+        "icon": "$(menu)"
+      },
+      {
         "command": "clusterWatcher.openDashboard",
         "title": "Cluster Watcher: Open Web Dashboard"
       },
@@ -113,34 +118,9 @@
     "menus": {
       "view/title": [
         {
-          "command": "clusterWatcher.refresh",
+          "command": "clusterWatcher.showMenu",
           "when": "view == clusterWatcher.jobs",
           "group": "navigation@1"
-        },
-        {
-          "command": "clusterWatcher.startService",
-          "when": "view == clusterWatcher.jobs",
-          "group": "navigation@2"
-        },
-        {
-          "command": "clusterWatcher.editConfig",
-          "when": "view == clusterWatcher.jobs",
-          "group": "navigation@3"
-        },
-        {
-          "command": "clusterWatcher.runSetup",
-          "when": "view == clusterWatcher.jobs",
-          "group": "config@1"
-        },
-        {
-          "command": "clusterWatcher.openSettings",
-          "when": "view == clusterWatcher.jobs",
-          "group": "config@2"
-        },
-        {
-          "command": "clusterWatcher.manageBackend",
-          "when": "view == clusterWatcher.jobs",
-          "group": "config@3"
         }
       ],
       "editor/title": [
