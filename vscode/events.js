@@ -1,9 +1,9 @@
 'use strict';
 
-const { jobKey, jobRef, stateGroup } = require('./renderers');
+const { isFailureGroup, jobKey, jobRef, stateGroup } = require('./renderers');
 
 const ACTIVE_GROUPS = new Set(['RUNNING', 'PENDING']);
-const FINISHED_GROUPS = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
+const FINISHED_GROUPS = new Set(['COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED']);
 const NOTIFICATION_MODES = new Set(['all', 'failures', 'off']);
 
 /**
@@ -37,7 +37,7 @@ function shouldNotify(mode, transition, cancelling = new Set()) {
   const effective = NOTIFICATION_MODES.has(mode) ? mode : 'all';
   if (effective === 'off') return false;
   if (transition.group === 'CANCELLED' && cancelling.has(jobRef(transition.job))) return false;
-  return effective === 'all' || transition.group === 'FAILED';
+  return effective === 'all' || isFailureGroup(transition.group);
 }
 
 /** Return the notification sentence for one finished job. */

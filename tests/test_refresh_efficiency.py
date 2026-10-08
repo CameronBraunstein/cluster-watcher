@@ -15,7 +15,7 @@ from helpers import TimedTestCase
 
 MACHINE = Machine("alpha", "alpha.example", "alice")
 ACCOUNTING_LINE = (
-    "10|train|COMPLETED|0:0|2026-09-22T10:00:00|2026-09-22T10:01:00|2026-09-22T10:02:00|60|gpu|"
+    "10|train|COMPLETED|0:0|2026-09-22T10:00:00|2026-09-22T10:01:00|2026-09-22T10:02:00|60|60|gpu|"
     "node01|1|8|cpu=8,gres/gpu=1|None|/logs/job.out|/logs/job.err|/work/alice\n"
 )
 

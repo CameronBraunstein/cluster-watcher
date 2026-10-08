@@ -22,7 +22,7 @@ def accounting_line(
     """Return one allocation-only sacct fixture row."""
     return (
         f"{job_id}|train|{state}|{exit_code}|2026-09-22T10:00:00|"
-        f"2026-09-22T10:01:00|2026-09-22T10:02:00|60|gpu|node01|1|8|"
+        f"2026-09-22T10:01:00|2026-09-22T10:02:00|60|60|gpu|node01|1|8|"
         f"cpu=8,gres/gpu=1|None|"
         f"/logs/job.out|{stderr}|/work/alice\n"
     )
@@ -47,6 +47,8 @@ class JobServiceTests(TimedTestCase):
         self.assertEqual(jobs[0]["submit_at"], "2026-09-22T10:00:00Z")
         self.assertEqual(jobs[0]["start_at"], "2026-09-22T10:01:00Z")
         self.assertEqual(jobs[0]["end_at"], "2026-09-22T10:02:00Z")
+        self.assertEqual(jobs[0]["elapsed_seconds"], 60)
+        self.assertEqual(jobs[0]["time_limit_seconds"], 3600)
 
     def test_accounting_query_batches_ids_and_is_user_scoped(self):
         command = accounting_jobs_command(SINCE, ("123", "456_7"), "alice")
@@ -55,6 +57,7 @@ class JobServiceTests(TimedTestCase):
         self.assertIn("--user=alice", command)
         self.assertIn("--allocations", command)
         self.assertIn("--array", command)
+        self.assertIn("ElapsedRaw,TimelimitRaw,Partition", command)
         self.assertIn("NNodes,NCPUS,AllocTRES", command)
         self.assertTrue(command.startswith("TZ=UTC sacct"))
         self.assertEqual(command.count("sacct"), 1)
@@ -70,6 +73,7 @@ class JobServiceTests(TimedTestCase):
         second = service.query(job_ids=("1000101",), since=SINCE)
 
         self.assertEqual(first["jobs"][0]["state"], "COMPLETED")
+        self.assertEqual(first["jobs"][0]["time_limit_seconds"], 3600)
         self.assertEqual(second["jobs"][0]["job_id"], "1000101")
         collect_accounting_jobs.assert_called_once_with(machine, 5, SINCE, ("1000101",))
 

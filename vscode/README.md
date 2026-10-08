@@ -35,13 +35,25 @@ MFA, Slurm queries, and refresh scheduling.
 **My Jobs** uses collapsible state groups instead of terminal-style banners.
 Each job is another collapsible card whose compact form contains its name,
 progress color bar, and completion/start estimate. Long names stay on one line
-and end in an ellipsis; hover anywhere on the compact card to see the full job
-name. The bar and elapsed/total time stay on one line at the sidebar's narrowest
-expanded width. Expand the card to see the job ID after the cluster, partition,
-and resource summary; click it (or focus it and press Enter) to copy it. A
-running job's calculated limit time, elapsed label, and terminal job's end
-time also appear with the expanded lifecycle details rather than as prose in
-the compact card. Expanded timestamps and the compact icon/short-label action row remain
+and end in an ellipsis; an immediate hover label shows the full job name. Card
+summaries use tight internal padding and reduced spacing between neighboring
+cards. The copyable job-ID badge has rectangular corners.
+Dependency-blocked cards use the short label `dependency`; the expanded
+**Depends on** row retains the complete dependency. Open cards use a horizontal
+divider between the always-visible summary and their details instead of a
+disclosure icon. Opening or closing highlights the card border immediately,
+then fades that highlight more slowly.
+The bar and run/allotted time stay on one line at the sidebar's narrowest
+expanded width, including on completed and failed cards; their denominator
+comes from the time limit retained in Slurm accounting. Jobs are separated into
+**Failed (Early)** and **Failed (Timeout)** groups; the latter is reserved for
+Slurm's explicit `TIMEOUT` state. Expand a card to see the job ID before the
+cluster, partition, and resource summary; click it (or focus it and press
+Enter) to copy it. A running job's calculated limit and a terminal job's end
+time appear with the expanded lifecycle details. Elapsed time is not repeated
+there because it is already in the compact progress fraction. Running cards
+omit **Ended**; pending cards omit both **Launched** and **Ended**. Expanded
+timestamps and the compact icon/short-label action row remain
 on one line at that width. Expand a card to see details and to:
 
 - select the archive-box icon and move it into the collapsed **Archive** group

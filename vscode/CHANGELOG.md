@@ -11,6 +11,21 @@ All notable changes to the Cluster Watcher VS Code extension.
 - Collapsed cards now truncate long job names to one line and expose the full
   name on hover. The copyable job ID moved beside expanded resource metadata,
   and elapsed/end text moved into expanded lifecycle details.
+- Dependency waits now use the compact `dependency` label. Open cards use a
+  summary/detail divider instead of a disclosure icon, card borders flash
+  immediately after layout changes and fade back more slowly, and full-name
+  hover labels appear immediately.
+- Completed and failed cards keep the progress bar's `time run / time allotted`
+  comparison. Elapsed time is no longer duplicated in expanded details;
+  running cards omit **Ended**, and pending cards omit **Launched** and
+  **Ended**. The backend now includes Slurm's accounting time limit for
+  terminal jobs so the denominator and proportional fill remain available
+  after a job leaves the live queue.
+- Job IDs now precede cluster and resource metadata. Failed jobs are split into
+  **Failed (Early)** and **Failed (Timeout)** sections in both the sidebar and
+  browser dashboard.
+- Job-ID badges now use rectangular corners, while compact cards use less
+  internal padding and tighter spacing between cards.
 
 ## 0.1.3 — 2026-10-07
 

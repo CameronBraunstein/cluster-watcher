@@ -37,7 +37,8 @@ test('jobs retain terminal state grouping and lifecycle visibility', () => {
   assert.match(html, /Ended/);
   assert.equal(lifecycle(jobs[1], 'ended'), '—');
   assert.notEqual(lifecycle(jobs[0], 'ended'), 'Unavailable');
-  assert.equal(stateGroup('OUT_OF_MEMORY'), 'FAILED');
+  assert.equal(stateGroup('OUT_OF_MEMORY'), 'FAILED_EARLY');
+  assert.equal(stateGroup('TIMEOUT'), 'FAILED_TIMEOUT');
   assert.match(jobKey(jobs[0]), /cluster_1/);
 });
 
@@ -104,13 +105,16 @@ test('openAttribute falls back to the renderer default', () => {
 
 test('collapsed title truncates with a full-name tooltip and the job ID moves to expanded metadata', () => {
   const html = renderJobs({ jobs: [{ job_id: '2000068_123', name: 'a very long job title indeed', cluster: 'cluster_0', state: 'RUNNING' }] });
-  const cardSummary = html.match(/<summary title="a very long job title indeed">.*?<\/summary>/s)[0];
+  const cardSummary = html.match(/<summary data-full-name="a very long job title indeed">.*?<\/summary>/s)[0];
   assert.match(cardSummary, /<span class="name">a very long job title indeed<\/span>/);
   assert.doesNotMatch(cardSummary, /class="badge job-id/);
   assert.match(html, /\.name\{[^}]*overflow:hidden;text-overflow:ellipsis;white-space:nowrap;/);
+  assert.match(html, /\.card:not\(\[open\]\)>summary\[data-full-name\]:hover::after\{visibility:visible;opacity:1\}/);
+  assert.doesNotMatch(cardSummary, / title=/);
   assert.match(html, /<span class="badge job-id" role="button" tabindex="0" data-copy="2000068_123"/);
-  assert.match(html, /<div class="muted card-meta">cluster_0 \/ no partition · 0 node · 0 GPU · 0 CPU <span class="badge job-id"/);
-  assert.match(html, /\.card-meta>\.job-id\{display:inline-block;/);
+  assert.match(html, /<div class="muted card-meta"><span class="badge job-id"[^>]*>2000068_123<\/span> cluster_0 \/ no partition · 0 node · 0 GPU · 0 CPU<\/div>/);
+  assert.match(html, /\.card-meta>\.job-id\{display:inline-block;font-size:\.88em;margin-right:3px\}/);
+  assert.match(html, /\.job-id\{[^}]*border-radius:0\}/);
   assert.doesNotMatch(html, /\.job-id\{[^}]*width:/);
   assert.match(html, /type: 'copy'/);
 });
@@ -179,14 +183,19 @@ test('jobs-API-disabled view explains the fix and offers copy and retry', () => 
   assert.match(html, /data-command="clusterWatcher\.refresh"/);
 });
 
-test('card title sits beside its arrow and End Job is placed bottom right', () => {
+test('open card uses a divider and every layout toggle flashes its border', () => {
   const html = renderJobs({ jobs: [{ job_id: '1', cluster: 'cluster_0', state: 'RUNNING' }] });
-  assert.match(html, /\.card>summary\{[^}]*list-style:none;display:grid;grid-template-columns:auto minmax\(0,1fr\)/);
-  assert.match(html, /\.card>summary::before\{content:'';grid-column:1;grid-row:1/);
-  assert.match(html, /\.card\[open\]>summary::before\{transform:rotate\(90deg\)\}/);
-  assert.match(html, /\.card-summary-title\{grid-column:2;/);
+  assert.match(html, /\.card\{[^}]*margin:3px 0;/);
+  assert.match(html, /\.card>summary\{position:relative;padding:4px 5px;/);
+  assert.match(html, /\.card\[open\]>summary\{border-bottom:1px solid var\(--vscode-panel-border\)\}/);
+  assert.doesNotMatch(html, /\.card>summary::before/);
+  assert.match(html, /@keyframes card-layout-flash/);
+  assert.match(html, /@keyframes card-layout-flash\{0%\{border-color:var\(--vscode-focusBorder\);box-shadow:0 0 0 1px var\(--vscode-focusBorder\)\}100%\{/);
+  assert.match(html, /\.card\.layout-flash\{animation:card-layout-flash \.9s ease-out both\}/);
+  assert.match(html, /details\.classList\.add\('layout-flash'\)/);
+  assert.match(html, /setTimeout\(\(\) => details\.classList\.remove\('layout-flash'\), 950\)/);
   assert.match(html, /\.actions>\.end-job\{margin-left:auto\}/);
-  // End Job is the last action, so it lands at the right of the bottom row.
+  // End is the last action, so it lands at the right of the bottom row.
   assert.match(html, /<a class="button danger compact-action end-job"[^>]*aria-label="End job">End<\/a><\/div><\/div><\/details>/);
 });
 
@@ -199,9 +208,13 @@ test('running progress keeps advancing from generated_at without new data', () =
   assert.equal(later.label, '40m / 1h');
   assert.ok(later.percent > atRender.percent);
   assert.equal(progressView(progressSpec({ state: 'RUNNING', elapsed_seconds: 600 }, asOf), asOf).label, '10m');
-  // Finished-job timing belongs in expanded details, not the collapsed label.
-  const done = progressSpec({ state: 'COMPLETED', elapsed_seconds: 600 }, asOf);
-  assert.equal(progressView(done, asOf + 3600 * 1000).label, '');
+  // Completed and failed cards compare recorded runtime with the allocation.
+  const done = progressView(progressSpec({ state: 'COMPLETED', elapsed_seconds: 600, time_limit_seconds: 3600 }, asOf), asOf);
+  const failed = progressView(progressSpec({ state: 'FAILED', elapsed_seconds: 1800, time_limit_seconds: 3600 }, asOf), asOf);
+  assert.equal(done.label, '10m / 1h');
+  assert.equal(done.percent, 600 / 3600 * 100);
+  assert.equal(failed.label, '30m / 1h');
+  assert.equal(failed.percent, 50);
 });
 
 test('pending wait counts down and the webview re-runs the shared code', () => {
@@ -209,6 +222,8 @@ test('pending wait counts down and the webview re-runs the shared code', () => {
   const spec = progressSpec({ state: 'PENDING', submit_at: '2026-10-06T09:00:00Z', expected_start_at: '2026-10-06T11:00:00Z' }, asOf);
   assert.match(progressView(spec, asOf).label, /^1h until estimated start/);
   assert.match(progressView(spec, asOf + 30 * 60 * 1000).label, /^30m until estimated start/);
+  const dependency = progressSpec({ state: 'PENDING', reason: 'Dependency: afterok:12(unfulfilled)' }, asOf);
+  assert.equal(progressView(dependency, asOf).label, 'dependency');
 
   const html = renderJobs({ generated_at: '2026-10-06T10:00:00Z', jobs: [{ job_id: '1', cluster: 'c', state: 'RUNNING', elapsed_seconds: 1 }] });
   assert.match(html, /<span class="job-progress" data-progress="\{&quot;group&quot;:&quot;RUNNING&quot;/);
@@ -252,7 +267,8 @@ test('expanded card moves the running deadline down and keeps details and action
     }],
   });
   assert.ok(html.includes(`<dt>Limit</dt><dd>${localTime('2026-09-30T16:01:00Z')}</dd>`));
-  assert.match(html, /<dt>Elapsed<\/dt><dd>1m<\/dd>/);
+  assert.doesNotMatch(html, /<dt>Elapsed<\/dt>/);
+  assert.doesNotMatch(html, /<dt>Ended<\/dt>/);
   assert.match(html, /<span class="muted progress-label">[^<]+ \/ 1h<\/span>/);
   assert.match(html, /\.times dt,\.times dd\{white-space:nowrap\}/);
   assert.match(html, /\.actions\{display:flex;flex-wrap:nowrap;/);
@@ -264,18 +280,37 @@ test('expanded card moves the running deadline down and keeps details and action
   assert.doesNotMatch(html, />Open (?:\.err|\.out|script)<\/a>/);
 });
 
-test('terminal job elapsed and ended text appears only in expanded lifecycle details', () => {
+test('terminal cards keep elapsed time in the compact fraction and end time in details', () => {
   const html = renderJobs({
     jobs: [{
-      job_id: '3', name: 'finished', cluster: 'cluster_0', state: 'COMPLETED', elapsed_seconds: 600,
+      job_id: '3', name: 'finished', cluster: 'cluster_0', state: 'COMPLETED', elapsed_seconds: 600, time_limit_seconds: 3600,
       submit_at: '2026-09-30T15:00:00Z', start_at: '2026-09-30T15:01:00Z', end_at: '2026-09-30T15:11:00Z',
     }],
   });
-  const cardSummary = html.match(/<summary title="finished">.*?<\/summary>/s)[0];
-  assert.match(cardSummary, /<span class="muted progress-label"><\/span>/);
+  const cardSummary = html.match(/<summary data-full-name="finished">.*?<\/summary>/s)[0];
+  assert.match(cardSummary, /<span class="muted progress-label">10m \/ 1h<\/span>/);
   assert.doesNotMatch(cardSummary, />[^<]*(?:elapsed|ended)[^<]*</i);
-  assert.match(html, /<dt>Elapsed<\/dt><dd>10m<\/dd><dt>Ended<\/dt><dd>[^<]+<\/dd>/);
+  assert.doesNotMatch(html, /<dt>Elapsed<\/dt>/);
+  assert.match(html, /<dt>Ended<\/dt><dd>[^<]+<\/dd>/);
   assert.match(html, /\.progress-label:empty\{display:none\}/);
+});
+
+test('expanded lifecycle rows are state-specific and failure groups distinguish timeouts', () => {
+  const jobs = [
+    { job_id: '1', name: 'running-job', cluster: 'c', state: 'RUNNING', submit_at: '2026-10-01T10:00:00Z', start_at: '2026-10-01T10:01:00Z' },
+    { job_id: '2', name: 'pending-job', cluster: 'c', state: 'PENDING', submit_at: '2026-10-01T10:00:00Z' },
+    { job_id: '3', name: 'early-job', cluster: 'c', state: 'OUT_OF_MEMORY', submit_at: '2026-10-01T10:00:00Z', start_at: '2026-10-01T10:01:00Z', end_at: '2026-10-01T10:02:00Z' },
+    { job_id: '4', name: 'timeout-job', cluster: 'c', state: 'TIMEOUT', submit_at: '2026-10-01T10:00:00Z', start_at: '2026-10-01T10:01:00Z', end_at: '2026-10-01T11:01:00Z' },
+  ];
+  const html = renderJobs({ jobs });
+  const card = name => html.match(new RegExp(`<summary data-full-name="${name}">.*?</details>`, 's'))[0];
+
+  assert.doesNotMatch(card('running-job'), /<dt>Ended<\/dt>/);
+  assert.doesNotMatch(card('pending-job'), /<dt>(?:Launched|Ended)<\/dt>/);
+  assert.doesNotMatch(html, /<dt>Elapsed<\/dt>/);
+  assert.ok(html.indexOf('Failed (Early) (1)') < html.indexOf('Failed (Timeout) (1)'));
+  assert.match(html, /data-disclosure-key="group:active:FAILED_EARLY" open><summary>Failed \(Early\) \(1\)<\/summary>/);
+  assert.match(html, /data-disclosure-key="group:active:FAILED_TIMEOUT" open><summary>Failed \(Timeout\) \(1\)<\/summary>/);
 });
 
 test('dates use DD.MM.YYYY by default and follow the configured pattern', () => {

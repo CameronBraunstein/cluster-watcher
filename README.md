@@ -686,11 +686,14 @@ python3 cluster_watcher.py serve --jobs-api
 ```
 
 This replaces the active-only data in **My jobs** with collapsible **Running**,
-**Pending**, **Completed**, **Failed**, and **Cancelled** groups covering the
-last 24 hours; empty groups are omitted. Each job is a collapsed card showing
+**Pending**, **Completed**, **Failed (Early)**, **Failed (Timeout)**, and
+**Cancelled** groups covering the last 24 hours; empty groups are omitted.
+Slurm's explicit `TIMEOUT` state goes into **Failed (Timeout)**; every other
+failure state goes into **Failed (Early)**. Each job is a collapsed card showing
 its name, ID, progress color bar, and current completion/start estimate. Expand
-it to see cluster and partition, state, requested resources,
-submission/launch/end times, and its controls.
+it to see cluster and partition, state, requested resources, relevant lifecycle
+times, and its controls. Pending cards omit launch and end rows, while running
+cards omit the end row.
 The sort controls above each list order cards by the same fields; locations
 sort by cluster and then partition, while resources sort by GPU, CPU, and node
 counts. Group and card disclosure state is retained across automatic browser
@@ -1396,19 +1399,31 @@ or the cluster's state.
 The extension source lives entirely in [`vscode/`](vscode/). It contributes a
 Cluster Watcher Activity Bar container with two sidebar views:
 
-- **My Jobs** follows the running, pending, completed, failed, and cancelled
-  grouping from `cluster-watcher jobs`. State groups and individual job cards
+- **My Jobs** groups jobs as running, pending, completed, failed early, failed
+  by timeout, and cancelled. Slurm `TIMEOUT` jobs use **Failed (Timeout)** and
+  all other failure states use **Failed (Early)**. State groups and individual job cards
   are collapsible; a collapsed card retains a single-line, ellipsized job name
-  (hover it for the full name) and a progress bar with the elapsed/total time
-  or start estimate to its right. These remain on one line at the sidebar's
-  narrowest expanded width. The copyable job ID follows the cluster, partition,
-  and resources in the expanded metadata. Calculated running-job limits,
-  elapsed labels, and terminal-job end times also appear in expanded details.
+  (hover it for the full name) and a progress bar with the run/allotted time
+  or start estimate to its right. Compact cards use tight internal padding and
+  reduced inter-card spacing; the copyable job-ID badge is rectangular.
+  Completed and failed cards retain that
+  runtime comparison using the time limit preserved in Slurm accounting after
+  the job leaves the live queue. Dependency-blocked jobs show the compact
+  label `dependency`, with the full dependency in expanded details. Open cards
+  use a horizontal divider between their summary and details instead of a
+  disclosure icon; opening or closing highlights the card border immediately,
+  then lets the highlight fade more slowly.
+  These remain on one line at the sidebar's narrowest expanded width. The
+  copyable job ID precedes the cluster, partition, and resources in the
+  expanded metadata. Calculated running-job limits and terminal-job end times
+  also appear in expanded details; elapsed time remains in the compact progress
+  fraction instead of being repeated below. Running cards omit **Ended**, and
+  pending cards omit both **Launched** and **Ended**.
   State-group and cluster headings use the 11px
   size of the native view headings, and job titles are slightly smaller. Dates use
   `clusterWatcher.dateFormat` (default `DD.MM.YYYY`, tokens `YYYY`, `YY`, `MM`,
   `DD`) followed by 24-hour `HH:mm` local time. Expanded cards show resource
-  requests, submitted/launched/ended times, any dependency (each referenced
+  requests, state-relevant lifecycle times, any dependency (each referenced
   job ID jumps to its card), archive controls, stdout/stderr and batch-script
   actions, and, for running or pending jobs, an **End** button that confirms
   before cancelling the job. The detail timestamps and compact action row

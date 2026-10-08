@@ -12,7 +12,7 @@ test('first refresh is a silent baseline; later finishes are reported once', () 
   assert.deepEqual(first.finished, []);
 
   const second = jobTransitions(first.states, [job('1', 'FAILED'), job('2', 'COMPLETED'), job('3', 'PENDING')]);
-  assert.deepEqual(second.finished.map(({ job: item, group }) => [item.job_id, group]), [['1', 'FAILED']]);
+  assert.deepEqual(second.finished.map(({ job: item, group }) => [item.job_id, group]), [['1', 'FAILED_EARLY']]);
 
   const third = jobTransitions(second.states, [job('1', 'FAILED'), job('3', 'COMPLETED')]);
   assert.deepEqual(third.finished.map(({ job: item }) => item.job_id), ['3']);
@@ -20,7 +20,7 @@ test('first refresh is a silent baseline; later finishes are reported once', () 
 
 test('notification modes filter outcomes and skip jobs ended from the sidebar', () => {
   const completed = { job: job('1', 'COMPLETED'), group: 'COMPLETED' };
-  const failed = { job: job('2', 'TIMEOUT'), group: 'FAILED' };
+  const failed = { job: job('2', 'TIMEOUT'), group: 'FAILED_TIMEOUT' };
   const cancelled = { job: job('3', 'CANCELLED'), group: 'CANCELLED' };
   assert.equal(shouldNotify('all', completed), true);
   assert.equal(shouldNotify('failures', completed), false);
@@ -34,7 +34,7 @@ test('notification modes filter outcomes and skip jobs ended from the sidebar', 
 test('notification text names the job, cluster, and failure state', () => {
   assert.equal(notificationMessage({ job: job('1', 'COMPLETED'), group: 'COMPLETED' }), 'Job "job1" (1) on cluster_0 completed.');
   assert.equal(
-    notificationMessage({ job: job('2', 'OUT_OF_MEMORY', { exit_code: '0:125' }), group: 'FAILED' }),
+    notificationMessage({ job: job('2', 'OUT_OF_MEMORY', { exit_code: '0:125' }), group: 'FAILED_EARLY' }),
     'Job "job2" (2) on cluster_0 failed (OUT_OF_MEMORY, exit 0:125).',
   );
 });

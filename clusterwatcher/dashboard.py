@@ -61,7 +61,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .job-progress { display:block; margin-top:.5rem; } .job-progress-track { display:block; height:.62rem; overflow:hidden; border-radius:999px; background:#8883; }
 .job-progress-fill { display:block; height:100%; background:#2563eb; transition:width 1s linear; } .job-progress-text { display:block; margin-top:.22rem; font-size:.76rem; color:#666; }
 .job-progress.pending .job-progress-fill { background:#7c3aed; } .job-message { margin-top:.5rem; font-size:.78rem; color:#666; }
-.job-progress.completed .job-progress-fill { background:#16a34a; } .job-progress.failed .job-progress-fill { background:#dc2626; } .job-progress.cancelled .job-progress-fill, .job-progress.other .job-progress-fill { background:#6b7280; }
+.job-progress.completed .job-progress-fill { background:#16a34a; } .job-progress.failed_early .job-progress-fill, .job-progress.failed_timeout .job-progress-fill { background:#dc2626; } .job-progress.cancelled .job-progress-fill, .job-progress.other .job-progress-fill { background:#6b7280; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; }
 .archived-jobs { margin-top:1rem; border-top:1px solid #8884; padding-top:.75rem; } .archived-jobs > summary { cursor:pointer; font-weight:700; }
 .job-card .job-progress { margin-top:.5rem; } .log-tail { max-width:720px; max-height:20rem; overflow:auto; white-space:pre-wrap; font-size:.75rem; background:#111; color:#eee; padding:.5rem; border-radius:.3rem; }
@@ -349,15 +349,25 @@ function sortedJobs(jobs, listName) {
   });
 }
 
-const JOB_GROUP_ORDER = ['RUNNING', 'PENDING', 'COMPLETED', 'FAILED', 'CANCELLED', 'OTHER'];
-const JOB_GROUP_LABELS = { RUNNING:'Running', PENDING:'Pending', COMPLETED:'Completed', FAILED:'Failed', CANCELLED:'Cancelled', OTHER:'Other' };
+const JOB_GROUP_ORDER = ['RUNNING', 'PENDING', 'COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED', 'OTHER'];
+const JOB_GROUP_LABELS = { RUNNING:'Running', PENDING:'Pending', COMPLETED:'Completed', FAILED_EARLY:'Failed (Early)', FAILED_TIMEOUT:'Failed (Timeout)', CANCELLED:'Cancelled', OTHER:'Other' };
 const ACTIVE_JOB_STATES = new Set(['CONFIGURING', 'PENDING', 'REQUEUED', 'REQUEUE_FED', 'REQUEUE_HOLD', 'RESIZING', 'SIGNALING', 'STAGE_OUT', 'SUSPENDED']);
 function jobGroup(job) {
   const state = String(job.state || 'UNKNOWN').toUpperCase();
   if (state === 'RUNNING' || state === 'COMPLETED' || state === 'CANCELLED') return state;
   if (ACTIVE_JOB_STATES.has(state)) return 'PENDING';
-  if (FAILED_JOB_STATES.has(state)) return 'FAILED';
+  if (state === 'TIMEOUT') return 'FAILED_TIMEOUT';
+  if (FAILED_JOB_STATES.has(state)) return 'FAILED_EARLY';
   return 'OTHER';
+}
+
+/** Render only the lifecycle rows meaningful for this card's state group. */
+function jobLifecycleRows(job, submittedAt, submittedText) {
+  const group = jobGroup(job);
+  const rows = [`<dt>Submitted</dt><dd><time datetime="${escapeHtml(submittedAt || '')}">${escapeHtml(submittedText)}</time></dd>`];
+  if (group !== 'PENDING') rows.push(`<dt>Launched</dt><dd>${jobLifecycleCell(job, 'launched')}</dd>`);
+  if (group !== 'RUNNING' && group !== 'PENDING') rows.push(`<dt>Ended</dt><dd>${jobLifecycleCell(job, 'ended')}</dd>`);
+  return rows.join('');
 }
 
 function sortControls(listName) {
@@ -395,7 +405,7 @@ function jobCard(job, listName) {
   const actionButton = `<button data-job-action="${action}" data-job-key="${escapeHtml(jobArchiveKey(job))}">${actionLabel}</button>`;
   const logButtons = jobsApiEnabled ? `<button class="log-button" data-log-stream="err" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .err</button><button class="log-button" data-log-stream="out" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .out</button>` : '';
   const disclosureKey = `card:${listName}:${jobArchiveKey(job)}`;
-  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}"${jobDisclosureAttribute(disclosureKey)}><summary><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}<dl class="job-times"><dt>Submitted</dt><dd><time datetime="${escapeHtml(submittedAt || '')}">${escapeHtml(submittedText)}</time></dd><dt>Launched</dt><dd>${jobLifecycleCell(job, 'launched')}</dd><dt>Ended</dt><dd>${jobLifecycleCell(job, 'ended')}</dd></dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
+  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}"${jobDisclosureAttribute(disclosureKey)}><summary><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
 }
 
 function jobGroups(jobs, listName) {

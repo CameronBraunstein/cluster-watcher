@@ -243,11 +243,11 @@ def parse_accounting_jobs(output: str) -> list[dict[str, object]]:
     jobs: list[dict[str, object]] = []
     for line in output.splitlines():
         fields = line.rstrip("\n").split("|")
-        if len(fields) != 17:
+        if len(fields) != 18:
             continue
         (job_id, name, state, exit_code, submit_at, start_at, end_at,
-         elapsed_raw, partition, node_list, node_count, cpus, allocated_tres,
-         reason, stdout, stderr, workdir) = fields
+         elapsed_raw, time_limit_raw, partition, node_list, node_count, cpus,
+         allocated_tres, reason, stdout, stderr, workdir) = fields
         job_id = job_id.strip()
         if not re.fullmatch(r"\d+(?:_\d+)?", job_id):
             continue
@@ -261,6 +261,8 @@ def parse_accounting_jobs(output: str) -> list[dict[str, object]]:
             "start_at": utc_slurm_timestamp(_optional_slurm_value(start_at)),
             "end_at": utc_slurm_timestamp(_optional_slurm_value(end_at)),
             "elapsed_seconds": int(elapsed_raw) if elapsed_raw.isdigit() else None,
+            # Slurm reports TimelimitRaw in minutes; the jobs API uses seconds.
+            "time_limit_seconds": int(time_limit_raw) * 60 if time_limit_raw.isdigit() else None,
             "partition": partition.strip(),
             "nodes": expand_hostlist(node_list.strip()),
             "node_count": int(node_count) if node_count.isdigit() else 0,
@@ -281,7 +283,7 @@ def accounting_jobs_command(since: datetime, job_ids: tuple[str, ...] = (), user
         since = since.replace(tzinfo=timezone.utc)
     start = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     fields = (
-        "JobID,JobName,State,ExitCode,Submit,Start,End,ElapsedRaw,Partition,"
+        "JobID,JobName,State,ExitCode,Submit,Start,End,ElapsedRaw,TimelimitRaw,Partition,"
         "NodeList,NNodes,NCPUS,AllocTRES,Reason,StdOut,StdErr,WorkDir"
     )
     command = f"TZ=UTC sacct --noheader --parsable2 --allocations --array --starttime={shlex.quote(start)} --format={fields}"

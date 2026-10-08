@@ -7,7 +7,7 @@ const { BackendManager } = require('./backend');
 const { LOG_TAIL_LINES, logDocumentContent, logRequestPath, prependLogPage, virtualLogPath } = require('./logs');
 const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = require('./events');
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
-const { jobRef, setDateFormat, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup } = require('./renderers');
+const { isFailureGroup, jobRef, setDateFormat, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup } = require('./renderers');
 const {
   ExecutableValidationError, jobsApiDisabled, responseError, cliTerminalOptions, configurationError, resolveConfigPath, serviceArguments, serviceCommand, validateExecutable,
 } = require('./service');
@@ -454,7 +454,9 @@ class JobMonitor {
   async notify(transition) {
     const { job, group } = transition;
     const message = notificationMessage(transition);
-    const show = group === 'FAILED' ? vscode.window.showWarningMessage : vscode.window.showInformationMessage;
+    const show = isFailureGroup(group)
+      ? vscode.window.showWarningMessage
+      : vscode.window.showInformationMessage;
     const choice = await show(message, 'Open .out', 'Open .err');
     if (choice) {
       await vscode.commands.executeCommand('clusterWatcher.openLog', job.cluster, String(job.job_id || job.id), choice === 'Open .out' ? 'out' : 'err');
