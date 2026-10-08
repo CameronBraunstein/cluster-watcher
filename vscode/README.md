@@ -142,7 +142,10 @@ account may not use the partition), `min` (below its minimum GPU request),
 `limit` (over a limit for your account), `n/a` (no node can run it now, e.g.
 all drained), `ERR` (a real failure, such as Slurm not answering), `?` (not
 probed), or `…` (the first probes are still running). Hover a cell for
-Slurm's message.
+Slurm's message. The columns begin **Partition**, **Available**, **GPU**,
+**VRAM**, and **TFLOPS/s**, followed by the wait estimates and CPU total.
+Catalog names are shortened to model labels such as `H100`; hover one for its
+full GPU name.
 
 Two settings control background feedback:
 
@@ -153,7 +156,9 @@ Two settings control background feedback:
   completions are not replayed; jobs ended with **End Job** are not reported.
 - `clusterWatcher.statusBar` (default `true`) shows `N running · M pending` in
   the status bar, or a warning-coloured **offline** item when the service is
-  unreachable. Click it to reveal **My Jobs**.
+  unreachable. Its hover uses the correct singular/plural job labels and shows
+  the date and time of the latest successful jobs refresh. Click it to reveal
+  **My Jobs**.
 
 `clusterWatcher.dateFormat` (default `DD.MM.YYYY`) sets how sidebar dates are
 shown, using the tokens `YYYY`, `YY`, `MM` and `DD` (for example `YYYY-MM-DD`).

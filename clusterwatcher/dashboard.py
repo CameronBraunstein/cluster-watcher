@@ -496,14 +496,34 @@ function rememberPartitionDisclosure() {
   document.querySelectorAll('details[data-partition-key]').forEach(details => partitionDisclosure.set(details.dataset.partitionKey, details.open));
 }
 
+// Keep cluster summaries compact while retaining the catalog name on hover.
+function compactGpuName(value) {
+  const name = String(value || '').trim();
+  if (!name) return '—';
+  const patterns = [
+    /\\b((?:RTX|GTX)(?:\\s+PRO)?\\s+\\d{3,4}(?:\\s+Ti)?)\\b/i,
+    /\\b((?:MI|GH|GB)\\d{2,4}[A-Z]*|(?:H|A|B|L|T|V|P)\\d{1,4}[A-Z]*)\\b/i,
+    /\\b(Max\\s+\\d{3,4})\\b/i,
+    /\\b(M\\d(?:\\s+(?:Pro|Max|Ultra))?)\\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = name.match(pattern);
+    if (match) return match[1].replace(/\\s+/g, ' ');
+  }
+  const withoutBrand = name
+    .replace(/^(?:NVIDIA|AMD|Advanced Micro Devices|Intel)\\s+/i, '')
+    .replace(/^(?:GeForce|Tesla|Quadro|Instinct|Data Center GPU)\\s+/i, '');
+  return withoutBrand.split(/\\s+/).slice(0, 2).join(' ');
+}
+
 function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, estimates, estimatesUpdatedAt) {
   const status = [...nodes].sort((left, right) => statePriority(left) - statePriority(right) || String(left.name).localeCompare(String(right.name))).map(node => `<i class="node-state-block ${summaryStateClass(node)}" title="${escapeHtml(node.name)}: ${escapeHtml(node.state)}"></i>`).join('');
   const summary = compute.get(name);
   const best = summary && summary.best_gpu;
-  const details = best ? `${summary.rank ? `#${summary.rank} · ` : ''}${best.name} · ${best.vram_gb} GB VRAM/GPU · ${best.tensor_tflops.toLocaleString()} FP16/BF16 Tensor TFLOPS/GPU · ${summary.cpu_threads.toLocaleString()} CPU threads` : 'GPU model not catalogued';
+  const details = best ? `${summary.rank ? `#${summary.rank} · ` : ''}<span title="${escapeHtml(best.name)}">${escapeHtml(compactGpuName(best.name))}</span> · ${escapeHtml(best.vram_gb)} GB VRAM/GPU · ${escapeHtml(best.tensor_tflops.toLocaleString())} FP16/BF16 Tensor TFLOPS/GPU · ${escapeHtml(summary.cpu_threads.toLocaleString())} CPU threads` : 'GPU model not catalogued';
   const badges = jobBadges(jobs, name, thresholds);
   const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}</h3><div class="partition-status" aria-label="Node states for ${escapeHtml(name)}">${status}</div>${badges ? `<div class="job-badges">${badges}</div>` : ''}</div>`;
-  const body = `<div class="partition-compute">${escapeHtml(details)}</div>${waitChart(estimates, name, estimatesUpdatedAt)}<div class="node-grid">${nodesByAvailableGpu(nodes).map(nodeCard).join('')}</div>`;
+  const body = `<div class="partition-compute">${details}</div>${waitChart(estimates, name, estimatesUpdatedAt)}<div class="node-grid">${nodesByAvailableGpu(nodes).map(nodeCard).join('')}</div>`;
   const disclosureKey = JSON.stringify([clusterName, name]);
   return `<details class="partition-section${summary?.aggregate ? ' aggregate-partition' : ''}" data-partition-key="${escapeHtml(disclosureKey)}"${partitionDisclosure.get(disclosureKey) ? ' open' : ''}><summary>${heading}</summary>${body}</details>`;
 }

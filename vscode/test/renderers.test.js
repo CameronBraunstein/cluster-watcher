@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { DEFAULT_DATE_FORMAT, localTime, setDateFormat, progressSpec, progressView, commandAttributes, escapeHtml, renderJobsApiDisabled, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
+const { DEFAULT_DATE_FORMAT, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, escapeHtml, renderJobsApiDisabled, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
 
 test('jobs retain terminal state grouping and lifecycle visibility', () => {
   const jobs = [
@@ -48,7 +48,7 @@ test('status shows GPU specifications, availability, and wait matrix', () => {
     cpus: { total: 128 },
     gpus: {
       total: 8, schedulable_idle: 2,
-      models: [{ name: 'NVIDIA H100', vram_gb: 80, fp16_bf16_tensor_tflops: 989 }],
+      models: [{ name: 'NVIDIA H100 NVL', vram_gb: 80, fp16_bf16_tensor_tflops: 989 }],
     },
     wait_estimates: [
       { gpus: 1, estimated_wait_seconds: 300, error: null },
@@ -61,17 +61,27 @@ test('status shows GPU specifications, availability, and wait matrix', () => {
     clusters: [{ name: 'cluster_0', reachable: true, partitions: [partition] }],
   });
 
-  assert.match(html, /NVIDIA H100/);
+  assert.match(html, /<td title="NVIDIA H100 NVL">H100<\/td>/);
   assert.match(html, /80G/);
   assert.match(html, /2\/8/);
   assert.ok(html.indexOf('class="unavailable"') < html.indexOf('class="available"'));
   assert.match(html, /CPU threads/);
+  assert.ok(html.indexOf('<th>Partition</th><th>Available</th><th>GPU</th><th>VRAM</th><th>TFLOPS\/s</th>') >= 0);
   assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary>cluster_0<\/summary>/);
   assert.doesNotMatch(html, /## cluster_0 ##/);
   assert.doesNotMatch(html, /<body><h2>Cluster Status<\/h2>/);
   assert.equal(waitCell(partition, 1), '5m');
   assert.equal(waitCell(partition, 2), 'DENY');
   assert.equal(waitCell(partition, 16), '—');
+});
+
+test('GPU catalog names are reduced to recognizable model labels', () => {
+  assert.equal(compactGpuName('NVIDIA H100 NVL'), 'H100');
+  assert.equal(compactGpuName('NVIDIA A100 80 GB'), 'A100');
+  assert.equal(compactGpuName('AMD Instinct MI300A'), 'MI300A');
+  assert.equal(compactGpuName('NVIDIA GeForce RTX 4090'), 'RTX 4090');
+  assert.equal(compactGpuName('Intel Data Center GPU Max 1550'), 'Max 1550');
+  assert.equal(compactGpuName('Custom Accelerator Name'), 'Custom Accelerator');
 });
 
 test('API text is escaped before entering a webview', () => {

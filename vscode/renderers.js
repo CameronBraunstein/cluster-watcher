@@ -419,6 +419,31 @@ function bestGpu(partition) {
 }
 
 /**
+ * Reduce a catalog GPU name to its recognizable model designation.
+ *
+ * Vendor and product-family wording remains available in the cell tooltip;
+ * the compact label keeps the narrow status table readable.
+ */
+function compactGpuName(value) {
+  const name = String(value || '').trim();
+  if (!name) return '—';
+  const patterns = [
+    /\b((?:RTX|GTX)(?:\s+PRO)?\s+\d{3,4}(?:\s+Ti)?)\b/i,
+    /\b((?:MI|GH|GB)\d{2,4}[A-Z]*|(?:H|A|B|L|T|V|P)\d{1,4}[A-Z]*)\b/i,
+    /\b(Max\s+\d{3,4})\b/i,
+    /\b(M\d(?:\s+(?:Pro|Max|Ultra))?)\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = name.match(pattern);
+    if (match) return match[1].replace(/\s+/g, ' ');
+  }
+  const withoutBrand = name
+    .replace(/^(?:NVIDIA|AMD|Advanced Micro Devices|Intel)\s+/i, '')
+    .replace(/^(?:GeForce|Tesla|Quadro|Instinct|Data Center GPU)\s+/i, '');
+  return withoutBrand.split(/\s+/).slice(0, 2).join(' ');
+}
+
+/**
  * Short labels for why a wait probe failed (the service's ``error_kind``).
  * Policy refusals get their own words, so ERR only marks real failures.
  */
@@ -497,11 +522,12 @@ function renderStatus(payload, disclosures = {}) {
       const availablePercent = total ? Math.max(0, Math.min(100, idle / total * 100)) : 0;
       const unavailablePercent = total ? 100 - availablePercent : 100;
       const waits = WAIT_GPU_COUNTS.map((count) => `<td title="${escapeHtml(waitTitle(partition, count, pending))}"${waitData(partition, count, asOf)}>${escapeHtml(waitCell(partition, count, pending))}</td>`).join('');
-      return `<tr class="${partition.aggregate ? 'aggregate' : ''}"><td>${escapeHtml(partition.name)}${partition.aggregate ? ' (aggregate)' : ''}</td><td>${escapeHtml(profile?.name || '—')}</td><td>${profile?.vram_gb == null ? '—' : `${escapeHtml(profile.vram_gb)}G`}</td><td>${profile?.fp16_bf16_tensor_tflops == null ? '—' : escapeHtml(profile.fp16_bf16_tensor_tflops)}</td><td><div class="availability" title="${idle}/${total} GPUs schedulable and idle"><span class="unavailable" style="width:${unavailablePercent}%"></span><span class="available" style="width:${availablePercent}%"></span></div>${idle}/${total}</td>${waits}<td>${escapeHtml(partition.cpus?.total ?? 0)}</td></tr>`;
+      const fullGpuName = profile?.name || '—';
+      return `<tr class="${partition.aggregate ? 'aggregate' : ''}"><td>${escapeHtml(partition.name)}${partition.aggregate ? ' (aggregate)' : ''}</td><td><div class="availability" title="${idle}/${total} GPUs schedulable and idle"><span class="unavailable" style="width:${unavailablePercent}%"></span><span class="available" style="width:${availablePercent}%"></span></div>${idle}/${total}</td><td title="${escapeHtml(fullGpuName)}">${escapeHtml(compactGpuName(fullGpuName))}</td><td>${profile?.vram_gb == null ? '—' : `${escapeHtml(profile.vram_gb)}G`}</td><td>${profile?.fp16_bf16_tensor_tflops == null ? '—' : escapeHtml(profile.fp16_bf16_tensor_tflops)}</td>${waits}<td>${escapeHtml(partition.cpus?.total ?? 0)}</td></tr>`;
     }).join('');
-    clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(cluster.resource_error)}</p>` : ''}<div class="table-wrap"><table><thead><tr><th>Partition</th><th>GPU</th><th>VRAM</th><th>TFLOPS/s</th><th>Available</th>${WAIT_GPU_COUNTS.map((count) => `<th>${count}</th>`).join('')}<th>CPU threads</th></tr></thead><tbody>${rows}</tbody></table></div></details>`);
+    clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(cluster.resource_error)}</p>` : ''}<div class="table-wrap"><table><thead><tr><th>Partition</th><th>Available</th><th>GPU</th><th>VRAM</th><th>TFLOPS/s</th>${WAIT_GPU_COUNTS.map((count) => `<th>${count}</th>`).join('')}<th>CPU threads</th></tr></thead><tbody>${rows}</tbody></table></div></details>`);
   }
   return document('Cluster Status', clusters.join('') || '<p>No clusters returned.</p>');
 }
 
-module.exports = { DEFAULT_DATE_FORMAT, localTime, setDateFormat, progressSpec, progressView, commandAttributes, escapeHtml, isFailureGroup, jobRef, openAttribute, parseDependency, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };
+module.exports = { DEFAULT_DATE_FORMAT, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, escapeHtml, isFailureGroup, jobRef, openAttribute, parseDependency, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };

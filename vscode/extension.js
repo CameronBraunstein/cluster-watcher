@@ -432,22 +432,34 @@ class JobMonitor {
     this.item.command = 'clusterWatcher.jobs.focus';
     /** Previous refresh's job states; null until the first successful refresh. */
     this.states = null;
+    /** Jobs from the latest payload, retained so a 304 check can update the hover timestamp. */
+    this.jobs = [];
   }
 
   /** Process one jobs payload; ``cancelling`` suppresses jobs the user ended. */
-  update(payload, cancelling) {
+  update(payload, cancelling, refreshedAt) {
     const jobs = payload.jobs || [];
+    this.jobs = jobs;
     const { states, finished } = jobTransitions(this.states, jobs);
     this.states = states;
     const settings = configuration();
     for (const transition of finished) {
       if (shouldNotify(settings.notifications, transition, cancelling)) void this.notify(transition);
     }
-    const summary = statusSummary(jobs);
+    const summary = statusSummary(jobs, refreshedAt);
     this.item.text = summary.text;
     this.item.tooltip = summary.tooltip;
     this.item.backgroundColor = undefined;
     this.show(settings);
+  }
+
+  /** Update the hover timestamp after an unchanged conditional jobs response. */
+  checked(refreshedAt) {
+    const summary = statusSummary(this.jobs, refreshedAt);
+    this.item.text = summary.text;
+    this.item.tooltip = summary.tooltip;
+    this.item.backgroundColor = undefined;
+    this.show(configuration());
   }
 
   /** Distinguish a running service without --jobs-api from an unreachable one. */

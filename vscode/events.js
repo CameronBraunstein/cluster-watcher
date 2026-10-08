@@ -1,6 +1,6 @@
 'use strict';
 
-const { isFailureGroup, jobKey, jobRef, stateGroup } = require('./renderers');
+const { isFailureGroup, jobKey, jobRef, localTime, stateGroup } = require('./renderers');
 
 const ACTIVE_GROUPS = new Set(['RUNNING', 'PENDING']);
 const FINISHED_GROUPS = new Set(['COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED']);
@@ -48,8 +48,13 @@ function notificationMessage({ job, group }) {
   return `Job ${label} on ${job.cluster} ${outcome}.`;
 }
 
-/** Build the status-bar text and tooltip for the current jobs payload. */
-function statusSummary(jobs) {
+/** Return a count followed by a correctly pluralized job noun. */
+function jobCount(count) {
+  return `${count} ${count === 1 ? 'job' : 'jobs'}`;
+}
+
+/** Build the status-bar text and tooltip for the current jobs payload and check time. */
+function statusSummary(jobs, refreshedAt) {
   let running = 0;
   let pending = 0;
   for (const job of jobs || []) {
@@ -58,7 +63,11 @@ function statusSummary(jobs) {
     else if (group === 'PENDING') pending += 1;
   }
   const text = running || pending ? `$(server-process) ${running} running · ${pending} pending` : '$(server-process) no active jobs';
-  return { text, tooltip: `Cluster Watcher: ${running} running and ${pending} pending job(s). Click to show My Jobs.` };
+  const refreshed = refreshedAt ? `\nLast refreshed ${localTime(refreshedAt)}.` : '';
+  return {
+    text,
+    tooltip: `Cluster Watcher: ${jobCount(running)} running and ${jobCount(pending)} pending.${refreshed}\nClick to show My Jobs.`,
+  };
 }
 
 module.exports = { jobTransitions, notificationMessage, shouldNotify, statusSummary };

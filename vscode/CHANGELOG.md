@@ -32,6 +32,11 @@ All notable changes to the Cluster Watcher VS Code extension.
   beside their native headings. Each heading has an independent **Refresh**
   action; the Command Palette's **Refresh Sidebar** action still refreshes both.
   Less-frequent actions remain in the Command Palette.
+- The running/pending status-bar hover now pluralizes `job` for each count and
+  shows the local date and time of the latest successful jobs refresh.
+- Cluster Status now orders its leading columns as **Partition**, **Available**,
+  **GPU**, **VRAM**, and **TFLOPS/s**. GPU names use compact model labels such
+  as `H100`, with the full catalog name available on hover in both interfaces.
 
 ## 0.1.3 — 2026-10-07
 

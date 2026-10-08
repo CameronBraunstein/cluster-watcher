@@ -40,9 +40,18 @@ test('notification text names the job, cluster, and failure state', () => {
 });
 
 test('status bar summarises running and pending jobs', () => {
-  assert.equal(statusSummary([job('1', 'RUNNING'), job('2', 'PENDING'), job('3', 'PENDING'), job('4', 'COMPLETED')]).text,
-    '$(server-process) 1 running · 2 pending');
+  const refreshedAt = new Date(2026, 9, 8, 14, 5).getTime();
+  const summary = statusSummary(
+    [job('1', 'RUNNING'), job('2', 'PENDING'), job('3', 'PENDING'), job('4', 'COMPLETED')],
+    refreshedAt,
+  );
+  assert.equal(summary.text, '$(server-process) 1 running · 2 pending');
+  assert.equal(
+    summary.tooltip,
+    'Cluster Watcher: 1 job running and 2 jobs pending.\nLast refreshed 08.10.2026 14:05.\nClick to show My Jobs.',
+  );
   assert.equal(statusSummary([]).text, '$(server-process) no active jobs');
+  assert.match(statusSummary([job('1', 'PENDING')]).tooltip, /0 jobs running and 1 job pending/);
 });
 
 test('publishing is blocked while placeholders remain', () => {

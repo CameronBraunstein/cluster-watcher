@@ -62,12 +62,13 @@ class RefreshCoordinator {
       const result = await this.client.poll('/api/v1/jobs', this.etags.jobs);
       const checkedAt = Date.now();
       if (result.notModified) {
+        this.monitor.checked(checkedAt);
         this.jobsProvider.checked(checkedAt);
         return;
       }
       this.etags.jobs = result.etag;
       // The monitor reads the cancelling set before the provider prunes it.
-      this.monitor.update(result.payload, this.jobsProvider.cancelling);
+      this.monitor.update(result.payload, this.jobsProvider.cancelling, checkedAt);
       this.jobsProvider.update(result.payload, checkedAt);
     } catch (error) {
       this.etags.jobs = undefined;

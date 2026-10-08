@@ -26,7 +26,9 @@ function harness(poll) {
   };
   const monitor = {
     updates: [],
-    update(payload, cancelling) { this.updates.push({ payload, cancelling }); },
+    checks: [],
+    update(payload, cancelling, checkedAt) { this.updates.push({ payload, cancelling, checkedAt }); },
+    checked(checkedAt) { this.checks.push(checkedAt); },
     jobsApiDisabled() {},
     offline() {},
   };
@@ -107,4 +109,14 @@ test('overlapping refreshes share the request for each endpoint', async () => {
 
   assert.equal(calls.filter((path) => path === '/api/v1/jobs').length, 1);
   assert.equal(calls.filter((path) => path === '/api/v1/snapshot').length, 1);
+});
+
+test('an unchanged jobs check updates the status-bar refresh time', async () => {
+  const state = harness(async () => ({ notModified: true }));
+
+  await state.coordinator.refreshJobs();
+
+  assert.equal(state.monitor.checks.length, 1);
+  assert.equal(state.jobsProvider.checks.length, 1);
+  assert.equal(state.monitor.updates.length, 0);
 });

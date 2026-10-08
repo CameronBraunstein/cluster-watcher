@@ -1434,10 +1434,11 @@ Cluster Watcher Activity Bar container with two sidebar views:
   remain on one line: archive uses an icon and the open actions use **.err**,
   **.out**, and **script** labels.
 - **Cluster Status** follows `cluster-watcher status`: partitions are separated
-  by collapsible cluster headings and show the strongest GPU model, per-GPU
-  VRAM and Tensor throughput, schedulable GPU availability, one-hour wait
-  estimates for 1–64 GPUs, and CPU threads. A wait cell without an estimate is
-  labelled as described in
+  by collapsible cluster headings. Its columns begin **Partition**,
+  **Available**, **GPU**, **VRAM**, and **TFLOPS/s**, followed by one-hour wait
+  estimates for 1–64 GPUs and CPU threads. GPU catalog names use compact model
+  labels such as `H100`; hover the label for the full name. A wait cell without
+  an estimate is labelled as described in
   [Why a wait cell has no estimate](#why-a-wait-cell-has-no-estimate); hover it
   for Slurm's message.
 
@@ -1448,6 +1449,10 @@ heading has its own **Refresh** action: **My Jobs** polls only job data, while
 **Cluster Status** polls only the capacity snapshot. **Cluster Watcher: Refresh
 Sidebar** in the Command Palette refreshes both views; all other Cluster
 Watcher actions also remain in the Command Palette.
+
+The bottom status-bar summary shows the running and pending counts. Its hover
+pluralizes `job` correctly for each count and includes the local date and time
+of the latest successful jobs refresh.
 
 The Activity Bar SVG depicts three server boxes with a magnifying glass over
 their upper-right corner. It was created specifically for this project and is
