@@ -152,7 +152,9 @@ Slurm's message. The columns begin **Partition**, **Available**, **GPU**,
 **VRAM**, and **TFLOPS/s**, followed by the wait estimates and CPU total.
 Catalog names are shortened to model labels such as `H100`; hover one for its
 full GPU name. The availability bar and `idle/total` fraction stay together on
-one line for a more compact table.
+one line for a more compact table. Green available capacity appears on the left
+and red unavailable capacity follows it. Hover the bar for a node-only state
+breakdown that appears after about 100 ms; zero-count categories are omitted.
 
 Two settings control background feedback:
 

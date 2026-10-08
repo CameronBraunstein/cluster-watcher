@@ -69,7 +69,10 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .job-card .job-progress { margin-top:.5rem; } .log-tail { max-width:720px; max-height:20rem; overflow:auto; white-space:pre-wrap; font-size:.75rem; background:#111; color:#eee; padding:.5rem; border-radius:.3rem; }
 .log-button { white-space:nowrap; cursor:pointer; }
 .partition-section { margin:1.25rem 0; } .partition-heading { display:flex; align-items:center; gap:.65rem; margin:0 0 .55rem; } .partition-heading h3 { margin:0; }
-.partition-status { display:flex; flex-wrap:wrap; gap:2px; } .node-state-block { width:.75rem; height:.75rem; border-radius:2px; }
+.partition-status { display:flex; position:relative; flex-wrap:wrap; gap:2px; cursor:help; } .node-state-block { width:.75rem; height:.75rem; border-radius:2px; }
+.partition-status[data-availability]::after { content:attr(data-availability); position:absolute; z-index:20; left:0; top:calc(100% + 4px); width:max-content; max-width:min(24rem, 80vw); padding:.25rem .4rem; border:1px solid #8888; outline:1px solid #fff; border-radius:2px; background:Canvas; color:CanvasText; font-size:.75rem; font-weight:400; line-height:1.25; white-space:normal; visibility:hidden; opacity:0; pointer-events:none; }
+@keyframes availability-hover-in { from { opacity:0; } to { opacity:1; } }
+.partition-status[data-availability]:hover::after { visibility:visible; animation:availability-hover-in .05s linear .1s both; }
 .partition-compute { color:#666; font-size:.8rem; margin:-.2rem 0 .55rem; }
 .wait-chart { margin:.8rem 0 1.2rem; max-width:720px; } .wait-chart figcaption { font-size:.8rem; margin-bottom:.45rem; }
 .wait-chart-layout { display:grid; grid-template-columns:2.8rem minmax(260px, 1fr); gap:.4rem; }
@@ -90,7 +93,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .node.mine { outline:2px solid #2563eb; outline-offset:2px; } .cell.mine { outline:2px solid #2563eb; outline-offset:1px; }
 .cell-row { display:flex; flex-wrap:wrap; gap:2px; margin:.25rem 0 .4rem; } .cell { border-radius:2px; }
 .gpu-cell { width:1.1rem; height:1.1rem; } .cpu-cell { width:.42rem; height:.42rem; }
-.powered-off { background:#000; } .drained { background:#8b4513; } .allocated { background:#dc2626; } .mixed-powered-off { background:#f97316; } .mixed { background:#eab308; } .idle { background:#16a34a; } .unknown { background:#6b7280; } .other { background:#eab308; }
+.powered-off { background:#000; } .drained { background:#8b4513; } .down { background:#991b1b; } .reserved { background:#7c3aed; } .maintenance, .rebooting { background:#2563eb; } .allocated { background:#dc2626; } .mixed-powered-off { background:#f97316; } .mixed { background:#eab308; } .idle { background:#16a34a; } .unknown { background:#6b7280; } .other { background:#eab308; }
 .legend { display:flex; flex-wrap:wrap; gap:.35rem .75rem; font-size:.85rem; }
 .legend-item { display:inline-flex; gap:.3rem; align-items:center; } .swatch { width:.7rem; height:.7rem; border-radius:50%; }
 .error { color:#c33; white-space:pre-wrap; }
@@ -112,18 +115,36 @@ function resourceCells(label, resource, cellClass, mineCount) {
   const allocated = asNumber(resource.allocated), idle = asNumber(resource.idle), total = asNumber(resource.total);
   const unavailable = Math.max(0, total - allocated - idle);
   const accessibleLabel = `${label}: ${allocated} allocated, ${idle} idle, ${unavailable} unavailable, ${total} total`;
-  return `<div class="cell-row" role="img" aria-label="${escapeHtml(accessibleLabel)}">${cells('idle', idle, cellClass, `${label}: idle`)}${cells('other', unavailable, cellClass, `${label}: unavailable`)}${cells('allocated', allocated, cellClass, `${label}: allocated`, Math.min(mineCount, allocated))}</div>`;
+  return `<div class="cell-row" role="img" aria-label="${escapeHtml(accessibleLabel)}">${cells('idle', idle, cellClass, `${label}: idle`)}${cells('allocated', allocated, cellClass, `${label}: allocated`, Math.min(mineCount, allocated))}${cells('other', unavailable, cellClass, `${label}: unavailable`)}</div>`;
 }
 
-function stateClass(state) {
-  const value = String(state).toLowerCase();
-  if (value.startsWith('mixed') && value.includes('~')) return 'mixed-powered-off';
-  if (value.startsWith('drained') && value.includes('~')) return 'powered-off';
-  if (value.startsWith('drained')) return 'drained';
-  if (value.startsWith('allocated')) return 'allocated';
-  if (value.startsWith('mixed')) return 'mixed';
+/** Group one raw Slurm state into a concise availability category. */
+function availabilityStateLabel(node) {
+  const value = String(node?.state || 'unknown').toLowerCase();
+  if (value.includes('reserved')) return 'reserved';
+  if (value.includes('drain')) return 'drained';
+  if (value.includes('maint')) return 'maintenance';
+  if (value.includes('reboot')) return 'rebooting';
+  if (value.includes('power') || value.includes('~')) return 'powered off';
+  if (value.includes('down') || value.includes('fail') || value.includes('no_resp')) return 'down';
+  if (value.startsWith('alloc') || (asNumber(node?.gpu?.total) && !asNumber(node?.gpu?.idle))) return 'full';
   if (value.startsWith('idle')) return 'idle';
-  return 'unknown';
+  if (value.startsWith('mix')) return 'mixed';
+  return value.replace(/[+_]+/g, ' ');
+}
+
+/** Describe only node-state categories represented in this partition. */
+function availabilityDescription(nodes) {
+  const counts = new Map();
+  for (const node of nodes) {
+    const label = availabilityStateLabel(node);
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  const order = ['idle', 'mixed', 'full', 'reserved', 'drained', 'down', 'maintenance', 'rebooting', 'powered off'];
+  return `Nodes: ${[...counts.entries()].sort(([left], [right]) => {
+    const leftIndex = order.indexOf(left), rightIndex = order.indexOf(right);
+    return (leftIndex < 0 ? order.length : leftIndex) - (rightIndex < 0 ? order.length : rightIndex) || left.localeCompare(right);
+  }).map(([label, count]) => `${count} ${label}`).join(', ')}`;
 }
 
 function nodeCard(node) {
@@ -135,12 +156,14 @@ function nodeCard(node) {
 }
 
 function statePriority(node) {
-  return { idle: 0, mixed: 1, 'mixed-powered-off': 2, allocated: 3, drained: 4, 'powered-off': 5, unknown: 6 }[summaryStateClass(node)];
+  return { idle: 0, allocated: 1, mixed: 2, 'mixed-powered-off': 3, reserved: 4, drained: 5, down: 6, maintenance: 7, rebooting: 8, 'powered-off': 9, unknown: 10 }[summaryStateClass(node)] ?? 11;
 }
 
 function summaryStateClass(node) {
-  const gpu = node.gpu || {};
-  return asNumber(gpu.total) && !asNumber(gpu.idle) ? 'allocated' : stateClass(node.state);
+  const label = availabilityStateLabel(node);
+  if (label === 'full') return 'allocated';
+  if (label === 'powered off') return String(node?.state || '').toLowerCase().startsWith('mix') ? 'mixed-powered-off' : 'powered-off';
+  return ['idle', 'mixed', 'reserved', 'drained', 'down', 'maintenance', 'rebooting'].includes(label) ? label : 'unknown';
 }
 
 function nodesByAvailableGpu(nodes) {
@@ -520,12 +543,13 @@ function compactGpuName(value) {
 }
 
 function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, estimates, estimatesUpdatedAt) {
-  const status = [...nodes].sort((left, right) => statePriority(left) - statePriority(right) || String(left.name).localeCompare(String(right.name))).map(node => `<i class="node-state-block ${summaryStateClass(node)}" title="${escapeHtml(node.name)}: ${escapeHtml(node.state)}"></i>`).join('');
+  const availability = availabilityDescription(nodes);
+  const status = [...nodes].sort((left, right) => statePriority(left) - statePriority(right) || String(left.name).localeCompare(String(right.name))).map(node => `<i class="node-state-block ${summaryStateClass(node)}"></i>`).join('');
   const summary = compute.get(name);
   const best = summary && summary.best_gpu;
   const details = best ? `${summary.rank ? `#${summary.rank} · ` : ''}<span title="${escapeHtml(best.name)}">${escapeHtml(compactGpuName(best.name))}</span> · ${escapeHtml(best.vram_gb)} GB VRAM/GPU · ${escapeHtml(best.tensor_tflops.toLocaleString())} FP16/BF16 Tensor TFLOPS/GPU · ${escapeHtml(summary.cpu_threads.toLocaleString())} CPU threads` : 'GPU model not catalogued';
   const badges = jobBadges(jobs, name, thresholds);
-  const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}</h3><div class="partition-status" aria-label="Node states for ${escapeHtml(name)}">${status}</div>${badges ? `<div class="job-badges">${badges}</div>` : ''}</div>`;
+  const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}</h3><div class="partition-status" data-availability="${escapeHtml(availability)}" aria-label="${escapeHtml(availability)}">${status}</div>${badges ? `<div class="job-badges">${badges}</div>` : ''}</div>`;
   const body = `<div class="partition-compute">${details}</div>${waitChart(estimates, name, estimatesUpdatedAt)}<div class="node-grid">${nodesByAvailableGpu(nodes).map(nodeCard).join('')}</div>`;
   const disclosureKey = JSON.stringify([clusterName, name]);
   return `<details class="partition-section${summary?.aggregate ? ' aggregate-partition' : ''}" data-partition-key="${escapeHtml(disclosureKey)}"${partitionDisclosure.get(disclosureKey) ? ' open' : ''}><summary>${heading}</summary>${body}</details>`;

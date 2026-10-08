@@ -191,11 +191,37 @@ function archiveIcon() {
 function document(title, body, freshness = {}) {
   const nonce = crypto.randomBytes(16).toString('base64');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:3px 0;background:var(--vscode-sideBar-background)}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card>summary[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:4px;top:calc(100% + 2px);max-width:calc(100% - 18px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open])>summary[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{display:flex;min-width:0}.card-summary-progress{display:block;min-width:0}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 0 auto;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta>.job-id{display:inline-block;font-size:.88em;margin-right:3px}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:3px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0}.available{background:var(--vscode-testing-iconPassed)}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em}.times dt{color:var(--vscode-descriptionForeground)}.times dt,.times dd{white-space:nowrap}.times dd{margin:0;text-align:right}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.78em}th,td{text-align:left;padding:3px 5px;border-bottom:1px solid var(--vscode-panel-border);white-space:nowrap}th{color:var(--vscode-descriptionForeground)}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
+body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:3px 0;background:var(--vscode-sideBar-background)}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card>summary[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:4px;top:calc(100% + 2px);max-width:calc(100% - 18px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open])>summary[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{display:flex;min-width:0}.card-summary-progress{display:block;min-width:0}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 0 auto;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta>.job-id{display:inline-block;font-size:.88em;margin-right:3px}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:3px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0;cursor:help}.available{background:var(--vscode-testing-iconPassed)}.availability-tooltip{position:fixed;z-index:100;display:none;max-width:220px;padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));outline:1px solid #fff;border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;pointer-events:none}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em}.times dt{color:var(--vscode-descriptionForeground)}.times dt,.times dd{white-space:nowrap}.times dd{margin:0;text-align:right}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.78em}th,td{text-align:left;padding:3px 5px;border-bottom:1px solid var(--vscode-panel-border);white-space:nowrap}th{color:var(--vscode-descriptionForeground)}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
 .card>summary[data-full-name]::after{outline:1px solid #fff}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
+  const AVAILABILITY_HOVER_DELAY_MS = 100;
+  const availabilityTooltip = document.createElement('div');
+  availabilityTooltip.className = 'availability-tooltip';
+  availabilityTooltip.setAttribute('role', 'tooltip');
+  document.body.appendChild(availabilityTooltip);
+  let availabilityHoverTimer;
+  const hideAvailabilityTooltip = () => {
+    clearTimeout(availabilityHoverTimer);
+    availabilityTooltip.style.display = 'none';
+  };
+  document.querySelectorAll('[data-availability]').forEach((bar) => {
+    bar.addEventListener('mouseenter', () => {
+      clearTimeout(availabilityHoverTimer);
+      availabilityHoverTimer = setTimeout(() => {
+        availabilityTooltip.textContent = bar.dataset.availability;
+        availabilityTooltip.style.display = 'block';
+        const barBounds = bar.getBoundingClientRect();
+        const tooltipBounds = availabilityTooltip.getBoundingClientRect();
+        availabilityTooltip.style.left = Math.max(4, Math.min(barBounds.left, window.innerWidth - tooltipBounds.width - 4)) + 'px';
+        const below = barBounds.bottom + 4;
+        availabilityTooltip.style.top = (below + tooltipBounds.height <= window.innerHeight ? below : Math.max(4, barBounds.top - tooltipBounds.height - 4)) + 'px';
+      }, AVAILABILITY_HOVER_DELAY_MS);
+    });
+    bar.addEventListener('mouseleave', hideAvailabilityTooltip);
+  });
+  window.addEventListener('scroll', hideAvailabilityTooltip, true);
   // Shared with the extension so the page keeps times current between refreshes.
   ${formatDuration.toString()}
   const dateFormat = ${JSON.stringify(dateFormat).replace(/</g, '\\u003c')};
@@ -496,6 +522,43 @@ function loginPrompt(cluster) {
 }
 
 /**
+ * Return the concise availability category for one Slurm node state.
+ * Restrictive modifiers take precedence over the base state because an
+ * ``IDLE+DRAIN`` node is physically idle but unavailable to new jobs.
+ */
+function availabilityStateLabel(state) {
+  const value = String(state || 'unknown').toLowerCase();
+  if (value.includes('reserved')) return 'reserved';
+  if (value.includes('drain')) return 'drained';
+  if (value.includes('maint')) return 'maintenance';
+  if (value.includes('reboot')) return 'rebooting';
+  if (value.includes('power')) return 'powered off';
+  if (value.includes('down') || value.includes('fail') || value.includes('no_resp')) return 'down';
+  if (value.startsWith('alloc')) return 'full';
+  if (value.startsWith('idle')) return 'idle';
+  if (value.startsWith('mix')) return 'mixed';
+  return value.replace(/[+_]+/g, ' ');
+}
+
+/** Build an availability tooltip, omitting node-state categories with no nodes. */
+function availabilityTitle(partition) {
+  const categories = new Map();
+  for (const [state, rawCount] of Object.entries(partition.node_states || {})) {
+    const count = Number(rawCount) || 0;
+    if (!count) continue;
+    const label = availabilityStateLabel(state);
+    categories.set(label, (categories.get(label) || 0) + count);
+  }
+  const order = ['idle', 'mixed', 'full', 'reserved', 'drained', 'down', 'maintenance', 'rebooting', 'powered off'];
+  const entries = [...categories.entries()].sort(([left], [right]) => {
+    const leftIndex = order.indexOf(left), rightIndex = order.indexOf(right);
+    return (leftIndex < 0 ? order.length : leftIndex) - (rightIndex < 0 ? order.length : rightIndex) || left.localeCompare(right);
+  });
+  const nodes = entries.map(([label, count]) => `${count} ${label}`).join(', ');
+  return nodes ? `Nodes: ${nodes}` : 'Node state details unavailable';
+}
+
+/**
  * Render the stable availability snapshot in cluster-separated tables.
  * `disclosures` maps disclosure keys to remembered open/closed choices.
  */
@@ -520,13 +583,14 @@ function renderStatus(payload, disclosures = {}, freshness = {}) {
       const idle = Number(partition.gpus?.schedulable_idle) || 0;
       const availablePercent = total ? Math.max(0, Math.min(100, idle / total * 100)) : 0;
       const unavailablePercent = total ? 100 - availablePercent : 100;
+      const availability = escapeHtml(availabilityTitle(partition));
       const waits = WAIT_GPU_COUNTS.map((count) => `<td title="${escapeHtml(waitTitle(partition, count, pending))}"${waitData(partition, count, asOf)}>${escapeHtml(waitCell(partition, count, pending))}</td>`).join('');
       const fullGpuName = profile?.name || '—';
-      return `<tr class="${partition.aggregate ? 'aggregate' : ''}"><td>${escapeHtml(partition.name)}${partition.aggregate ? ' (aggregate)' : ''}</td><td><div class="availability-cell"><div class="availability" title="${idle}/${total} GPUs schedulable and idle"><span class="unavailable" style="width:${unavailablePercent}%"></span><span class="available" style="width:${availablePercent}%"></span></div><span>${idle}/${total}</span></div></td><td title="${escapeHtml(fullGpuName)}">${escapeHtml(compactGpuName(fullGpuName))}</td><td>${profile?.vram_gb == null ? '—' : `${escapeHtml(profile.vram_gb)}G`}</td><td>${profile?.fp16_bf16_tensor_tflops == null ? '—' : escapeHtml(profile.fp16_bf16_tensor_tflops)}</td>${waits}<td>${escapeHtml(partition.cpus?.total ?? 0)}</td></tr>`;
+      return `<tr class="${partition.aggregate ? 'aggregate' : ''}"><td>${escapeHtml(partition.name)}${partition.aggregate ? ' (aggregate)' : ''}</td><td><div class="availability-cell"><div class="availability" data-availability="${availability}" aria-label="${availability}"><span class="available" style="width:${availablePercent}%"></span><span class="unavailable" style="width:${unavailablePercent}%"></span></div><span>${idle}/${total}</span></div></td><td title="${escapeHtml(fullGpuName)}">${escapeHtml(compactGpuName(fullGpuName))}</td><td>${profile?.vram_gb == null ? '—' : `${escapeHtml(profile.vram_gb)}G`}</td><td>${profile?.fp16_bf16_tensor_tflops == null ? '—' : escapeHtml(profile.fp16_bf16_tensor_tflops)}</td>${waits}<td>${escapeHtml(partition.cpus?.total ?? 0)}</td></tr>`;
     }).join('');
     clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(cluster.resource_error)}</p>` : ''}<div class="table-wrap"><table><thead><tr><th>Partition</th><th>Available</th><th>GPU</th><th>VRAM</th><th>TFLOPS/s</th>${WAIT_GPU_COUNTS.map((count) => `<th>${count}</th>`).join('')}<th>CPU threads</th></tr></thead><tbody>${rows}</tbody></table></div></details>`);
   }
   return document('Cluster Status', clusters.join('') || '<p>No clusters returned.</p>', freshness);
 }
 
-module.exports = { DEFAULT_DATE_FORMAT, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, escapeHtml, isFailureGroup, jobRef, openAttribute, parseDependency, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };
+module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, escapeHtml, isFailureGroup, jobRef, openAttribute, parseDependency, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };

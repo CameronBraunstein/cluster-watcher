@@ -83,7 +83,7 @@ def wait_error_label(estimate: dict[str, object]) -> str:
 
 
 def _availability_bar(idle: int, total: int, use_color: bool, width: int = 8) -> tuple[str, str]:
-    """Render unavailable GPUs in red and schedulable idle GPUs in green."""
+    """Render schedulable idle GPUs in green before unavailable GPUs in red."""
     idle = min(max(0, idle), max(0, total))
     if total < 1:
         plain_bar = "[" + "░" * width + "]"
@@ -94,10 +94,10 @@ def _availability_bar(idle: int, total: int, use_color: bool, width: int = 8) ->
     if total > idle and green == width:
         green -= 1
     red = width - green
-    plain_bar = f"[{'█' * red}{'░' * green}]"
+    plain_bar = f"[{'░' * green}{'█' * red}]"
     if not use_color:
         return plain_bar, plain_bar
-    styled = f"[{ANSI_RED}{'█' * red}{ANSI_GREEN}{'█' * green}{ANSI_RESET}]"
+    styled = f"[{ANSI_GREEN}{'█' * green}{ANSI_RED}{'█' * red}{ANSI_RESET}]"
     return styled, plain_bar
 
 

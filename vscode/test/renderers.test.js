@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { DEFAULT_DATE_FORMAT, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, escapeHtml, renderJobsApiDisabled, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
+const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, escapeHtml, renderJobsApiDisabled, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
 
 test('jobs retain terminal state grouping and lifecycle visibility', () => {
   const jobs = [
@@ -50,6 +50,7 @@ test('status shows GPU specifications, availability, and wait matrix', () => {
       total: 8, schedulable_idle: 2,
       models: [{ name: 'NVIDIA H100 NVL', vram_gb: 80, fp16_bf16_tensor_tflops: 989 }],
     },
+    node_states: { IDLE: 2, MIXED: 0, ALLOCATED: 3, RESERVED: 1, DOWN: 1 },
     wait_estimates: [
       { gpus: 1, estimated_wait_seconds: 300, error: null },
       { gpus: 2, estimated_wait_seconds: null, error: 'Access/permission denied' },
@@ -66,7 +67,11 @@ test('status shows GPU specifications, availability, and wait matrix', () => {
   assert.match(html, /2\/8/);
   assert.match(html, /<div class="availability-cell"><div class="availability"[^>]*>.*?<\/div><span>2\/8<\/span><\/div>/);
   assert.match(html, /\.availability-cell\{display:flex;align-items:center;gap:3px;white-space:nowrap\}/);
-  assert.ok(html.indexOf('class="unavailable"') < html.indexOf('class="available"'));
+  assert.ok(html.indexOf('class="available"') < html.indexOf('class="unavailable"'));
+  assert.match(html, /data-availability="Nodes: 2 idle, 3 full, 1 reserved, 1 down"/);
+  assert.doesNotMatch(html, /data-availability="[^"]*GPUs:/);
+  assert.match(html, /const AVAILABILITY_HOVER_DELAY_MS = 100/);
+  assert.doesNotMatch(html, /0 mixed/);
   assert.match(html, /CPU threads/);
   assert.ok(html.indexOf('<th>Partition</th><th>Available</th><th>GPU</th><th>VRAM</th><th>TFLOPS\/s</th>') >= 0);
   assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary>cluster_0<\/summary>/);
@@ -75,6 +80,21 @@ test('status shows GPU specifications, availability, and wait matrix', () => {
   assert.equal(waitCell(partition, 1), '5m');
   assert.equal(waitCell(partition, 2), 'DENY');
   assert.equal(waitCell(partition, 16), '—');
+});
+
+test('availability tooltips group restrictive Slurm states and omit zero counts', () => {
+  const partition = {
+    gpus: { total: 16, schedulable_idle: 4 },
+    node_states: { IDLE: 2, 'IDLE+DRAIN': 1, 'MIXED+RESERVED': 2, ALLOCATED: 3, DOWN: 0 },
+  };
+
+  assert.equal(availabilityStateLabel('IDLE+DRAIN'), 'drained');
+  assert.equal(availabilityStateLabel('MIXED+RESERVED'), 'reserved');
+  assert.equal(
+    availabilityTitle(partition),
+    'Nodes: 2 idle, 3 full, 2 reserved, 1 drained',
+  );
+  assert.doesNotMatch(availabilityTitle(partition), /down/);
 });
 
 test('GPU catalog names are reduced to recognizable model labels', () => {

@@ -566,8 +566,11 @@ behavior, and further names select more clusters. With `--jobs`, each cluster
 also gets the legacy `squeue` state summary. `--json` and `--dry-run` remain
 one-shot modes and cannot be combined with a refresh interval.
 
-The GPU availability bar renders GPUs that are allocated or currently
-unschedulable/reserved in red and schedulable idle GPUs in green. The following
+The GPU availability bar renders schedulable idle GPUs in green on the left,
+followed by GPUs that are allocated or currently unschedulable/reserved in red.
+In graphical views, hovering over the bar displays a node-only breakdown after
+about 100 ms and lists each nonzero state category, such as idle, mixed, full,
+reserved, drained, or down. The following
 fraction is `schedulable idle / total`; this intentionally does not count an
 unallocated GPU on a drained, down, maintained, rebooting, powered-off,
 reserved, failed, or unresponsive node as available.
@@ -1272,8 +1275,10 @@ values beside each partition. `*-all` partitions whose nodes are fully covered
 by specific partitions are collapsed at the bottom. Every partition has an
 expandable arrow for its node-level view. Within an expanded partition, node
 cards are ordered by idle GPU count, then idle CPU count. GPU/CPU cells are
-drawn idle (green), unavailable (yellow), then allocated (red), and the summary
-blocks use the same availability-first ordering.
+drawn idle (green), allocated (red), then unavailable (yellow). The summary
+blocks likewise place idle nodes first and full nodes second, followed by the
+remaining states. Hovering a partition's summary blocks shows a nonzero-only
+breakdown of its node availability states.
 
 ## Job awareness and wait indicators
 
@@ -1442,7 +1447,10 @@ Cluster Watcher Activity Bar container with two sidebar views:
   an estimate is labelled as described in
   [Why a wait cell has no estimate](#why-a-wait-cell-has-no-estimate); hover it
   for Slurm's message. The availability bar and its `idle/total` fraction share
-  one line to reduce the table's width and height.
+  one line to reduce the table's width and height. Green availability is drawn
+  first, followed by red unavailable capacity; hovering the bar lists only the
+  nonzero node-state categories (for example idle, full, reserved, and down).
+  This node-only hover appears after approximately 100 ms.
 
 The redundant in-webview **My Jobs** and **Cluster Status** titles are omitted;
 the native collapsible VS Code view headings provide those labels. A compact

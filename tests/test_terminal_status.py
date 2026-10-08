@@ -12,6 +12,7 @@ from clusterwatcher.terminal_status import (
     StatusBoardCollector,
     render_status_board,
     run_terminal_status_board,
+    _availability_bar,
 )
 from helpers import TimedTestCase
 
@@ -58,6 +59,13 @@ def capacity_payload() -> dict[str, object]:
 
 class TerminalStatusTests(TimedTestCase):
     """Exercise status columns, capacity colors, probes, and live output."""
+
+    def test_availability_bar_places_green_capacity_before_red_capacity(self):
+        """Keep available capacity on the left in plain and colored output."""
+        styled, plain = _availability_bar(2, 4, True, width=4)
+
+        self.assertEqual(plain, "[░░██]")
+        self.assertLess(styled.index("\033[32m"), styled.index("\033[31m"))
 
     def test_board_renders_cluster_capacity_and_fixed_wait_columns(self):
         """Show all requested capacity signals in one row per partition."""

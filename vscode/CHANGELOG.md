@@ -41,7 +41,9 @@ All notable changes to the Cluster Watcher VS Code extension.
 - Cluster Status now orders its leading columns as **Partition**, **Available**,
   **GPU**, **VRAM**, and **TFLOPS/s**. GPU names use compact model labels such
   as `H100`, with the full catalog name available on hover in both interfaces.
-- Cluster Status keeps each availability bar and fraction on one line. Manual
+- Cluster Status keeps each availability bar and fraction on one line, puts
+  green available capacity before red unavailable capacity, and shows a
+  nonzero-only, node-only state breakdown after a 100 ms hover. Manual
   view refreshes briefly show a spinning sync icon so fast and unchanged
   checks still provide immediate feedback, followed by a notification that
   distinguishes refreshed data from a check with no updates.
