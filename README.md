@@ -1399,15 +1399,19 @@ Cluster Watcher Activity Bar container with two sidebar views:
 - **My Jobs** follows the running, pending, completed, failed, and cancelled
   grouping from `cluster-watcher jobs`. State groups and individual job cards
   are collapsible; a collapsed card retains the job name, an ID badge sized to
-  the ID (click it to copy the ID), and a progress bar with the elapsed time,
-  time limit or start estimate to its right (below it when the sidebar is too
-  narrow). State-group and cluster headings use the 11px size of the native
-  view headings, and job titles are slightly smaller. Dates use
+  the ID (click it to copy the ID), and a progress bar with the elapsed/total
+  time or start estimate to its right. These remain on one line at the
+  sidebar's narrowest expanded width; the calculated running-job limit moves
+  into the expanded details. State-group and cluster headings use the 11px
+  size of the native view headings, and job titles are slightly smaller. Dates use
   `clusterWatcher.dateFormat` (default `DD.MM.YYYY`, tokens `YYYY`, `YY`, `MM`,
-  `DD`) followed by 24-hour `HH:mm` local time. Expanded cards show resource requests, submitted/launched/ended
-  times, any dependency (each referenced job ID jumps to its card), archive
-  controls, stdout/stderr and batch-script actions, and, for running or pending jobs, an
-  **End Job** button that confirms before cancelling the job.
+  `DD`) followed by 24-hour `HH:mm` local time. Expanded cards show resource
+  requests, submitted/launched/ended times, any dependency (each referenced
+  job ID jumps to its card), archive controls, stdout/stderr and batch-script
+  actions, and, for running or pending jobs, an **End** button that confirms
+  before cancelling the job. The detail timestamps and compact action row
+  remain on one line: archive uses an icon and the open actions use **.err**,
+  **.out**, and **script** labels.
 - **Cluster Status** follows `cluster-watcher status`: partitions are separated
   by collapsible cluster headings and show the strongest GPU model, per-GPU
   VRAM and Tensor throughput, schedulable GPU availability, one-hour wait
@@ -1427,13 +1431,13 @@ released under CC0-1.0. Its SPDX notice and dedicated terms travel with the
 asset in [`vscode/media/LICENSE.txt`](vscode/media/LICENSE.txt); it has no
 third-party icon-set dependency.
 
-Select **Archive** on an expanded card to move it to the collapsed **Archive**
-group at the bottom. **Restore** returns it to the active state group. This
-choice is stored in VS Code's extension `globalState`, so it persists across
-view reloads and editor restarts. Expanded/collapsed groups and cards also keep
-their current state across live data refreshes; the same applies to cluster
-sections. **Open .err** and **Open .out** retrieve the newest 2,000 lines
-through the loopback jobs API and open them as read-only virtual editor
+Select the archive-box icon on an expanded card to move it to the collapsed
+**Archive** group at the bottom. **Restore** returns it to the active state
+group. This choice is stored in VS Code's extension `globalState`, so it
+persists across view reloads and editor restarts. Expanded/collapsed groups and
+cards also keep their current state across live data refreshes; the same
+applies to cluster sections. **.err** and **.out** retrieve the newest 2,000
+lines through the loopback jobs API and open them as read-only virtual editor
 documents. When older output exists, select the upward-arrow **Load 2,000 Older
 Lines** action in that editor's title bar. Every click prepends one bounded
 page until the complete file is loaded. The bounded paging API prevents a

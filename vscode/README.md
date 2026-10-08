@@ -34,21 +34,26 @@ MFA, Slurm queries, and refresh scheduling.
 
 **My Jobs** uses collapsible state groups instead of terminal-style banners.
 Each job is another collapsible card whose compact form contains its name, ID,
-progress color bar, and completion/start estimate. The ID badge has a fixed
-width regardless of the title length; click it (or focus it and press Enter) to
-copy the job ID to the clipboard without toggling the card. Expand a card to
-see details and to:
+progress color bar, and completion/start estimate. The bar and elapsed/total
+time stay on one line at the sidebar's narrowest expanded width; a running
+job's calculated limit time appears with the other details only after the card
+is expanded. The ID badge has a fixed width regardless of the title length;
+click it (or focus it and press Enter) to copy the job ID to the clipboard
+without toggling the card. Expanded timestamps and the compact icon/short-label
+action row also remain on one line at that width. Expand a card to see details
+and to:
 
-- select **Archive** and move it into the collapsed **Archive** group at the
-  bottom, or **Restore** it later;
-- open the associated `.err` or `.out` stream as a read-only VS Code document;
-- select **Open script** to view the Slurm batch script the job ran, as a
+- select the archive-box icon and move it into the collapsed **Archive** group
+  at the bottom, or **Restore** it later;
+- select **.err** or **.out** to open that stream as a read-only VS Code
+  document;
+- select **script** to view the Slurm batch script the job ran, as a
   read-only, shell-highlighted document. For queued and running jobs this is
   Slurm's exact copy of the submitted script. Slurm usually discards that copy
   when a job ends, so for finished jobs the extension opens the script file
   named on the recorded `sbatch` command line instead, and a warning says that
   it is the current file and may have changed since submission;
-- for running and pending jobs, select **End Job** in the card's lower-right
+- for running and pending jobs, select **End** in the card's lower-right
   corner. A modal dialog asks for
   confirmation, then the service runs `scancel` for that job. The ID badge
   turns red and the button disappears until Slurm stops listing the job;

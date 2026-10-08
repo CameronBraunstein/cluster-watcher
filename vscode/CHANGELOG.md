@@ -4,6 +4,11 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
+- Narrow job cards now keep progress, elapsed/total time, detail timestamps,
+  and the complete action row on single lines. Running-job deadlines moved to
+  expanded details, while archive/log/script/cancel actions use compact icons
+  or labels with full tooltips.
+
 ## 0.1.3 — 2026-10-07
 
 - First-use backend installation can now download the exact native release for

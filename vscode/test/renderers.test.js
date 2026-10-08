@@ -25,13 +25,13 @@ test('jobs retain terminal state grouping and lifecycle visibility', () => {
   assert.match(html, /<details class="job-group" data-disclosure-key="group:active:RUNNING" open><summary>Running \(1\)<\/summary>/);
   assert.match(html, /<details class="card" data-disclosure-key=/);
   assert.match(html, /class="card-summary-progress"/);
-  assert.match(html, /limit /);
+  assert.match(html, /<dt>Limit<\/dt><dd>/);
   assert.doesNotMatch(html, /<body><h2>My Jobs<\/h2>/);
   assert.match(html, /api\.postMessage\(\{ type: 'disclosure'/);
-  assert.match(html, />Archive<\/a>/);
+  assert.match(html, /title="Archive job" aria-label="Archive job"><svg class="action-icon"/);
   assert.match(html, />Restore<\/a>/);
-  assert.match(html, />Open \.err<\/a>/);
-  assert.match(html, />Open \.out<\/a>/);
+  assert.match(html, />\.err<\/a>/);
+  assert.match(html, />\.out<\/a>/);
   assert.match(html, /Submitted/);
   assert.match(html, /Launched/);
   assert.match(html, /Ended/);
@@ -111,19 +111,19 @@ test('job ID badge wraps tightly around the ID and is copyable without toggling 
   assert.match(html, /event\.stopPropagation\(\)/);
 });
 
-test('End Job appears only for running and pending jobs and hides while ending', () => {
+test('End appears only for running and pending jobs and hides while ending', () => {
   const jobs = [
     { job_id: '1', cluster: 'cluster_0', state: 'RUNNING' },
     { job_id: '2', cluster: 'cluster_0', state: 'PENDING' },
     { job_id: '3', cluster: 'cluster_0', state: 'COMPLETED' },
   ];
   const html = renderJobs({ jobs });
-  assert.equal(html.match(/>End Job<\/a>/g).length, 2);
+  assert.equal(html.match(/aria-label="End job">End<\/a>/g).length, 2);
   assert.match(html, /data-command="clusterWatcher\.cancelJob" data-args="\[&quot;cluster_0&quot;,&quot;1&quot;/);
   assert.doesNotMatch(html, /href="command:/);
 
   const ending = renderJobs({ jobs }, {}, new Set([jobRef(jobs[0])]));
-  assert.equal(ending.match(/>End Job<\/a>/g).length, 1);
+  assert.equal(ending.match(/aria-label="End job">End<\/a>/g).length, 1);
   assert.match(ending, /class="badge job-id ending"/);
 });
 
@@ -162,9 +162,9 @@ test('welcome view offers start, setup, config, and settings with escaped detail
   assert.match(html, /ECONNREFUSED &lt;127\.0\.0\.1&gt;/);
 });
 
-test('every card offers Open script for its job', () => {
+test('every card offers a compact script action for its job', () => {
   const html = renderJobs({ jobs: [{ job_id: '5', cluster: 'cluster_0', state: 'COMPLETED' }] });
-  assert.match(html, /data-command="clusterWatcher\.openScript" data-args="\[&quot;cluster_0&quot;,&quot;5&quot;\]"[^>]*>Open script<\/a>/);
+  assert.match(html, /data-command="clusterWatcher\.openScript" data-args="\[&quot;cluster_0&quot;,&quot;5&quot;\]"[^>]*>script<\/a>/);
 });
 
 test('jobs-API-disabled view explains the fix and offers copy and retry', () => {
@@ -183,7 +183,7 @@ test('card title sits beside its arrow and End Job is placed bottom right', () =
   assert.match(html, /\.card-summary-title\{grid-column:2;/);
   assert.match(html, /\.actions>\.end-job\{margin-left:auto\}/);
   // End Job is the last action, so it lands at the right of the bottom row.
-  assert.match(html, /<a class="button danger end-job"[^>]*>End Job<\/a><\/div><\/div><\/details>/);
+  assert.match(html, /<a class="button danger compact-action end-job"[^>]*aria-label="End job">End<\/a><\/div><\/div><\/details>/);
 });
 
 test('running progress keeps advancing from generated_at without new data', () => {
@@ -191,8 +191,8 @@ test('running progress keeps advancing from generated_at without new data', () =
   const spec = progressSpec({ state: 'RUNNING', elapsed_seconds: 600, time_limit_seconds: 3600 }, asOf);
   const atRender = progressView(spec, asOf);
   const later = progressView(spec, asOf + 30 * 60 * 1000);
-  assert.match(atRender.label, /^10m \/ 1h/);
-  assert.match(later.label, /^40m \/ 1h/);
+  assert.equal(atRender.label, '10m / 1h');
+  assert.equal(later.label, '40m / 1h');
   assert.ok(later.percent > atRender.percent);
   // Finished jobs keep their recorded elapsed time.
   const done = progressSpec({ state: 'COMPLETED', elapsed_seconds: 600 }, asOf);
@@ -230,10 +230,32 @@ test('heading sizes: groups and cluster names match the 11px view headings, job 
   assert.match(html, /\.name\{[^}]*font-size:10\.5px/);
 });
 
-test('progress label sits to the right of the bar', () => {
+test('progress label stays beside the bar at the narrowest expanded width', () => {
   const html = renderJobs({ generated_at: '2026-09-30T15:02:00Z', jobs: [{ job_id: '1', cluster: 'cluster_0', state: 'RUNNING', elapsed_seconds: 60, time_limit_seconds: 3600 }] });
-  assert.match(html, /\.job-progress\{display:flex;/);
+  assert.match(html, /\.job-progress\{display:flex;flex-wrap:nowrap;/);
+  assert.match(html, /\.job-progress>\.progress\{flex:1 1 auto;min-width:20px\}/);
+  assert.match(html, /\.progress-label\{flex:0 0 auto;white-space:nowrap;font-size:\.72em\}/);
   assert.match(html, /<span class="job-progress"[^>]*><span class="progress">.*?<\/span><\/span><span class="muted progress-label">/);
+});
+
+test('expanded card moves the running deadline down and keeps details and actions compact', () => {
+  const html = renderJobs({
+    generated_at: '2026-09-30T15:02:00Z',
+    jobs: [{
+      job_id: '1', cluster: 'cluster_0', state: 'RUNNING', elapsed_seconds: 60, time_limit_seconds: 3600,
+      submit_at: '2026-09-30T15:00:00Z', start_at: '2026-09-30T15:01:00Z',
+    }],
+  });
+  assert.ok(html.includes(`<dt>Limit</dt><dd>${localTime('2026-09-30T16:01:00Z')}</dd>`));
+  assert.match(html, /<span class="muted progress-label">[^<]+ \/ 1h<\/span>/);
+  assert.match(html, /\.times dt,\.times dd\{white-space:nowrap\}/);
+  assert.match(html, /\.actions\{display:flex;flex-wrap:nowrap;/);
+  assert.match(html, /title="Archive job" aria-label="Archive job"><svg class="action-icon"/);
+  assert.match(html, /title="Open \.err log" aria-label="Open \.err log">\.err<\/a>/);
+  assert.match(html, /title="Open \.out log" aria-label="Open \.out log">\.out<\/a>/);
+  assert.match(html, /title="Open the Slurm batch script this job ran" aria-label="Open batch script">script<\/a>/);
+  assert.match(html, /title="End job" aria-label="End job">End<\/a>/);
+  assert.doesNotMatch(html, />Open (?:\.err|\.out|script)<\/a>/);
 });
 
 test('dates use DD.MM.YYYY by default and follow the configured pattern', () => {
