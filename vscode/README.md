@@ -83,8 +83,10 @@ renders the remembered state into every refreshed page (for the current VS Code
 session). Cluster names are collapsible headings in **Cluster Status**. The
 native **My Jobs** and **Cluster Status** view headings replace redundant titles
 inside each webview. Each heading displays `Updated <date and time> · Checked
-<time>`. A single menu button beside **My Jobs** opens refresh, service,
-dashboard, configuration, settings, and backend-management actions.
+<time>`. Each heading has its own **Refresh** action, which polls only that
+view's endpoint. **Cluster Watcher: Refresh Sidebar** in the Command Palette
+refreshes both views; service, dashboard, configuration, settings, and
+backend-management actions also remain available there.
 
 Log documents initially contain the newest 2,000 lines. If more output exists,
 use the upward-arrow **Load 2,000 Older Lines** editor-title action; each click

@@ -29,8 +29,9 @@ All notable changes to the Cluster Watcher VS Code extension.
 - Pending cards now omit `.err` and `.out`. Archived pending jobs continue to
   refresh and gain both log actions as soon as their Slurm state advances.
 - **My Jobs** and **Cluster Status** now show compact updated/checked timestamps
-  beside their native headings. One menu button beside **My Jobs** replaces the
-  separate title actions with a shared action picker.
+  beside their native headings. Each heading has an independent **Refresh**
+  action; the Command Palette's **Refresh Sidebar** action still refreshes both.
+  Less-frequent actions remain in the Command Palette.
 
 ## 0.1.3 — 2026-10-07
 

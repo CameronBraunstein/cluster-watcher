@@ -1443,9 +1443,11 @@ Cluster Watcher Activity Bar container with two sidebar views:
 
 The redundant in-webview **My Jobs** and **Cluster Status** titles are omitted;
 the native collapsible VS Code view headings provide those labels. Each heading
-has a compact `Updated <date and time> · Checked <time>` description. One menu
-button beside **My Jobs** opens all service, dashboard, configuration, settings,
-and backend actions instead of displaying separate title buttons.
+has a compact `Updated <date and time> · Checked <time>` description. Each
+heading has its own **Refresh** action: **My Jobs** polls only job data, while
+**Cluster Status** polls only the capacity snapshot. **Cluster Watcher: Refresh
+Sidebar** in the Command Palette refreshes both views; all other Cluster
+Watcher actions also remain in the Command Palette.
 
 The Activity Bar SVG depicts three server boxes with a magnifying glass over
 their upper-right corner. It was created specifically for this project and is

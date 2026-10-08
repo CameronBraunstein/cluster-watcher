@@ -53,9 +53,14 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "clusterWatcher.showMenu",
-        "title": "Cluster Watcher Actions",
-        "icon": "$(menu)"
+        "command": "clusterWatcher.refreshJobs",
+        "title": "Cluster Watcher: Refresh My Jobs",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "clusterWatcher.refreshStatus",
+        "title": "Cluster Watcher: Refresh Cluster Status",
+        "icon": "$(refresh)"
       },
       {
         "command": "clusterWatcher.openDashboard",
@@ -118,8 +123,13 @@
     "menus": {
       "view/title": [
         {
-          "command": "clusterWatcher.showMenu",
+          "command": "clusterWatcher.refreshJobs",
           "when": "view == clusterWatcher.jobs",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clusterWatcher.refreshStatus",
+          "when": "view == clusterWatcher.status",
           "group": "navigation@1"
         }
       ],

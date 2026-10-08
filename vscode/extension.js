@@ -5,9 +5,9 @@ const extensionManifest = require('./package.json');
 const { JobArchive } = require('./archive');
 const { BackendManager } = require('./backend');
 const { LOG_TAIL_LINES, logDocumentContent, logRequestPath, prependLogPage, virtualLogPath } = require('./logs');
-const { showSidebarMenu } = require('./menu');
 const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = require('./events');
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
+const { RefreshCoordinator } = require('./refresh');
 const { isFailureGroup, jobRef, setDateFormat, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness } = require('./renderers');
 const {
   ExecutableValidationError, jobsApiDisabled, responseError, cliTerminalOptions, configurationError, resolveConfigPath, serviceArguments, serviceCommand, validateExecutable,
@@ -517,68 +517,6 @@ class JobScriptDocumentProvider {
   }
 }
 
-/** Refresh both views together without overlapping API requests. */
-class RefreshCoordinator {
-  constructor(client, jobsProvider, statusProvider, monitor) {
-    this.client = client;
-    this.jobsProvider = jobsProvider;
-    this.statusProvider = statusProvider;
-    this.monitor = monitor;
-    /** ETags of the last data rendered per endpoint, for conditional polling. */
-    this.etags = {};
-    this.inFlight = undefined;
-    this.timer = undefined;
-  }
-
-  async refresh() {
-    if (this.inFlight) return this.inFlight;
-    this.inFlight = this.run().finally(() => { this.inFlight = undefined; });
-    return this.inFlight;
-  }
-
-  async run() {
-    const [jobs, status] = await Promise.allSettled([
-      this.client.poll('/api/v1/jobs', this.etags.jobs),
-      this.client.poll('/api/v1/snapshot', this.etags.status),
-    ]);
-    const checkedAt = Date.now();
-    if (jobs.status === 'fulfilled' && jobs.value.notModified) {
-      this.jobsProvider.checked(checkedAt);
-    } else if (jobs.status === 'fulfilled') {
-      this.etags.jobs = jobs.value.etag;
-      // The monitor reads the cancelling set before the provider prunes it.
-      this.monitor.update(jobs.value.payload, this.jobsProvider.cancelling);
-      this.jobsProvider.update(jobs.value.payload, checkedAt);
-    } else if (jobsApiDisabled(jobs.reason)) {
-      this.etags.jobs = undefined;
-      this.monitor.jobsApiDisabled();
-      this.jobsProvider.jobsApiDisabled();
-    } else {
-      this.etags.jobs = undefined;
-      this.monitor.offline();
-      this.jobsProvider.error(jobs.reason);
-    }
-    if (status.status === 'fulfilled' && status.value.notModified) {
-      this.statusProvider.checked(checkedAt);
-    } else if (status.status === 'fulfilled') {
-      this.etags.status = status.value.etag;
-      this.statusProvider.update(status.value.payload, checkedAt);
-    } else {
-      this.etags.status = undefined;
-      this.statusProvider.error(status.reason);
-    }
-  }
-
-  schedule() {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = setInterval(() => void this.refresh(), configuration().refreshSeconds * 1000);
-  }
-
-  dispose() {
-    if (this.timer) clearInterval(this.timer);
-  }
-}
-
 /** Confirm with a modal dialog, then cancel one job through the loopback service. */
 async function cancelJob(client, jobsProvider, coordinator, cluster, jobId, name) {
   const label = name && name !== jobId ? `"${name}" (${jobId})` : jobId;
@@ -591,7 +529,7 @@ async function cancelJob(client, jobsProvider, coordinator, cluster, jobId, name
   await client.post(`/api/v1/jobs/${encodeURIComponent(cluster)}/${encodeURIComponent(jobId)}/cancel`);
   jobsProvider.markCancelling(cluster, jobId);
   vscode.window.showInformationMessage(`Cancellation requested for job ${jobId} on ${cluster}.`);
-  void coordinator.refresh();
+  void coordinator.refreshJobs();
 }
 
 /** Return the shell command that starts a correctly configured service. */
@@ -682,7 +620,10 @@ function activate(context) {
   const jobsProvider = new JobsSidebarProvider(context.globalState);
   const statusProvider = new SidebarProvider('status');
   const monitor = new JobMonitor();
-  const coordinator = new RefreshCoordinator(client, jobsProvider, statusProvider, monitor);
+  const coordinator = new RefreshCoordinator(client, jobsProvider, statusProvider, monitor, {
+    jobsApiDisabled,
+    refreshSeconds: () => configuration().refreshSeconds,
+  });
   let controller;
   backendManager = new BackendManager(vscode, context, extensionManifest.version, {
     onWillChange: () => controller?.stopForBackendChange(),
@@ -701,7 +642,8 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('clusterWatcher.stopService', () => controller.stop()),
     vscode.commands.registerCommand('clusterWatcher.refresh', () => coordinator.refresh()),
-    vscode.commands.registerCommand('clusterWatcher.showMenu', () => showSidebarMenu(vscode)),
+    vscode.commands.registerCommand('clusterWatcher.refreshJobs', () => coordinator.refreshJobs()),
+    vscode.commands.registerCommand('clusterWatcher.refreshStatus', () => coordinator.refreshStatus()),
     vscode.commands.registerCommand('clusterWatcher.openDashboard', () => vscode.env.openExternal(vscode.Uri.parse(configuration().backendUrl))),
     vscode.commands.registerCommand('clusterWatcher.showServiceTerminal', () => controller.showTerminal()),
     vscode.commands.registerCommand('clusterWatcher.archiveJob', async (key) => {
