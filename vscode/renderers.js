@@ -103,20 +103,19 @@ function progressSpec(job, asOf) {
     submit: time(job.submit_at || job.submit_time),
     expected: time(job.expected_start_at || job.start_at || job.start_time),
     reason: String(job.reason || ''),
-    ended: ['COMPLETED', 'FAILED', 'CANCELLED', 'OTHER'].includes(group) ? lifecycle(job, 'ended') : '—',
   };
 }
 
 /**
  * Compute a progress bar's fill and label at time ``now`` from a
- * ``progressSpec``. Self-contained apart from ``formatDuration`` and
- * ``localTime``, because the webview re-runs it every few seconds.
+ * ``progressSpec``. Self-contained apart from ``formatDuration``, because the
+ * webview re-runs it every few seconds.
  */
 function progressView(spec, now) {
   if (spec.group === 'RUNNING') {
     const elapsed = spec.elapsed + Math.max(0, (now - spec.asOf) / 1000);
     const percent = spec.limit ? Math.min(100, elapsed / spec.limit * 100) : 0;
-    const label = spec.limit ? `${formatDuration(elapsed)} / ${formatDuration(spec.limit)}` : `${formatDuration(elapsed)} elapsed`;
+    const label = spec.limit ? `${formatDuration(elapsed)} / ${formatDuration(spec.limit)}` : formatDuration(elapsed);
     return { fill: 'running', percent, label };
   }
   if (spec.group === 'PENDING') {
@@ -128,8 +127,7 @@ function progressView(spec, now) {
       : `${formatDuration(remaining)} until estimated start`;
     return { fill: 'pending', percent, label };
   }
-  const ended = spec.ended !== '—' && spec.ended !== 'Unavailable' ? ` · ended ${spec.ended}` : '';
-  return { fill: spec.group.toLowerCase(), percent: 100, label: `${formatDuration(spec.elapsed)} elapsed${ended}` };
+  return { fill: spec.group.toLowerCase(), percent: 100, label: '' };
 }
 
 /** Render state-appropriate elapsed/wait progress that the webview keeps current. */
@@ -147,6 +145,12 @@ function runningLimitRow(job, asOf) {
   return `<dt>Limit</dt><dd>${escapeHtml(localTime(new Date(startedAt + spec.limit * 1000).toISOString()))}</dd>`;
 }
 
+/** Render elapsed time for started jobs with the expanded lifecycle details. */
+function expandedElapsedRow(job) {
+  if (stateGroup(job.state) === 'PENDING') return '';
+  return `<dt>Elapsed</dt><dd>${escapeHtml(formatDuration(job.elapsed_seconds))}</dd>`;
+}
+
 /** Return the small archive-box icon used by compact job-card actions. */
 function archiveIcon() {
   return '<svg class="action-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2 2.5h12v3H2zM3.5 5.5h9v8h-9zM6 8h4" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>';
@@ -158,7 +162,7 @@ function document(title, body, updatedAt) {
   const updatedAttribute = updatedAt ? ` data-updated="${escapeHtml(updatedAt)}"` : '';
   const nonce = crypto.randomBytes(16).toString('base64');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:6px 0;background:var(--vscode-sideBar-background)}.card>summary{padding:8px;cursor:pointer;list-style:none;display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:7px;align-items:start}.card>summary::-webkit-details-marker{display:none}.card>summary::before{content:'';grid-column:1;grid-row:1;margin-top:.4em;border-style:solid;border-width:4px 0 4px 6px;border-color:transparent transparent transparent currentColor;transition:transform .1s}.card[open]>summary::before{transform:rotate(90deg)}.card-summary-title{grid-column:2;display:flex;justify-content:space-between;gap:8px}.card-summary-progress{grid-column:2;display:block;min-width:0}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 0 auto;white-space:nowrap;font-size:.72em}.card-body{padding:0 8px 8px}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow-wrap:anywhere;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{flex:0 0 auto;align-self:flex-start;font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden;margin:6px 0 3px}.progress{display:block;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability{display:flex}.available{background:var(--vscode-testing-iconPassed)}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em}.times dt{color:var(--vscode-descriptionForeground)}.times dt,.times dd{white-space:nowrap}.times dd{margin:0;text-align:right}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.78em}th,td{text-align:left;padding:3px 5px;border-bottom:1px solid var(--vscode-panel-border);white-space:nowrap}th{color:var(--vscode-descriptionForeground)}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
+body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:6px 0;background:var(--vscode-sideBar-background)}.card>summary{padding:8px;cursor:pointer;list-style:none;display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:7px;align-items:start}.card>summary::-webkit-details-marker{display:none}.card>summary::before{content:'';grid-column:1;grid-row:1;margin-top:.4em;border-style:solid;border-width:4px 0 4px 6px;border-color:transparent transparent transparent currentColor;transition:transform .1s}.card[open]>summary::before{transform:rotate(90deg)}.card-summary-title{grid-column:2;display:flex;min-width:0}.card-summary-progress{grid-column:2;display:block;min-width:0}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 0 auto;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy}.card-meta>.job-id{display:inline-block;font-size:.88em;margin-left:3px}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden;margin:6px 0 3px}.progress{display:block;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability{display:flex}.available{background:var(--vscode-testing-iconPassed)}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em}.times dt{color:var(--vscode-descriptionForeground)}.times dt,.times dd{white-space:nowrap}.times dd{margin:0;text-align:right}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.78em}th,td{text-align:left;padding:3px 5px;border-bottom:1px solid var(--vscode-panel-border);white-space:nowrap}th{color:var(--vscode-descriptionForeground)}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
 </style></head><body><div class="meta"${updatedAttribute}>${escapeHtml(updated)}</div>${body}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
@@ -199,7 +203,7 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
   document.querySelectorAll('details[data-disclosure-key]').forEach((details) => {
     details.addEventListener('toggle', () => remember(details));
   });
-  // Copy a job ID without toggling the card that contains its badge.
+  // Copy a job ID from the expanded detail row.
   const copy = (event, badge) => {
     event.preventDefault();
     event.stopPropagation();
@@ -321,6 +325,7 @@ function jobRef(job) {
  */
 function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date.now()) {
   const identifier = String(job.job_id || job.id || 'unknown');
+  const name = String(job.name || identifier);
   const nodes = Number(job.node_count) || (job.nodes || []).length;
   const resources = `${nodes} node · ${Number(job.gpus) || 0} GPU · ${Number(job.cpus) || 0} CPU`;
   const archiveCommand = archived ? 'clusterWatcher.restoreJob' : 'clusterWatcher.archiveJob';
@@ -338,7 +343,7 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
     actions.push(`<a class="button danger compact-action end-job" role="button" ${commandAttributes('clusterWatcher.cancelJob', [job.cluster, identifier, job.name || identifier])} title="End job" aria-label="End job">End</a>`);
   }
   const disclosureKey = `card:${archived ? 'archive' : 'active'}:${key}`;
-  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary><span class="card-summary-title"><span class="name">${escapeHtml(job.name || identifier)}</span><span class="badge job-id${ending ? ' ending' : ''}" role="button" tabindex="0" data-copy="${escapeHtml(identifier)}" title="${escapeHtml(identifier)}${ending ? ' · ending' : ''} — click to copy">${escapeHtml(identifier)}</span></span><span class="card-summary-progress">${jobProgress(job, asOf)}</span></summary><div class="card-body"><div class="muted">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')} · ${escapeHtml(resources)}</div><dl class="times"><dt>Submitted</dt><dd>${escapeHtml(localTime(job.submit_at || job.submit_time))}</dd><dt>Launched</dt><dd>${escapeHtml(lifecycle(job, 'launched'))}</dd><dt>Ended</dt><dd>${escapeHtml(lifecycle(job, 'ended'))}</dd>${runningLimitRow(job, asOf)}${dependencyLinks(job)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
+  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary title="${escapeHtml(name)}"><span class="card-summary-title"><span class="name">${escapeHtml(name)}</span></span><span class="card-summary-progress">${jobProgress(job, asOf)}</span></summary><div class="card-body"><div class="muted card-meta">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')} · ${escapeHtml(resources)} <span class="badge job-id${ending ? ' ending' : ''}" role="button" tabindex="0" data-copy="${escapeHtml(identifier)}" title="${escapeHtml(identifier)}${ending ? ' · ending' : ''} — click to copy">${escapeHtml(identifier)}</span></div><dl class="times"><dt>Submitted</dt><dd>${escapeHtml(localTime(job.submit_at || job.submit_time))}</dd><dt>Launched</dt><dd>${escapeHtml(lifecycle(job, 'launched'))}</dd>${expandedElapsedRow(job)}<dt>Ended</dt><dd>${escapeHtml(lifecycle(job, 'ended'))}</dd>${runningLimitRow(job, asOf)}${dependencyLinks(job)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
 }
 
 /**

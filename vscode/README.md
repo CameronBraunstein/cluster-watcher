@@ -33,15 +33,16 @@ MFA, Slurm queries, and refresh scheduling.
   settings created before the managed installer was introduced.
 
 **My Jobs** uses collapsible state groups instead of terminal-style banners.
-Each job is another collapsible card whose compact form contains its name, ID,
-progress color bar, and completion/start estimate. The bar and elapsed/total
-time stay on one line at the sidebar's narrowest expanded width; a running
-job's calculated limit time appears with the other details only after the card
-is expanded. The ID badge has a fixed width regardless of the title length;
-click it (or focus it and press Enter) to copy the job ID to the clipboard
-without toggling the card. Expanded timestamps and the compact icon/short-label
-action row also remain on one line at that width. Expand a card to see details
-and to:
+Each job is another collapsible card whose compact form contains its name,
+progress color bar, and completion/start estimate. Long names stay on one line
+and end in an ellipsis; hover anywhere on the compact card to see the full job
+name. The bar and elapsed/total time stay on one line at the sidebar's narrowest
+expanded width. Expand the card to see the job ID after the cluster, partition,
+and resource summary; click it (or focus it and press Enter) to copy it. A
+running job's calculated limit time, elapsed label, and terminal job's end
+time also appear with the expanded lifecycle details rather than as prose in
+the compact card. Expanded timestamps and the compact icon/short-label action row remain
+on one line at that width. Expand a card to see details and to:
 
 - select the archive-box icon and move it into the collapsed **Archive** group
   at the bottom, or **Restore** it later;

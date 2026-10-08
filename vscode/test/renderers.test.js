@@ -102,13 +102,17 @@ test('openAttribute falls back to the renderer default', () => {
   assert.equal(openAttribute({ key: false }, 'key', true), '');
 });
 
-test('job ID badge wraps tightly around the ID and is copyable without toggling the card', () => {
+test('collapsed title truncates with a full-name tooltip and the job ID moves to expanded metadata', () => {
   const html = renderJobs({ jobs: [{ job_id: '2000068_123', name: 'a very long job title indeed', cluster: 'cluster_0', state: 'RUNNING' }] });
+  const cardSummary = html.match(/<summary title="a very long job title indeed">.*?<\/summary>/s)[0];
+  assert.match(cardSummary, /<span class="name">a very long job title indeed<\/span>/);
+  assert.doesNotMatch(cardSummary, /class="badge job-id/);
+  assert.match(html, /\.name\{[^}]*overflow:hidden;text-overflow:ellipsis;white-space:nowrap;/);
   assert.match(html, /<span class="badge job-id" role="button" tabindex="0" data-copy="2000068_123"/);
-  assert.match(html, /\.job-id\{flex:0 0 auto;align-self:flex-start;/);
+  assert.match(html, /<div class="muted card-meta">cluster_0 \/ no partition · 0 node · 0 GPU · 0 CPU <span class="badge job-id"/);
+  assert.match(html, /\.card-meta>\.job-id\{display:inline-block;/);
   assert.doesNotMatch(html, /\.job-id\{[^}]*width:/);
   assert.match(html, /type: 'copy'/);
-  assert.match(html, /event\.stopPropagation\(\)/);
 });
 
 test('End appears only for running and pending jobs and hides while ending', () => {
@@ -194,9 +198,10 @@ test('running progress keeps advancing from generated_at without new data', () =
   assert.equal(atRender.label, '10m / 1h');
   assert.equal(later.label, '40m / 1h');
   assert.ok(later.percent > atRender.percent);
-  // Finished jobs keep their recorded elapsed time.
+  assert.equal(progressView(progressSpec({ state: 'RUNNING', elapsed_seconds: 600 }, asOf), asOf).label, '10m');
+  // Finished-job timing belongs in expanded details, not the collapsed label.
   const done = progressSpec({ state: 'COMPLETED', elapsed_seconds: 600 }, asOf);
-  assert.match(progressView(done, asOf + 3600 * 1000).label, /^10m elapsed/);
+  assert.equal(progressView(done, asOf + 3600 * 1000).label, '');
 });
 
 test('pending wait counts down and the webview re-runs the shared code', () => {
@@ -247,6 +252,7 @@ test('expanded card moves the running deadline down and keeps details and action
     }],
   });
   assert.ok(html.includes(`<dt>Limit</dt><dd>${localTime('2026-09-30T16:01:00Z')}</dd>`));
+  assert.match(html, /<dt>Elapsed<\/dt><dd>1m<\/dd>/);
   assert.match(html, /<span class="muted progress-label">[^<]+ \/ 1h<\/span>/);
   assert.match(html, /\.times dt,\.times dd\{white-space:nowrap\}/);
   assert.match(html, /\.actions\{display:flex;flex-wrap:nowrap;/);
@@ -256,6 +262,20 @@ test('expanded card moves the running deadline down and keeps details and action
   assert.match(html, /title="Open the Slurm batch script this job ran" aria-label="Open batch script">script<\/a>/);
   assert.match(html, /title="End job" aria-label="End job">End<\/a>/);
   assert.doesNotMatch(html, />Open (?:\.err|\.out|script)<\/a>/);
+});
+
+test('terminal job elapsed and ended text appears only in expanded lifecycle details', () => {
+  const html = renderJobs({
+    jobs: [{
+      job_id: '3', name: 'finished', cluster: 'cluster_0', state: 'COMPLETED', elapsed_seconds: 600,
+      submit_at: '2026-09-30T15:00:00Z', start_at: '2026-09-30T15:01:00Z', end_at: '2026-09-30T15:11:00Z',
+    }],
+  });
+  const cardSummary = html.match(/<summary title="finished">.*?<\/summary>/s)[0];
+  assert.match(cardSummary, /<span class="muted progress-label"><\/span>/);
+  assert.doesNotMatch(cardSummary, />[^<]*(?:elapsed|ended)[^<]*</i);
+  assert.match(html, /<dt>Elapsed<\/dt><dd>10m<\/dd><dt>Ended<\/dt><dd>[^<]+<\/dd>/);
+  assert.match(html, /\.progress-label:empty\{display:none\}/);
 });
 
 test('dates use DD.MM.YYYY by default and follow the configured pattern', () => {

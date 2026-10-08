@@ -1398,11 +1398,13 @@ Cluster Watcher Activity Bar container with two sidebar views:
 
 - **My Jobs** follows the running, pending, completed, failed, and cancelled
   grouping from `cluster-watcher jobs`. State groups and individual job cards
-  are collapsible; a collapsed card retains the job name, an ID badge sized to
-  the ID (click it to copy the ID), and a progress bar with the elapsed/total
-  time or start estimate to its right. These remain on one line at the
-  sidebar's narrowest expanded width; the calculated running-job limit moves
-  into the expanded details. State-group and cluster headings use the 11px
+  are collapsible; a collapsed card retains a single-line, ellipsized job name
+  (hover it for the full name) and a progress bar with the elapsed/total time
+  or start estimate to its right. These remain on one line at the sidebar's
+  narrowest expanded width. The copyable job ID follows the cluster, partition,
+  and resources in the expanded metadata. Calculated running-job limits,
+  elapsed labels, and terminal-job end times also appear in expanded details.
+  State-group and cluster headings use the 11px
   size of the native view headings, and job titles are slightly smaller. Dates use
   `clusterWatcher.dateFormat` (default `DD.MM.YYYY`, tokens `YYYY`, `YY`, `MM`,
   `DD`) followed by 24-hour `HH:mm` local time. Expanded cards show resource

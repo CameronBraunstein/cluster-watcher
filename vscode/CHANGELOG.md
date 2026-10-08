@@ -8,6 +8,9 @@ All notable changes to the Cluster Watcher VS Code extension.
   and the complete action row on single lines. Running-job deadlines moved to
   expanded details, while archive/log/script/cancel actions use compact icons
   or labels with full tooltips.
+- Collapsed cards now truncate long job names to one line and expose the full
+  name on hover. The copyable job ID moved beside expanded resource metadata,
+  and elapsed/end text moved into expanded lifecycle details.
 
 ## 0.1.3 — 2026-10-07
 
