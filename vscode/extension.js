@@ -7,8 +7,8 @@ const { BackendManager } = require('./backend');
 const { LOG_TAIL_LINES, logDocumentContent, logRequestPath, prependLogPage, virtualLogPath } = require('./logs');
 const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = require('./events');
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
-const { RefreshCoordinator } = require('./refresh');
-const { isFailureGroup, jobRef, setDateFormat, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness } = require('./renderers');
+const { RefreshCoordinator, RefreshFeedback, refreshResultMessage } = require('./refresh');
+const { isFailureGroup, jobRef, localTime, setDateFormat, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup } = require('./renderers');
 const {
   ExecutableValidationError, jobsApiDisabled, responseError, cliTerminalOptions, configurationError, resolveConfigPath, serviceArguments, serviceCommand, validateExecutable,
 } = require('./service');
@@ -221,12 +221,13 @@ class SidebarProvider {
 
   resolveWebviewView(view) {
     this.view = view;
-    this.updateDescription();
+    // Freshness is rendered below the native heading, not beside its title.
+    this.view.description = undefined;
     // Command URIs stay disabled: buttons post a message and receive() enforces WEBVIEW_COMMANDS.
     view.webview.options = { enableScripts: true };
     view.webview.onDidReceiveMessage((message) => this.receive(message));
     if (this.payload) this.render();
-    else view.webview.html = renderMessage(this.title(), 'Connecting to the local Cluster Watcher service…');
+    else view.webview.html = renderMessage(this.title(), 'Connecting to the local Cluster Watcher service…', '', this.freshness());
   }
 
   /**
@@ -235,7 +236,6 @@ class SidebarProvider {
    */
   checked(at) {
     this.checkedAt = at;
-    this.updateDescription();
     if (!this.view) return;
     if (!this.showingData && this.payload) this.render();
     else void this.view.webview.postMessage({ type: 'checked', at });
@@ -266,10 +266,9 @@ class SidebarProvider {
     return this.kind === 'jobs' ? 'My Jobs' : 'Cluster Status';
   }
 
-  /** Refresh the stable, visible view description with collection/check times. */
-  updateDescription() {
-    if (!this.view) return;
-    this.view.description = viewFreshness(this.updatedAt, this.checkedAt) || undefined;
+  /** Return timestamps rendered immediately below this view's native heading. */
+  freshness() {
+    return { updatedAt: this.updatedAt };
   }
 
   /** Record when the current payload changed and when the request completed. */
@@ -277,7 +276,6 @@ class SidebarProvider {
     this.payload = payload;
     this.updatedAt = payload.generated_at || payload.updated_at;
     this.checkedAt = checkedAt;
-    this.updateDescription();
   }
 
   update(payload, checkedAt = Date.now()) {
@@ -288,21 +286,21 @@ class SidebarProvider {
   render() {
     if (!this.view || !this.payload) return;
     this.showingData = true;
-    this.view.webview.html = renderStatus(this.payload, this.disclosures);
+    this.view.webview.html = renderStatus(this.payload, this.disclosures, this.freshness());
   }
 
   error(error) {
     this.showingData = false;
     if (!this.view) return;
     const detail = error instanceof Error ? error.message : String(error);
-    this.view.webview.html = renderWelcome(this.title(), detail);
+    this.view.webview.html = renderWelcome(this.title(), detail, this.freshness());
   }
 
   /** Explain that the service runs without the jobs API and how to restart it. */
   jobsApiDisabled() {
     this.showingData = false;
     if (!this.view) return;
-    this.view.webview.html = renderJobsApiDisabled(this.title(), restartCommandText());
+    this.view.webview.html = renderJobsApiDisabled(this.title(), restartCommandText(), this.freshness());
   }
 }
 
@@ -344,7 +342,7 @@ class JobsSidebarProvider extends SidebarProvider {
       ...this.payload,
       jobs: this.archiveStore.activeJobs(this.payload.jobs || []),
       archived_jobs: this.archiveStore.archivedJobs(),
-    }, this.disclosures, this.cancelling);
+    }, this.disclosures, this.cancelling, this.freshness());
   }
 
   async archive(key) {
@@ -636,6 +634,23 @@ function activate(context) {
     jobsApiDisabled,
     refreshSeconds: () => configuration().refreshSeconds,
   });
+  const refreshFeedback = new RefreshFeedback(
+    (key, value) => vscode.commands.executeCommand('setContext', key, value),
+  );
+  const manualRefresh = (contextKey, refresh) => refreshFeedback.run(contextKey, async () => {
+    const result = await refresh();
+    const message = result?.outcome === 'error'
+      ? undefined
+      : refreshResultMessage(result, localTime(result.checkedAt, true));
+    if (message) void vscode.window.showInformationMessage(message);
+    return result;
+  });
+  const refreshJobsWithFeedback = () => manualRefresh(
+    'clusterWatcher.refreshingJobs', () => coordinator.refreshJobs(),
+  );
+  const refreshStatusWithFeedback = () => manualRefresh(
+    'clusterWatcher.refreshingStatus', () => coordinator.refreshStatus(),
+  );
   let controller;
   backendManager = new BackendManager(vscode, context, extensionManifest.version, {
     onWillChange: () => controller?.stopForBackendChange(),
@@ -654,8 +669,10 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('clusterWatcher.stopService', () => controller.stop()),
     vscode.commands.registerCommand('clusterWatcher.refresh', () => coordinator.refresh()),
-    vscode.commands.registerCommand('clusterWatcher.refreshJobs', () => coordinator.refreshJobs()),
-    vscode.commands.registerCommand('clusterWatcher.refreshStatus', () => coordinator.refreshStatus()),
+    vscode.commands.registerCommand('clusterWatcher.refreshJobs', refreshJobsWithFeedback),
+    vscode.commands.registerCommand('clusterWatcher.refreshJobsBusy', refreshJobsWithFeedback),
+    vscode.commands.registerCommand('clusterWatcher.refreshStatus', refreshStatusWithFeedback),
+    vscode.commands.registerCommand('clusterWatcher.refreshStatusBusy', refreshStatusWithFeedback),
     vscode.commands.registerCommand('clusterWatcher.openDashboard', () => vscode.env.openExternal(vscode.Uri.parse(configuration().backendUrl))),
     vscode.commands.registerCommand('clusterWatcher.showServiceTerminal', () => controller.showTerminal()),
     vscode.commands.registerCommand('clusterWatcher.archiveJob', async (key) => {

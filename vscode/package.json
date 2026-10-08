@@ -58,9 +58,19 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "clusterWatcher.refreshJobsBusy",
+        "title": "Cluster Watcher: Refreshing My Jobs",
+        "icon": "$(sync~spin)"
+      },
+      {
         "command": "clusterWatcher.refreshStatus",
         "title": "Cluster Watcher: Refresh Cluster Status",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "clusterWatcher.refreshStatusBusy",
+        "title": "Cluster Watcher: Refreshing Cluster Status",
+        "icon": "$(sync~spin)"
       },
       {
         "command": "clusterWatcher.openDashboard",
@@ -121,15 +131,35 @@
       ]
     },
     "menus": {
+      "commandPalette": [
+        {
+          "command": "clusterWatcher.refreshJobsBusy",
+          "when": "false"
+        },
+        {
+          "command": "clusterWatcher.refreshStatusBusy",
+          "when": "false"
+        }
+      ],
       "view/title": [
         {
           "command": "clusterWatcher.refreshJobs",
-          "when": "view == clusterWatcher.jobs",
+          "when": "view == clusterWatcher.jobs && !clusterWatcher.refreshingJobs",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clusterWatcher.refreshJobsBusy",
+          "when": "view == clusterWatcher.jobs && clusterWatcher.refreshingJobs",
           "group": "navigation@1"
         },
         {
           "command": "clusterWatcher.refreshStatus",
-          "when": "view == clusterWatcher.status",
+          "when": "view == clusterWatcher.status && !clusterWatcher.refreshingStatus",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clusterWatcher.refreshStatusBusy",
+          "when": "view == clusterWatcher.status && clusterWatcher.refreshingStatus",
           "group": "navigation@1"
         }
       ],

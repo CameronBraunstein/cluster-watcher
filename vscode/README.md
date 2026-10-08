@@ -35,7 +35,8 @@ MFA, Slurm queries, and refresh scheduling.
 **My Jobs** uses collapsible state groups instead of terminal-style banners.
 Each job is another collapsible card whose compact form contains its name,
 progress color bar, and completion/start estimate. Long names stay on one line
-and end in an ellipsis; an immediate hover label shows the full job name. Card
+and end in an ellipsis; an immediate, white-outlined hover label shows the
+cluster, job ID, and full job name. Card
 summaries use tight internal padding and reduced spacing between neighboring
 cards. The copyable job-ID badge has rectangular corners.
 Dependency-blocked cards use the short label `dependency`; the expanded
@@ -82,11 +83,16 @@ refreshes: the webview reports each expand/collapse to the extension, which
 renders the remembered state into every refreshed page (for the current VS Code
 session). Cluster names are collapsible headings in **Cluster Status**. The
 native **My Jobs** and **Cluster Status** view headings replace redundant titles
-inside each webview. Each heading displays `Updated <date and time> · Checked
-<time>`. Each heading has its own **Refresh** action, which polls only that
-view's endpoint. **Cluster Watcher: Refresh Sidebar** in the Command Palette
+inside each webview. A compact `Last update: <date and time with seconds>` line
+appears directly below each heading. Each heading has its own **Refresh**
+action, which polls only that view's endpoint.
+**Cluster Watcher: Refresh Sidebar** in the Command Palette
 refreshes both views; service, dashboard, configuration, settings, and
-backend-management actions also remain available there.
+backend-management actions also remain available there. A pressed heading
+refresh button changes briefly to a spinning sync icon, including when the
+response is unchanged. A notification distinguishes new data (`Refreshed at:`)
+from an unchanged check (`Checked, but no updates at:`), with a local date and
+time including seconds.
 
 Log documents initially contain the newest 2,000 lines. If more output exists,
 use the upward-arrow **Load 2,000 Older Lines** editor-title action; each click
@@ -134,8 +140,8 @@ Refreshes are conditional: the extension sends the previous response's ETag
 and the service answers `304 Not Modified` when your jobs and the cluster
 status are unchanged, so the views are not rebuilt (no flicker, and scroll and
 hover are kept). Progress bars, elapsed times, and wait estimates still count
-on their own every few seconds. The view-heading description shows when data
-last changed and when it was last checked.
+on their own every few seconds. The compact freshness line below each heading
+shows only when data last changed, with exact second precision.
 
 In **Cluster Status**, a wait cell without an estimate says why: `DENY` (your
 account may not use the partition), `min` (below its minimum GPU request),
@@ -145,7 +151,8 @@ probed), or `…` (the first probes are still running). Hover a cell for
 Slurm's message. The columns begin **Partition**, **Available**, **GPU**,
 **VRAM**, and **TFLOPS/s**, followed by the wait estimates and CPU total.
 Catalog names are shortened to model labels such as `H100`; hover one for its
-full GPU name.
+full GPU name. The availability bar and `idle/total` fraction stay together on
+one line for a more compact table.
 
 Two settings control background feedback:
 
@@ -157,8 +164,8 @@ Two settings control background feedback:
 - `clusterWatcher.statusBar` (default `true`) shows `N running · M pending` in
   the status bar, or a warning-coloured **offline** item when the service is
   unreachable. Its hover uses the correct singular/plural job labels and shows
-  the date and time of the latest successful jobs refresh. Click it to reveal
-  **My Jobs**.
+  the date and time of the latest successful jobs refresh, including seconds.
+  Click it to reveal **My Jobs**.
 
 `clusterWatcher.dateFormat` (default `DD.MM.YYYY`) sets how sidebar dates are
 shown, using the tokens `YYYY`, `YY`, `MM` and `DD` (for example `YYYY-MM-DD`).

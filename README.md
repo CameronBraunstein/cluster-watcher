@@ -1406,7 +1406,8 @@ Cluster Watcher Activity Bar container with two sidebar views:
   by timeout, and cancelled. Slurm `TIMEOUT` jobs use **Failed (Timeout)** and
   all other failure states use **Failed (Early)**. State groups and individual job cards
   are collapsible; a collapsed card retains a single-line, ellipsized job name
-  (hover it for the full name) and a progress bar with the run/allotted time
+  (hover it for a white-outlined `<cluster> <job ID> <full job name>` label) and
+  a progress bar with the run/allotted time
   or start estimate to its right. Compact cards use tight internal padding and
   reduced inter-card spacing; the copyable job-ID badge is rectangular.
   Completed and failed cards retain that
@@ -1440,19 +1441,24 @@ Cluster Watcher Activity Bar container with two sidebar views:
   labels such as `H100`; hover the label for the full name. A wait cell without
   an estimate is labelled as described in
   [Why a wait cell has no estimate](#why-a-wait-cell-has-no-estimate); hover it
-  for Slurm's message.
+  for Slurm's message. The availability bar and its `idle/total` fraction share
+  one line to reduce the table's width and height.
 
 The redundant in-webview **My Jobs** and **Cluster Status** titles are omitted;
-the native collapsible VS Code view headings provide those labels. Each heading
-has a compact `Updated <date and time> · Checked <time>` description. Each
-heading has its own **Refresh** action: **My Jobs** polls only job data, while
+the native collapsible VS Code view headings provide those labels. A compact
+`Last update: <date and time with seconds>` line appears directly below each
+heading. Each heading has its own **Refresh** action: **My Jobs** polls only job
+data, while
 **Cluster Status** polls only the capacity snapshot. **Cluster Watcher: Refresh
 Sidebar** in the Command Palette refreshes both views; all other Cluster
-Watcher actions also remain in the Command Palette.
+Watcher actions also remain in the Command Palette. Pressing either heading's
+refresh button temporarily replaces it with a spinning sync icon, making even
+a fast or unchanged refresh visible. A notification then reports either
+`Refreshed at: <date and time>` or `Checked, but no updates at: <date and time>`.
 
 The bottom status-bar summary shows the running and pending counts. Its hover
 pluralizes `job` correctly for each count and includes the local date and time
-of the latest successful jobs refresh.
+of the latest successful jobs refresh, including seconds.
 
 The Activity Bar SVG depicts three server boxes with a magnifying glass over
 their upper-right corner. It was created specifically for this project and is

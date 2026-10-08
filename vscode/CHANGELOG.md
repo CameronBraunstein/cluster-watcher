@@ -9,8 +9,10 @@ All notable changes to the Cluster Watcher VS Code extension.
   expanded details, while archive/log/script/cancel actions use compact icons
   or labels with full tooltips.
 - Collapsed cards now truncate long job names to one line and expose the full
-  name on hover. The copyable job ID moved beside expanded resource metadata,
-  and elapsed/end text moved into expanded lifecycle details.
+  name on hover. Hover boxes now have a white outline and show the cluster, job
+  ID, and full name in both interfaces. The copyable job ID moved beside
+  expanded resource metadata, and elapsed/end text moved into expanded
+  lifecycle details.
 - Dependency waits now use the compact `dependency` label. Open cards use a
   summary/detail divider instead of a disclosure icon, card borders flash
   immediately after layout changes and fade back more slowly, and full-name
@@ -28,15 +30,21 @@ All notable changes to the Cluster Watcher VS Code extension.
   internal padding and tighter spacing between cards.
 - Pending cards now omit `.err` and `.out`. Archived pending jobs continue to
   refresh and gain both log actions as soon as their Slurm state advances.
-- **My Jobs** and **Cluster Status** now show compact updated/checked timestamps
-  beside their native headings. Each heading has an independent **Refresh**
-  action; the Command Palette's **Refresh Sidebar** action still refreshes both.
-  Less-frequent actions remain in the Command Palette.
+- **My Jobs** and **Cluster Status** now show compact `Last update:` text
+  directly below their native headings, with second precision.
+  Each heading has an independent **Refresh** action; the Command Palette's
+  **Refresh Sidebar** action still refreshes both. Less-frequent actions remain
+  in the Command Palette.
 - The running/pending status-bar hover now pluralizes `job` for each count and
-  shows the local date and time of the latest successful jobs refresh.
+  shows the local date and time, including seconds, of the latest successful
+  jobs refresh.
 - Cluster Status now orders its leading columns as **Partition**, **Available**,
   **GPU**, **VRAM**, and **TFLOPS/s**. GPU names use compact model labels such
   as `H100`, with the full catalog name available on hover in both interfaces.
+- Cluster Status keeps each availability bar and fraction on one line. Manual
+  view refreshes briefly show a spinning sync icon so fast and unchanged
+  checks still provide immediate feedback, followed by a notification that
+  distinguishes refreshed data from a check with no updates.
 
 ## 0.1.3 — 2026-10-07
 

@@ -53,17 +53,26 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   // viewContainer/title is a proposed API that published extensions cannot use.
   assert.equal(manifest.contributes.menus['viewContainer/title'], undefined);
   assert.deepEqual(manifest.contributes.menus['view/title'], [
-    { command: 'clusterWatcher.refreshJobs', when: 'view == clusterWatcher.jobs', group: 'navigation@1' },
-    { command: 'clusterWatcher.refreshStatus', when: 'view == clusterWatcher.status', group: 'navigation@1' },
+    { command: 'clusterWatcher.refreshJobs', when: 'view == clusterWatcher.jobs && !clusterWatcher.refreshingJobs', group: 'navigation@1' },
+    { command: 'clusterWatcher.refreshJobsBusy', when: 'view == clusterWatcher.jobs && clusterWatcher.refreshingJobs', group: 'navigation@1' },
+    { command: 'clusterWatcher.refreshStatus', when: 'view == clusterWatcher.status && !clusterWatcher.refreshingStatus', group: 'navigation@1' },
+    { command: 'clusterWatcher.refreshStatusBusy', when: 'view == clusterWatcher.status && clusterWatcher.refreshingStatus', group: 'navigation@1' },
+  ]);
+  assert.deepEqual(manifest.contributes.menus.commandPalette, [
+    { command: 'clusterWatcher.refreshJobsBusy', when: 'false' },
+    { command: 'clusterWatcher.refreshStatusBusy', when: 'false' },
   ]);
   assert.match(manifest.contributes.menus['editor/title'][0].when, /cluster-watcher-log/);
   const commands = new Map(manifest.contributes.commands.map((command) => [command.command, command]));
   assert.equal(commands.get('clusterWatcher.refresh').icon, '$(refresh)');
   assert.equal(commands.get('clusterWatcher.refreshJobs').icon, '$(refresh)');
+  assert.equal(commands.get('clusterWatcher.refreshJobsBusy').icon, '$(sync~spin)');
   assert.equal(commands.get('clusterWatcher.refreshStatus').icon, '$(refresh)');
+  assert.equal(commands.get('clusterWatcher.refreshStatusBusy').icon, '$(sync~spin)');
   assert.equal(commands.get('clusterWatcher.startService').icon, '$(play)');
   const extensionSource = readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-  assert.match(extensionSource, /this\.view\.description = viewFreshness\(this\.updatedAt, this\.checkedAt\)/);
+  assert.match(extensionSource, /this\.view\.description = undefined/);
+  assert.match(extensionSource, /renderStatus\(this\.payload, this\.disclosures, this\.freshness\(\)\)/);
   assert.match(extensionSource, /coordinator\.refreshJobs\(\)/);
   assert.match(extensionSource, /coordinator\.refreshStatus\(\)/);
 });

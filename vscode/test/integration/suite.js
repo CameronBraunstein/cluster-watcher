@@ -11,7 +11,8 @@ const manifest = require('../../package.json');
 
 const EXPECTED_COMMANDS = [
   'clusterWatcher.startService', 'clusterWatcher.stopService', 'clusterWatcher.refresh',
-  'clusterWatcher.refreshJobs', 'clusterWatcher.refreshStatus',
+  'clusterWatcher.refreshJobs', 'clusterWatcher.refreshJobsBusy',
+  'clusterWatcher.refreshStatus', 'clusterWatcher.refreshStatusBusy',
   'clusterWatcher.openDashboard', 'clusterWatcher.showServiceTerminal', 'clusterWatcher.loadMoreLog',
   'clusterWatcher.runSetup', 'clusterWatcher.editConfig', 'clusterWatcher.openSettings',
   'clusterWatcher.manageBackend',

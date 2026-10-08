@@ -52,7 +52,9 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .my-jobs { border:1px solid #2563eb66; background:#2563eb0c; border-radius:.5rem; margin:1rem 0; padding:1rem; }
 .my-jobs h2 { margin:0 0 .75rem; } .job-group { margin:.7rem 0; } .job-group > summary { cursor:pointer; font-weight:700; }
 .job-card-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:.65rem; margin:.65rem 0; }
-.job-card { border:1px solid #8885; border-radius:.4rem; background:Canvas; } .job-card > summary { display:grid; gap:.25rem; padding:.7rem; cursor:pointer; }
+.job-card { border:1px solid #8885; border-radius:.4rem; background:Canvas; } .job-card > summary { display:grid; position:relative; gap:.25rem; padding:.7rem; cursor:pointer; }
+.job-card > summary[data-full-name]::after { content:attr(data-full-name); position:absolute; z-index:10; left:.35rem; top:calc(100% + 2px); max-width:calc(100% - 1rem); padding:.25rem .4rem; border:1px solid #8888; outline:1px solid #fff; border-radius:2px; background:Canvas; color:CanvasText; font-size:.75rem; font-weight:400; line-height:1.25; white-space:normal; overflow-wrap:anywhere; visibility:hidden; opacity:0; pointer-events:none; }
+.job-card:not([open]) > summary[data-full-name]:hover::after { visibility:visible; opacity:1; }
 .job-card-summary-title { display:flex; justify-content:space-between; gap:.5rem; align-items:baseline; }
 .job-card-body { padding:0 .7rem .7rem; } .job-card-actions, .job-sort-controls { display:flex; flex-wrap:wrap; gap:.4rem; margin:.55rem 0; }
 .job-card-actions button, .job-sort-controls button { cursor:pointer; }
@@ -386,6 +388,7 @@ function jobDisclosureAttribute(key, defaultOpen = false) {
 
 function jobCard(job, listName) {
   const identifier = jobId(job), name = job.name || identifier;
+  const hoverText = [job.cluster, identifier, name].filter(Boolean).join(' ');
   const nodes = nodeCount(job), gpus = Number(job.gpus) || 0, cpus = Number(job.cpus) || 0;
   const resources = job.id || gpus || cpus ? `${nodes} node${nodes === 1 ? '' : 's'} · ${gpus} GPU${gpus === 1 ? '' : 's'} · ${cpus} CPU${cpus === 1 ? '' : 's'}` : `${nodes} node${nodes === 1 ? '' : 's'}`;
   const group = jobGroup(job);
@@ -405,7 +408,7 @@ function jobCard(job, listName) {
   const actionButton = `<button data-job-action="${action}" data-job-key="${escapeHtml(jobArchiveKey(job))}">${actionLabel}</button>`;
   const logButtons = jobsApiEnabled && group !== 'PENDING' ? `<button class="log-button" data-log-stream="err" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .err</button><button class="log-button" data-log-stream="out" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .out</button>` : '';
   const disclosureKey = `card:${listName}:${jobArchiveKey(job)}`;
-  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}"${jobDisclosureAttribute(disclosureKey)}><summary><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
+  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}"${jobDisclosureAttribute(disclosureKey)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
 }
 
 function jobGroups(jobs, listName) {

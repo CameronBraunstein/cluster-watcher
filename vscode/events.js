@@ -63,7 +63,7 @@ function statusSummary(jobs, refreshedAt) {
     else if (group === 'PENDING') pending += 1;
   }
   const text = running || pending ? `$(server-process) ${running} running · ${pending} pending` : '$(server-process) no active jobs';
-  const refreshed = refreshedAt ? `\nLast refreshed ${localTime(refreshedAt)}.` : '';
+  const refreshed = refreshedAt ? `\nLast refreshed ${localTime(refreshedAt, true)}.` : '';
   return {
     text,
     tooltip: `Cluster Watcher: ${jobCount(running)} running and ${jobCount(pending)} pending.${refreshed}\nClick to show My Jobs.`,

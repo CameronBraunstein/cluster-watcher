@@ -64,6 +64,8 @@ test('status shows GPU specifications, availability, and wait matrix', () => {
   assert.match(html, /<td title="NVIDIA H100 NVL">H100<\/td>/);
   assert.match(html, /80G/);
   assert.match(html, /2\/8/);
+  assert.match(html, /<div class="availability-cell"><div class="availability"[^>]*>.*?<\/div><span>2\/8<\/span><\/div>/);
+  assert.match(html, /\.availability-cell\{display:flex;align-items:center;gap:3px;white-space:nowrap\}/);
   assert.ok(html.indexOf('class="unavailable"') < html.indexOf('class="available"'));
   assert.match(html, /CPU threads/);
   assert.ok(html.indexOf('<th>Partition</th><th>Available</th><th>GPU</th><th>VRAM</th><th>TFLOPS\/s</th>') >= 0);
@@ -115,11 +117,12 @@ test('openAttribute falls back to the renderer default', () => {
 
 test('collapsed title truncates with a full-name tooltip and the job ID moves to expanded metadata', () => {
   const html = renderJobs({ jobs: [{ job_id: '2000068_123', name: 'a very long job title indeed', cluster: 'cluster_0', state: 'RUNNING' }] });
-  const cardSummary = html.match(/<summary data-full-name="a very long job title indeed">.*?<\/summary>/s)[0];
+  const cardSummary = html.match(/<summary data-full-name="cluster_0 2000068_123 a very long job title indeed">.*?<\/summary>/s)[0];
   assert.match(cardSummary, /<span class="name">a very long job title indeed<\/span>/);
   assert.doesNotMatch(cardSummary, /class="badge job-id/);
   assert.match(html, /\.name\{[^}]*overflow:hidden;text-overflow:ellipsis;white-space:nowrap;/);
   assert.match(html, /\.card:not\(\[open\]\)>summary\[data-full-name\]:hover::after\{visibility:visible;opacity:1\}/);
+  assert.match(html, /\.card>summary\[data-full-name\]::after\{outline:1px solid #fff\}/);
   assert.doesNotMatch(cardSummary, / title=/);
   assert.match(html, /<span class="badge job-id" role="button" tabindex="0" data-copy="2000068_123"/);
   assert.match(html, /<div class="muted card-meta"><span class="badge job-id"[^>]*>2000068_123<\/span> cluster_0 \/ no partition · 0 node · 0 GPU · 0 CPU<\/div>/);
@@ -189,7 +192,7 @@ test('pending jobs hide log actions until a refreshed archived snapshot leaves p
   const pending = { job_id: '7', name: 'pending', cluster: 'cluster_0', state: 'PENDING', submit_at: '2026-10-01T10:00:00Z' };
   const completedArchive = { ...pending, name: 'archived-completed', state: 'COMPLETED', end_at: '2026-10-01T10:05:00Z' };
   const html = renderJobs({ jobs: [pending], archived_jobs: [completedArchive] });
-  const card = name => html.match(new RegExp(`<summary data-full-name="${name}">.*?</details>`, 's'))[0];
+  const card = name => html.match(new RegExp(`<summary data-full-name="cluster_0 7 ${name}">.*?</details>`, 's'))[0];
 
   assert.doesNotMatch(card('pending'), /clusterWatcher\.openLog/);
   assert.match(card('pending'), /clusterWatcher\.openScript/);
@@ -308,7 +311,7 @@ test('terminal cards keep elapsed time in the compact fraction and end time in d
       submit_at: '2026-09-30T15:00:00Z', start_at: '2026-09-30T15:01:00Z', end_at: '2026-09-30T15:11:00Z',
     }],
   });
-  const cardSummary = html.match(/<summary data-full-name="finished">.*?<\/summary>/s)[0];
+  const cardSummary = html.match(/<summary data-full-name="cluster_0 3 finished">.*?<\/summary>/s)[0];
   assert.match(cardSummary, /<span class="muted progress-label">10m \/ 1h<\/span>/);
   assert.doesNotMatch(cardSummary, />[^<]*(?:elapsed|ended)[^<]*</i);
   assert.doesNotMatch(html, /<dt>Elapsed<\/dt>/);
@@ -324,7 +327,8 @@ test('expanded lifecycle rows are state-specific and failure groups distinguish 
     { job_id: '4', name: 'timeout-job', cluster: 'c', state: 'TIMEOUT', submit_at: '2026-10-01T10:00:00Z', start_at: '2026-10-01T10:01:00Z', end_at: '2026-10-01T11:01:00Z' },
   ];
   const html = renderJobs({ jobs });
-  const card = name => html.match(new RegExp(`<summary data-full-name="${name}">.*?</details>`, 's'))[0];
+  const identifiers = { 'running-job': '1', 'pending-job': '2', 'early-job': '3', 'timeout-job': '4' };
+  const card = name => html.match(new RegExp(`<summary data-full-name="c ${identifiers[name]} ${name}">.*?</details>`, 's'))[0];
 
   assert.doesNotMatch(card('running-job'), /<dt>Ended<\/dt>/);
   assert.doesNotMatch(card('pending-job'), /<dt>(?:Launched|Ended)<\/dt>/);
@@ -354,12 +358,17 @@ test('dates use DD.MM.YYYY by default and follow the configured pattern', () => 
   }
 });
 
-test('view freshness combines the updated date/time with the latest check time', () => {
-  const updated = new Date(2026, 9, 8, 14, 5, 0).toISOString();
-  const checked = new Date(2026, 9, 8, 14, 6, 7).getTime();
-  assert.equal(viewFreshness(updated, checked), 'Updated 08.10.2026 14:05 · Checked 14:06:07');
-  assert.equal(viewFreshness(updated), 'Updated 08.10.2026 14:05');
-  assert.equal(viewFreshness(undefined, checked), 'Checked 14:06:07');
+test('view freshness shows only the last update with second precision', () => {
+  const updated = new Date(2026, 9, 8, 14, 5, 23).toISOString();
+  assert.equal(viewFreshness(updated), 'Last update: 08.10.2026 14:05:23');
+  assert.equal(viewFreshness(undefined), '');
+
+  const html = renderStatus(
+    { clusters: [] }, {}, { updatedAt: updated },
+  );
+  assert.match(html, /<p class="view-freshness">Last update: 08\.10\.2026 14:05:23<\/p>/);
+  assert.doesNotMatch(html, /Last checked|data-last-checked/);
+  assert.match(html, /\.view-freshness\{margin:0 0 7px;/);
 });
 
 test('a closed SSH session offers a login button on the cluster card', () => {
