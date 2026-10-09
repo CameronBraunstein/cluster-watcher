@@ -63,7 +63,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .job-progress { display:block; margin-top:.5rem; } .job-progress-track { display:block; height:.62rem; overflow:hidden; border-radius:999px; background:#8883; }
 .job-progress-fill { display:block; height:100%; background:#2563eb; transition:width 1s linear; } .job-progress-text { display:block; max-width:100%; margin-top:.22rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.76rem; color:#666; }
 .job-progress-message { display:block; max-width:100%; margin-top:.5rem; overflow-wrap:anywhere; font-size:.76rem; line-height:1.3; color:#666; }
-.job-dependency-link { color:LinkText; font-family:ui-monospace, monospace; } .job-dependency-icon { display:inline-block; margin-left:.15rem; font-family:system-ui, sans-serif; font-weight:700; cursor:help; } .job-dependency-icon.waiting { font-weight:400; } .job-dependency-icon.satisfied { color:#16a34a; } .job-dependency-icon.failed { color:#dc2626; }
+.job-dependency-link { color:LinkText; font-family:ui-monospace, monospace; } .job-dependency-icon { display:inline-block; margin-left:.15rem; font-family:system-ui, sans-serif; font-weight:700; } .job-dependency-icon.waiting { font-weight:400; } .job-dependency-icon.satisfied { color:#16a34a; } .job-dependency-icon.failed { color:#dc2626; }
 .job-progress.pending .job-progress-fill { background:#7c3aed; } .job-message { margin-top:.5rem; font-size:.78rem; color:#666; }
 .job-progress.completed .job-progress-fill { background:#16a34a; } .job-progress.failed_early .job-progress-fill, .job-progress.failed_timeout .job-progress-fill { background:#dc2626; } .job-progress.cancelled .job-progress-fill, .job-progress.other .job-progress-fill { background:#6b7280; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; }
@@ -73,8 +73,10 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .partition-section { margin:1.25rem 0; } .partition-heading { display:flex; align-items:center; gap:.65rem; margin:0 0 .55rem; } .partition-heading h3 { margin:0; }
 .partition-status { display:flex; position:relative; flex-wrap:wrap; gap:2px; cursor:help; } .node-state-block { width:.75rem; height:.75rem; border-radius:2px; }
 .partition-status[data-availability]::after { content:attr(data-availability); position:absolute; z-index:20; left:0; top:calc(100% + 4px); width:max-content; max-width:min(24rem, 80vw); padding:.25rem .4rem; border:1px solid #8888; outline:1px solid #fff; border-radius:2px; background:Canvas; color:CanvasText; font-size:.75rem; font-weight:400; line-height:1.25; white-space:normal; visibility:hidden; opacity:0; pointer-events:none; }
+.fast-hover { display:inline-block; position:relative; cursor:help; }
+.fast-hover[data-fast-tooltip]::after { content:attr(data-fast-tooltip); position:absolute; z-index:20; left:0; top:calc(100% + 4px); width:max-content; max-width:min(24rem, 80vw); padding:.25rem .4rem; border:1px solid #8888; outline:1px solid #fff; border-radius:2px; background:Canvas; color:CanvasText; font-size:.75rem; font-weight:400; line-height:1.25; white-space:normal; visibility:hidden; opacity:0; pointer-events:none; }
 @keyframes availability-hover-in { from { opacity:0; } to { opacity:1; } }
-.partition-status[data-availability]:hover::after { visibility:visible; animation:availability-hover-in .05s linear .1s both; }
+.partition-status[data-availability]:hover::after, .fast-hover[data-fast-tooltip]:hover::after { visibility:visible; animation:availability-hover-in .05s linear .1s both; }
 .partition-compute { color:#666; font-size:.8rem; margin:-.2rem 0 .55rem; }
 .wait-chart { margin:.8rem 0 1.2rem; max-width:720px; } .wait-chart figcaption { font-size:.8rem; margin-bottom:.45rem; }
 .wait-chart-layout { display:grid; grid-template-columns:2.8rem minmax(260px, 1fr); gap:.4rem; }
@@ -306,7 +308,7 @@ function dependencyLink(owner, clause, id) {
   const status = dependencyStatus(owner, clause, id);
   const icons = { waiting:'🕒', satisfied:'✓', failed:'✕' };
   const description = dependencyStatusDescription(status, clause, id);
-  return `${dependencyJobLink(owner, id)} <span class="job-dependency-icon ${status}" role="img" aria-label="${escapeHtml(description)}" title="${escapeHtml(description)}">${icons[status]}</span>`;
+  return `${dependencyJobLink(owner, id)} <span class="job-dependency-icon fast-hover ${status}" role="img" aria-label="${escapeHtml(description)}" data-fast-tooltip="${escapeHtml(description)}">${icons[status]}</span>`;
 }
 
 /** Render the compact dependency label with links to jobs already on the page. */
@@ -656,7 +658,7 @@ function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, es
   const status = [...nodes].sort((left, right) => statePriority(left) - statePriority(right) || String(left.name).localeCompare(String(right.name))).map(node => `<i class="node-state-block ${summaryStateClass(node)}"></i>`).join('');
   const summary = compute.get(name);
   const best = summary && summary.best_gpu;
-  const details = best ? `${summary.rank ? `#${summary.rank} · ` : ''}<span title="${escapeHtml(best.name)}">${escapeHtml(compactGpuName(best.name))}</span> · ${escapeHtml(best.vram_gb)} GB VRAM/GPU · ${escapeHtml(best.tensor_tflops.toLocaleString())} FP16/BF16 Tensor TFLOPS/GPU · ${escapeHtml(summary.cpu_threads.toLocaleString())} CPU threads` : 'GPU model not catalogued';
+  const details = best ? `${summary.rank ? `#${summary.rank} · ` : ''}<span class="fast-hover" data-fast-tooltip="${escapeHtml(best.name)}" aria-label="${escapeHtml(best.name)}">${escapeHtml(compactGpuName(best.name))}</span> · ${escapeHtml(best.vram_gb)} GB VRAM/GPU · ${escapeHtml(best.tensor_tflops.toLocaleString())} FP16/BF16 Tensor TFLOPS/GPU · ${escapeHtml(summary.cpu_threads.toLocaleString())} CPU threads` : 'GPU model not catalogued';
   const badges = jobBadges(jobs, name, thresholds);
   const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}</h3><div class="partition-status" data-availability="${escapeHtml(availability)}" aria-label="${escapeHtml(availability)}">${status}</div>${badges ? `<div class="job-badges">${badges}</div>` : ''}</div>`;
   const body = `<div class="partition-compute">${details}</div>${waitChart(estimates, name, estimatesUpdatedAt)}<div class="node-grid">${nodesByAvailableGpu(nodes).map(nodeCard).join('')}</div>`;

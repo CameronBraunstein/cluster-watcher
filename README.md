@@ -1317,10 +1317,11 @@ A job with an unsatisfied dependency likewise omits the bar and uses
 that the card could not be found. In the expanded card, each ID is followed by
 a clock while waiting, a green check when its condition is satisfied, or a red
 x when it failed. Hovering the icon explains the condition, replacing the
-visible Slurm status parenthetical. Slurm usually removes satisfied entries
-from `%E`, so a check is shown only while that ID is still available in the
-expression or another retained job snapshot. Jobs whose overall dependency is
-impossible move from **Pending** to **Failed Dependency**.
+visible Slurm status parenthetical. This hover uses the same fast display as
+the availability breakdown. Slurm usually removes satisfied entries from `%E`,
+so a check is shown only while that ID is still available in the expression or
+another retained job snapshot. Jobs whose overall dependency is impossible
+move from **Pending** to **Failed Dependency**.
 
 Running jobs use Slurm's `%M` elapsed time and `%l` original full time limit to
 draw progress from the actual beginning of the allocation—not from when the
@@ -1464,10 +1465,12 @@ Cluster Watcher Activity Bar container with two sidebar views:
   rectangular job-ID copy badge uses an inset focus-colored hover/focus border
   so none of its edges are clipped.
 - **Cluster Status** follows `cluster-watcher status`: partitions are separated
-  by collapsible cluster headings. Its columns begin **Partition**,
-  **Available**, **GPU**, **VRAM**, and **TFLOPS/s**, followed by one-hour wait
-  estimates for 1–64 GPUs and CPU threads. GPU catalog names use compact model
-  labels such as `H100`; hover the label for the full name. A wait cell without
+  by collapsible cluster headings. Each partition name occupies a full-width
+  row above its capacity data, so the data columns begin **Available**, **GPU**,
+  **VRAM**, and **TFLOPS/s**, followed by one-hour wait estimates for 1–64 GPUs
+  and CPU threads. GPU catalog names use compact model labels such as `H100`;
+  hover the label for the full name using the same fast hover as availability.
+  A wait cell without
   an estimate is labelled as described in
   [Why a wait cell has no estimate](#why-a-wait-cell-has-no-estimate); hover it
   for Slurm's message. The availability bar and its `idle/total` fraction share

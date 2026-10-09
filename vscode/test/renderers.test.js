@@ -62,18 +62,22 @@ test('status shows GPU specifications, availability, and wait matrix', () => {
     clusters: [{ name: 'cluster_0', reachable: true, partitions: [partition] }],
   });
 
-  assert.match(html, /<td title="NVIDIA H100 NVL">H100<\/td>/);
+  assert.match(html, /<td class="gpu-model" data-fast-tooltip="NVIDIA H100 NVL" aria-label="NVIDIA H100 NVL">H100<\/td>/);
   assert.match(html, /80G/);
   assert.match(html, /2\/8/);
   assert.match(html, /<div class="availability-cell"><div class="availability"[^>]*>.*?<\/div><span>2\/8<\/span><\/div>/);
   assert.match(html, /\.availability-cell\{display:flex;align-items:center;gap:3px;white-space:nowrap\}/);
   assert.ok(html.indexOf('class="available"') < html.indexOf('class="unavailable"'));
   assert.match(html, /data-availability="Nodes: 2 idle, 3 full, 1 reserved, 1 down"/);
+  assert.match(html, /data-fast-tooltip="Nodes: 2 idle, 3 full, 1 reserved, 1 down"/);
   assert.doesNotMatch(html, /data-availability="[^"]*GPUs:/);
-  assert.match(html, /const AVAILABILITY_HOVER_DELAY_MS = 100/);
+  assert.match(html, /const FAST_HOVER_DELAY_MS = 100/);
+  assert.match(html, /querySelectorAll\('\[data-fast-tooltip\]'\)/);
   assert.doesNotMatch(html, /0 mixed/);
   assert.match(html, /CPU threads/);
-  assert.ok(html.indexOf('<th>Partition</th><th>Available</th><th>GPU</th><th>VRAM</th><th>TFLOPS\/s</th>') >= 0);
+  assert.ok(html.indexOf('<th>Available</th><th>GPU</th><th>VRAM</th><th>TFLOPS/s</th>') >= 0);
+  assert.doesNotMatch(html, /<th>Partition<\/th>/);
+  assert.match(html, /<tbody class="partition-rows"><tr class="partition-name-row"><th colspan="12" scope="rowgroup">gpu-h100<\/th><\/tr><tr><td>/);
   assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary>cluster_0<\/summary>/);
   assert.doesNotMatch(html, /## cluster_0 ##/);
   assert.doesNotMatch(html, /<body><h2>Cluster Status<\/h2>/);
@@ -182,7 +186,7 @@ test('dependencies are parsed and rendered as links to the referenced card', () 
     { job_id: '12', cluster: 'cluster_0', state: 'RUNNING' },
     { job_id: '13', cluster: 'cluster_0', state: 'PENDING', dependency: 'afterok:12(unfulfilled)' },
   ] });
-  assert.match(html, /<dt>Depends on<\/dt><dd class="dependency-value">afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"[^>]*>12<\/a> <span class="dependency-icon waiting"[^>]*title="Unfulfilled: waiting for job 12 to satisfy afterok"[^>]*>🕒<\/span>/);
+  assert.match(html, /<dt>Depends on<\/dt><dd class="dependency-value">afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"[^>]*>12<\/a> <span class="dependency-icon waiting"[^>]*data-fast-tooltip="Unfulfilled: waiting for job 12 to satisfy afterok"[^>]*>🕒<\/span>/);
   const summary = html.match(/<summary data-full-name="cluster_0 13 13">.*?<\/summary>/s)[0];
   assert.match(summary, /dependency:afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"[^>]*>12<\/a>/);
   assert.doesNotMatch(summary, /dependency-icon/);
@@ -218,9 +222,9 @@ test('dependency icons reflect referenced outcomes and impossible jobs get their
   assert.match(html, /class="dependency-icon satisfied"[^>]*>✓<\/span>/);
   assert.match(html, /class="dependency-icon failed"[^>]*>✕<\/span>/);
   assert.match(html, /class="dependency-icon waiting"[^>]*>🕒<\/span>/);
-  assert.match(html, /title="Satisfied: job 10 satisfied afterany"/);
-  assert.match(html, /title="Failed: job 11 cannot satisfy afterok"/);
-  assert.match(html, /title="Waiting: waiting for job 12 to satisfy afterok"/);
+  assert.match(html, /data-fast-tooltip="Satisfied: job 10 satisfied afterany"/);
+  assert.match(html, /data-fast-tooltip="Failed: job 11 cannot satisfy afterok"/);
+  assert.match(html, /data-fast-tooltip="Waiting: waiting for job 12 to satisfy afterok"/);
   assert.match(html, /\.dependency-icon\.satisfied\{color:var\(--vscode-testing-iconPassed\)\}/);
   assert.match(html, /\.dependency-icon\.failed\{color:var\(--vscode-errorForeground\)\}/);
 });

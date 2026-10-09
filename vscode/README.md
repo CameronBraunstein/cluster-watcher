@@ -45,11 +45,12 @@ Dependency-blocked cards omit the empty progress bar and show
 reports when it cannot be found. In the expanded **Depends on** row, a clock
 after an ID marks it as waiting, a green check marks it as satisfied, and a red
 x marks it as failed. Hovering an icon shows the Slurm status and a fuller
-description instead of displaying a status parenthetical. Because Slurm
-normally removes satisfied IDs from its remaining-dependencies field, checks
-appear only while the ID remains available in the expression or a retained
-snapshot. Jobs whose overall condition is impossible appear under **Failed
-Dependency** instead of **Pending**. Open cards use a horizontal
+description instead of displaying a status parenthetical, using the same fast
+hover timing as the availability breakdown. Because Slurm normally removes
+satisfied IDs from its remaining-dependencies field, checks appear only while
+the ID remains available in the expression or a retained snapshot. Jobs whose
+overall condition is impossible appear under **Failed Dependency** instead of
+**Pending**. Open cards use a horizontal
 divider between the always-visible summary and their details instead of a
 disclosure icon. Opening or closing highlights the card border immediately,
 then fades that highlight more slowly.
@@ -168,13 +169,15 @@ account may not use the partition), `min` (below its minimum GPU request),
 `limit` (over a limit for your account), `n/a` (no node can run it now, e.g.
 all drained), `ERR` (a real failure, such as Slurm not answering), `?` (not
 probed), or `…` (the first probes are still running). Hover a cell for
-Slurm's message. The columns begin **Partition**, **Available**, **GPU**,
-**VRAM**, and **TFLOPS/s**, followed by the wait estimates and CPU total.
-Catalog names are shortened to model labels such as `H100`; hover one for its
-full GPU name. The availability bar and `idle/total` fraction stay together on
-one line for a more compact table. Green available capacity appears on the left
-and red unavailable capacity follows it. Hover the bar for a node-only state
-breakdown that appears after about 100 ms; zero-count categories are omitted.
+Slurm's message. Each partition name has a full-width row above its capacity
+data; the remaining columns begin **Available**, **GPU**, **VRAM**, and
+**TFLOPS/s**, followed by the wait estimates and CPU total. Catalog names are
+shortened to model labels such as `H100`; hover one for its full GPU name after
+the same roughly 100 ms delay as the availability bar. The availability bar
+and `idle/total` fraction stay together on one line for a more compact table.
+Green available capacity appears on the left and red unavailable capacity
+follows it. Hover the bar for a node-only state breakdown; zero-count
+categories are omitted.
 
 Two settings control background feedback:
 

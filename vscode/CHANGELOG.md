@@ -18,7 +18,7 @@ All notable changes to the Cluster Watcher VS Code extension.
 - Dependency waits now use the compact `dependency:<type> <job ID>` label; the
   ID opens its job card or reports that it could not be found. In expanded
   details, waiting, satisfied, and failed IDs are followed by clock, check, and
-  x icons with descriptive hover text instead of visible status parentheses;
+  x icons with descriptive fast hover text instead of visible status parentheses;
   impossible jobs move from **Pending** to **Failed Dependency**. Unavailable
   starts say **no estimate available**, and dependency/no-estimate cases omit
   the empty progress bar. Open cards use a summary/detail divider instead of a disclosure icon,
@@ -48,9 +48,11 @@ All notable changes to the Cluster Watcher VS Code extension.
 - The running/pending status-bar hover now pluralizes `job` for each count and
   shows the local date and time, including seconds, of the latest successful
   jobs refresh.
-- Cluster Status now orders its leading columns as **Partition**, **Available**,
-  **GPU**, **VRAM**, and **TFLOPS/s**. GPU names use compact model labels such
-  as `H100`, with the full catalog name available on hover in both interfaces.
+- Cluster Status puts each partition name in a full-width row above its data,
+  removing the dedicated **Partition** column. The data columns begin
+  **Available**, **GPU**, **VRAM**, and **TFLOPS/s**. GPU names use compact model
+  labels such as `H100`, with the full catalog name available through the same
+  fast hover used by availability in both interfaces.
 - Cluster Status keeps each availability bar and fraction on one line, puts
   green available capacity before red unavailable capacity, and shows a
   nonzero-only, node-only state breakdown after a 100 ms hover. Manual
