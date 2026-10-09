@@ -232,8 +232,27 @@ class JobServiceTests(TimedTestCase):
     def test_active_record_exposes_dependency(self):
         from clusterwatcher.jobs import _active_record
 
-        record = _active_record("alpha", {"id": "11", "state": "PENDING", "dependency": "afterok:10(unfulfilled)"})
-        self.assertEqual(record["dependency"], "afterok:10(unfulfilled)")
+        record = _active_record(
+            "alpha",
+            {
+                "id": "11",
+                "state": "PENDING",
+                "dependency": "afterok:10(failed)",
+                "reason": "DependencyNeverSatisfied",
+            },
+        )
+        self.assertEqual(record["dependency"], "afterok:10(failed)")
+        self.assertEqual(record["reason"], "DependencyNeverSatisfied")
+        waiting = _active_record(
+            "alpha",
+            {
+                "id": "12",
+                "state": "PENDING",
+                "dependency": "afterok:10(unfulfilled)",
+                "reason": "Dependency",
+            },
+        )
+        self.assertEqual(waiting["reason"], "Dependency: afterok:10(unfulfilled)")
         self.assertIsNone(_active_record("alpha", {"id": "12", "state": "PENDING", "dependency": "(null)"})["dependency"])
 
     def test_since_defaults_to_24_hours_and_personal_api_is_loopback_only(self):

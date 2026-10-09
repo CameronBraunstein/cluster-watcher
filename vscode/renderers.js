@@ -71,6 +71,27 @@ function stateGroup(value) {
   return 'OTHER';
 }
 
+/** Return whether Slurm says a pending job's overall dependency is impossible. */
+function hasFailedDependency(job) {
+  if (stateGroup(job.state) !== 'PENDING') return false;
+  if (/dependency\s*never\s*satisfied/i.test(String(job.reason || ''))) return true;
+  const expression = String(job.dependency || '');
+  const clauses = parseDependency(expression);
+  if (!clauses.length) return false;
+  const failed = (clause) => /^(?:failed|invalid|never satisfied)$/i.test(clause.status.trim());
+  return expression.includes('?') ? clauses.every(failed) : clauses.some(failed);
+}
+
+/** Map a complete job record onto its visible card group. */
+function jobGroup(job) {
+  return hasFailedDependency(job) ? 'FAILED_DEPENDENCY' : stateGroup(job.state);
+}
+
+/** Return whether the job has not launched and therefore lacks logs/timestamps. */
+function isQueuedGroup(group) {
+  return group === 'PENDING' || group === 'FAILED_DEPENDENCY';
+}
+
 /** Return whether a board group represents a failed job. */
 function isFailureGroup(group) {
   return group === 'FAILED_EARLY' || group === 'FAILED_TIMEOUT';
@@ -166,7 +187,7 @@ function progressView(spec, now) {
 }
 
 /** Render a compact dependency link or no-estimate message without an empty bar. */
-function pendingExplanation(job) {
+function pendingExplanation(job, jobs = []) {
   const rawDependency = String(job.dependency || '').trim();
   const dependency = ['(null)', 'NULL', 'None', 'N/A'].includes(rawDependency) ? '' : rawDependency;
   const reasonMatch = /^dependency(?::\s*(.*))?$/i.exec(String(job.reason || '').trim());
@@ -174,7 +195,7 @@ function pendingExplanation(job) {
   if (expression || reasonMatch) {
     const clauses = parseDependency(expression);
     const rendered = clauses.map((clause) => {
-      const links = clause.ids.map((id) => `<a class="dep-link" href="#" data-jump="${escapeHtml(`${job.cluster}/${id}`)}" title="Show job ${escapeHtml(id)}">${escapeHtml(id)}</a>`).join(',');
+      const links = clause.ids.map((id) => dependencyLink(job, clause, id, jobs)).join(',');
       return `${escapeHtml(clause.type)}${links ? ` ${links}` : ''}`;
     }).join(', ');
     return `dependency:${rendered || escapeHtml(expression)}`;
@@ -183,10 +204,10 @@ function pendingExplanation(job) {
 }
 
 /** Render state-appropriate elapsed/wait progress that the webview keeps current. */
-function jobProgress(job, asOf, now = Date.now()) {
+function jobProgress(job, asOf, now = Date.now(), jobs = []) {
   const spec = progressSpec(job, asOf);
-  if (spec.group === 'PENDING' && spec.expected == null) {
-    const explanation = pendingExplanation(job);
+  if (jobGroup(job) === 'FAILED_DEPENDENCY' || (spec.group === 'PENDING' && spec.expected == null)) {
+    const explanation = pendingExplanation(job, jobs);
     return `<span class="muted progress-message">${explanation}</span>`;
   }
   const view = progressView(spec, now);
@@ -203,10 +224,10 @@ function runningLimitRow(job, asOf) {
 
 /** Render only lifecycle rows that are meaningful for the job's current state. */
 function lifecycleRows(job, asOf) {
-  const group = stateGroup(job.state);
+  const group = jobGroup(job);
   const rows = [`<dt>Submitted</dt><dd>${escapeHtml(localTime(job.submit_at || job.submit_time))}</dd>`];
-  if (group !== 'PENDING') rows.push(`<dt>Launched</dt><dd>${escapeHtml(lifecycle(job, 'launched'))}</dd>`);
-  if (group !== 'RUNNING' && group !== 'PENDING') rows.push(`<dt>Ended</dt><dd>${escapeHtml(lifecycle(job, 'ended'))}</dd>`);
+  if (!isQueuedGroup(group)) rows.push(`<dt>Launched</dt><dd>${escapeHtml(lifecycle(job, 'launched'))}</dd>`);
+  if (group !== 'RUNNING' && !isQueuedGroup(group)) rows.push(`<dt>Ended</dt><dd>${escapeHtml(lifecycle(job, 'ended'))}</dd>`);
   const limit = runningLimitRow(job, asOf);
   if (limit) rows.push(limit);
   return rows.join('');
@@ -221,10 +242,11 @@ function archiveIcon() {
 function document(title, body, freshness = {}) {
   const nonce = crypto.randomBytes(16).toString('base64');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:3px 0;background:var(--vscode-sideBar-background);min-width:0}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none;min-width:0}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card>summary[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:4px;top:calc(100% + 2px);max-width:calc(100% - 18px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open])>summary[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{display:flex;min-width:0}.card-summary-progress{display:block;min-width:0}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0;max-width:100%}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px;min-width:0}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.card-meta>.job-id{display:inline-block;font-size:.88em;margin-right:3px}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:3px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0;cursor:help}.available{background:var(--vscode-testing-iconPassed)}.availability-tooltip{position:fixed;z-index:100;display:none;max-width:220px;padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));outline:1px solid #fff;border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;pointer-events:none}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em;min-width:0}.times dt{color:var(--vscode-descriptionForeground)}.times dt,.times dd{white-space:nowrap}.times dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:right}.times dd.dependency-value{white-space:normal;overflow-wrap:anywhere}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px;min-width:0}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.78em}th,td{text-align:left;padding:3px 5px;border-bottom:1px solid var(--vscode-panel-border);white-space:nowrap}th{color:var(--vscode-descriptionForeground)}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
+body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:3px 0;background:var(--vscode-sideBar-background);min-width:0}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none;min-width:0}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card>summary[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:4px;top:calc(100% + 2px);max-width:calc(100% - 18px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open])>summary[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{display:flex;min-width:0}.card-summary-progress{display:block;min-width:0}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0;max-width:100%}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px;min-width:0}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta{min-width:0;white-space:normal;overflow-wrap:anywhere}.card-meta>.job-id{display:inline-block;font-size:.88em;margin-right:3px}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:3px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0;cursor:help}.available{background:var(--vscode-testing-iconPassed)}.availability-tooltip{position:fixed;z-index:100;display:none;max-width:220px;padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));outline:1px solid #fff;border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;pointer-events:none}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em;min-width:0}.times dt{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd{margin:0;min-width:0;white-space:normal;text-align:right}.times dd.dependency-value{overflow-wrap:anywhere}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px;min-width:0}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.78em}th,td{text-align:left;padding:3px 5px;border-bottom:1px solid var(--vscode-panel-border);white-space:nowrap}th{color:var(--vscode-descriptionForeground)}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
 .card>summary[data-full-name]::after{outline:1px solid #fff}
 .card[open] .name{white-space:normal;overflow-wrap:anywhere}
 .progress-message{display:block;max-width:100%;font-size:.72em;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
+.dependency-icon{display:inline-block;margin-right:2px;font-family:system-ui,sans-serif;font-weight:700}.dependency-icon.waiting{font-weight:400}.dependency-icon.satisfied{color:var(--vscode-testing-iconPassed)}.dependency-icon.failed{color:var(--vscode-errorForeground)}
 .job-id:hover,.job-id:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--vscode-focusBorder)}
 button.button{border:0;font:inherit;cursor:pointer}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
@@ -411,12 +433,53 @@ function parseDependency(value) {
   }).filter(Boolean);
 }
 
+/** Find the referenced card, including an array task represented by its parent ID. */
+function referencedDependencyJob(owner, id, jobs) {
+  const target = `${owner.cluster}/${id}`;
+  return jobs.find((candidate) => jobRef(candidate) === target)
+    || jobs.find((candidate) => jobRef(candidate).startsWith(target + '_'));
+}
+
+/** Infer one dependency ID's state from Slurm's annotation and known job card. */
+function dependencyStatus(owner, clause, id, jobs = []) {
+  const annotation = String(clause.status || '').trim().toLowerCase();
+  if (['failed', 'invalid', 'never satisfied'].includes(annotation)) return 'failed';
+  if (['satisfied', 'fulfilled', 'complete', 'completed', 'success'].includes(annotation)) return 'satisfied';
+  if (annotation) return 'waiting';
+
+  const referenced = referencedDependencyJob(owner, id, jobs);
+  if (referenced) {
+    const group = stateGroup(referenced.state);
+    const terminal = ['COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED'].includes(group);
+    const type = String(clause.type || '').toLowerCase();
+    if (type === 'afterany' && terminal) return 'satisfied';
+    if (type === 'after' && (group === 'RUNNING' || terminal)) return 'satisfied';
+    if (['afterok', 'aftercorr'].includes(type)) {
+      if (group === 'COMPLETED') return 'satisfied';
+      if (terminal) return 'failed';
+    }
+    if (type === 'afternotok') {
+      if (group === 'COMPLETED') return 'failed';
+      if (terminal) return 'satisfied';
+    }
+  }
+  return hasFailedDependency(owner) ? 'failed' : 'waiting';
+}
+
+/** Render an accessible dependency-state icon followed by its linked job ID. */
+function dependencyLink(owner, clause, id, jobs = []) {
+  const status = dependencyStatus(owner, clause, id, jobs);
+  const icons = { waiting: '🕒', satisfied: '✓', failed: '✕' };
+  const labels = { waiting: 'Waiting for', satisfied: 'Satisfied by', failed: 'Failed dependency' };
+  return `<span class="dependency-icon ${status}" role="img" aria-label="${labels[status]} job ${escapeHtml(id)}" title="${labels[status]} job ${escapeHtml(id)}">${icons[status]}</span><a class="dep-link" href="#" data-jump="${escapeHtml(`${owner.cluster}/${id}`)}" title="Show job ${escapeHtml(id)}">${escapeHtml(id)}</a>`;
+}
+
 /** Render dependency clauses with links that jump to the referenced cards. */
-function dependencyLinks(job) {
+function dependencyLinks(job, jobs = []) {
   const clauses = parseDependency(job.dependency);
   if (!clauses.length) return '';
   const rendered = clauses.map((clause) => {
-    const links = clause.ids.map((id) => `<a class="dep-link" href="#" data-jump="${escapeHtml(`${job.cluster}/${id}`)}" title="Show job ${escapeHtml(id)}">${escapeHtml(id)}</a>`).join(', ');
+    const links = clause.ids.map((id) => dependencyLink(job, clause, id, jobs)).join(', ');
     return `${escapeHtml(clause.type)}${links ? ` ${links}` : ''}${clause.status ? ` <span class="muted">(${escapeHtml(clause.status)})</span>` : ''}`;
   }).join('<br>');
   return `<dt>Depends on</dt><dd class="dependency-value">${rendered}</dd>`;
@@ -431,7 +494,7 @@ function jobRef(job) {
  * Render one collapsible job card with archive, log, and (for active jobs)
  * cancellation actions. ``cancelling`` holds refs whose cancellation was sent.
  */
-function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date.now()) {
+function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date.now(), jobs = []) {
   const identifier = String(job.job_id || job.id || 'unknown');
   const name = String(job.name || identifier);
   const hoverText = [job.cluster, identifier, name].filter(Boolean).join(' ');
@@ -457,7 +520,7 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
   }
   const disclosureKey = `card:${archived ? 'archive' : 'active'}:${key}`;
   const metadata = `${job.cluster} / ${job.partition || 'no partition'} · ${resources}`;
-  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="card-summary-title"><span class="name">${escapeHtml(name)}</span></span><span class="card-summary-progress">${jobProgress(job, asOf)}</span></summary><div class="card-body"><div class="muted card-meta" title="${escapeHtml(metadata)}"><span class="badge job-id${ending ? ' ending' : ''}" role="button" tabindex="0" data-copy="${escapeHtml(identifier)}" title="${escapeHtml(identifier)}${ending ? ' · ending' : ''} — click to copy">${escapeHtml(identifier)}</span> ${escapeHtml(metadata)}</div><dl class="times">${lifecycleRows(job, asOf)}${dependencyLinks(job)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
+  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="card-summary-title"><span class="name">${escapeHtml(name)}</span></span><span class="card-summary-progress">${jobProgress(job, asOf, Date.now(), jobs)}</span></summary><div class="card-body"><div class="muted card-meta" title="${escapeHtml(metadata)}"><span class="badge job-id${ending ? ' ending' : ''}" role="button" tabindex="0" data-copy="${escapeHtml(identifier)}" title="${escapeHtml(identifier)}${ending ? ' · ending' : ''} — click to copy">${escapeHtml(identifier)}</span> ${escapeHtml(metadata)}</div><dl class="times">${lifecycleRows(job, asOf)}${dependencyLinks(job, jobs)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
 }
 
 /**
@@ -467,20 +530,21 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
  */
 function renderJobs(payload, disclosures = {}, cancelling = new Set(), freshness = {}) {
   const asOf = Date.parse(payload.generated_at || '') || Date.now();
-  const ranks = new Map(['RUNNING', 'PENDING', 'COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED', 'OTHER'].map((name, index) => [name, index]));
+  const ranks = new Map(['RUNNING', 'PENDING', 'FAILED_DEPENDENCY', 'COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED', 'OTHER'].map((name, index) => [name, index]));
   const jobs = [...(payload.jobs || [])].sort((left, right) => {
-    const groupDifference = ranks.get(stateGroup(left.state)) - ranks.get(stateGroup(right.state));
+    const groupDifference = ranks.get(jobGroup(left)) - ranks.get(jobGroup(right));
     if (groupDifference) return groupDifference;
     return String(right.submit_at || right.submit_time || '').localeCompare(String(left.submit_at || left.submit_time || ''));
   });
-  const labels = { RUNNING: 'Running', PENDING: 'Pending', COMPLETED: 'Completed', FAILED_EARLY: 'Failed (Early)', FAILED_TIMEOUT: 'Failed (Timeout)', CANCELLED: 'Cancelled', OTHER: 'Other' };
+  const labels = { RUNNING: 'Running', PENDING: 'Pending', FAILED_DEPENDENCY: 'Failed Dependency', COMPLETED: 'Completed', FAILED_EARLY: 'Failed (Early)', FAILED_TIMEOUT: 'Failed (Timeout)', CANCELLED: 'Cancelled', OTHER: 'Other' };
+  const archived = payload.archived_jobs || [];
+  const knownJobs = [...jobs, ...archived];
   const rows = [];
   for (const group of ranks.keys()) {
-    const grouped = jobs.filter((job) => stateGroup(job.state) === group);
-    if (grouped.length) rows.push(`<details class="job-group" data-disclosure-key="group:active:${group}"${openAttribute(disclosures, `group:active:${group}`, true)}><summary>${labels[group]} (${grouped.length})</summary>${grouped.map((job) => jobCard(job, false, disclosures, cancelling, asOf)).join('')}</details>`);
+    const grouped = jobs.filter((job) => jobGroup(job) === group);
+    if (grouped.length) rows.push(`<details class="job-group" data-disclosure-key="group:active:${group}"${openAttribute(disclosures, `group:active:${group}`, true)}><summary>${labels[group]} (${grouped.length})</summary>${grouped.map((job) => jobCard(job, false, disclosures, cancelling, asOf, knownJobs)).join('')}</details>`);
   }
-  const archived = payload.archived_jobs || [];
-  rows.push(`<details class="job-group archive" data-disclosure-key="group:archive"${openAttribute(disclosures, 'group:archive', false)}><summary>Archive (${archived.length})</summary>${archived.length ? archived.map((job) => jobCard(job, true, disclosures, cancelling, asOf)).join('') : '<p class="muted">No archived jobs.</p>'}</details>`);
+  rows.push(`<details class="job-group archive" data-disclosure-key="group:archive"${openAttribute(disclosures, 'group:archive', false)}><summary>Archive (${archived.length})</summary>${archived.length ? archived.map((job) => jobCard(job, true, disclosures, cancelling, asOf, knownJobs)).join('') : '<p class="muted">No archived jobs.</p>'}</details>`);
   if (!jobs.length && !archived.length) rows.unshift('<p>No jobs found in the last 24 hours.</p>');
   return document('My Jobs', rows.join(''), freshness);
 }
@@ -640,4 +704,4 @@ function renderStatus(payload, disclosures = {}, freshness = {}) {
   return document('Cluster Status', clusters.join('') || '<p>No clusters returned.</p>', freshness);
 }
 
-module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, escapeHtml, isFailureGroup, jobRef, openAttribute, parseDependency, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };
+module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, isFailureGroup, jobGroup, jobRef, openAttribute, parseDependency, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };

@@ -58,12 +58,12 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .job-card-summary-title { display:flex; justify-content:space-between; gap:.5rem; align-items:baseline; min-width:0; }
 .job-card-body { padding:0 .7rem .7rem; min-width:0; } .job-card-actions, .job-sort-controls { display:flex; flex-wrap:wrap; gap:.4rem; margin:.55rem 0; }
 .job-card-actions button, .job-sort-controls button { cursor:pointer; }
-.job-times { display:grid; grid-template-columns:auto 1fr; gap:.2rem .7rem; margin:.55rem 0; font-size:.8rem; } .job-times dt { color:#666; } .job-times dd { margin:0; text-align:right; }
+.job-times { display:grid; grid-template-columns:auto minmax(0, 1fr); gap:.2rem .7rem; margin:.55rem 0; font-size:.8rem; } .job-times dt { color:#666; white-space:nowrap; } .job-times dd { min-width:0; margin:0; white-space:normal; text-align:right; }
 .job-name { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:700; } .job-card[open] .job-name { white-space:normal; overflow-wrap:anywhere; } .job-location, .job-resources, .job-id { color:#666; font-size:.78rem; } .job-id { flex:0 1 auto; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .job-location, .job-resources, .job-message { overflow-wrap:anywhere; } .job-state { font-size:.74rem; text-transform:uppercase; letter-spacing:.04em; overflow-wrap:anywhere; }
 .job-progress { display:block; margin-top:.5rem; } .job-progress-track { display:block; height:.62rem; overflow:hidden; border-radius:999px; background:#8883; }
 .job-progress-fill { display:block; height:100%; background:#2563eb; transition:width 1s linear; } .job-progress-text { display:block; max-width:100%; margin-top:.22rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.76rem; color:#666; }
 .job-progress-message { display:block; max-width:100%; margin-top:.5rem; overflow-wrap:anywhere; font-size:.76rem; line-height:1.3; color:#666; }
-.job-dependency-link { color:LinkText; font-family:ui-monospace, monospace; }
+.job-dependency-link { color:LinkText; font-family:ui-monospace, monospace; } .job-dependency-icon { display:inline-block; margin-right:.15rem; font-family:system-ui, sans-serif; font-weight:700; } .job-dependency-icon.waiting { font-weight:400; } .job-dependency-icon.satisfied { color:#16a34a; } .job-dependency-icon.failed { color:#dc2626; }
 .job-progress.pending .job-progress-fill { background:#7c3aed; } .job-message { margin-top:.5rem; font-size:.78rem; color:#666; }
 .job-progress.completed .job-progress-fill { background:#16a34a; } .job-progress.failed_early .job-progress-fill, .job-progress.failed_timeout .job-progress-fill { background:#dc2626; } .job-progress.cancelled .job-progress-fill, .job-progress.other .job-progress-fill { background:#6b7280; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; }
@@ -233,15 +233,72 @@ function dependencyClauses(value) {
     const match = /^([A-Za-z_]+)(?::([^()]*))?(?:\\(([^)]*)\\))?$/.exec(part);
     if (!match) return null;
     const ids = (match[2] || '').split(':').map(id => id.replace(/\\+\\d+$/, '')).filter(id => /^\\d+(?:_(?:\\d+|\\*))?$/.test(id)).map(id => id.replace(/_\\*$/, ''));
-    return { type:match[1], ids };
+    return { type:match[1], ids, status:match[3] || '' };
   }).filter(Boolean);
+}
+
+/** Return whether Slurm says the overall pending dependency cannot succeed. */
+function hasFailedDependency(job) {
+  if (!ACTIVE_JOB_STATES.has(String(job.state || '').toUpperCase())) return false;
+  if (/dependency\\s*never\\s*satisfied/i.test(String(job.reason || ''))) return true;
+  const expression = String(job.dependency || ''), clauses = dependencyClauses(expression);
+  if (!clauses.length) return false;
+  const failed = clause => /^(?:failed|invalid|never satisfied)$/i.test(clause.status.trim());
+  return expression.includes('?') ? clauses.every(failed) : clauses.some(failed);
+}
+
+/** Return every current or saved job that a dependency link can target. */
+function knownDependencyJobs() {
+  return [...currentJobs, ...restoredJobs.values(), ...archivedJobs.values()];
+}
+
+/** Find a dependency's referenced card, including an array task by parent ID. */
+function referencedDependencyJob(owner, id) {
+  const target = `${owner.cluster}/${id}`;
+  const ref = candidate => `${candidate.cluster}/${jobId(candidate)}`;
+  const jobs = knownDependencyJobs();
+  return jobs.find(candidate => ref(candidate) === target)
+    || jobs.find(candidate => ref(candidate).startsWith(target + '_'));
+}
+
+/** Infer one dependency ID's waiting, satisfied, or failed state. */
+function dependencyStatus(owner, clause, id) {
+  const annotation = String(clause.status || '').trim().toLowerCase();
+  if (['failed', 'invalid', 'never satisfied'].includes(annotation)) return 'failed';
+  if (['satisfied', 'fulfilled', 'complete', 'completed', 'success'].includes(annotation)) return 'satisfied';
+  if (annotation) return 'waiting';
+  const referenced = referencedDependencyJob(owner, id);
+  if (referenced) {
+    const state = String(referenced.state || '').toUpperCase();
+    const terminal = state === 'COMPLETED' || state === 'CANCELLED' || FAILED_JOB_STATES.has(state);
+    const type = String(clause.type || '').toLowerCase();
+    if (type === 'afterany' && terminal) return 'satisfied';
+    if (type === 'after' && (state === 'RUNNING' || terminal)) return 'satisfied';
+    if (['afterok', 'aftercorr'].includes(type)) {
+      if (state === 'COMPLETED') return 'satisfied';
+      if (terminal) return 'failed';
+    }
+    if (type === 'afternotok') {
+      if (state === 'COMPLETED') return 'failed';
+      if (terminal) return 'satisfied';
+    }
+  }
+  return hasFailedDependency(owner) ? 'failed' : 'waiting';
+}
+
+/** Render one accessible dependency icon and linked job ID. */
+function dependencyLink(owner, clause, id) {
+  const status = dependencyStatus(owner, clause, id);
+  const icons = { waiting:'🕒', satisfied:'✓', failed:'✕' };
+  const labels = { waiting:'Waiting for', satisfied:'Satisfied by', failed:'Failed dependency' };
+  return `<span class="job-dependency-icon ${status}" role="img" aria-label="${labels[status]} job ${escapeHtml(id)}" title="${labels[status]} job ${escapeHtml(id)}">${icons[status]}</span><a href="#" class="job-dependency-link" data-job-jump="${escapeHtml(`${owner.cluster}/${id}`)}" title="Show job ${escapeHtml(id)}">${escapeHtml(id)}</a>`;
 }
 
 /** Render the compact dependency label with links to jobs already on the page. */
 function pendingDependency(job, expression) {
   const clauses = dependencyClauses(expression);
   const rendered = clauses.map(clause => {
-    const links = clause.ids.map(id => `<a href="#" class="job-dependency-link" data-job-jump="${escapeHtml(`${job.cluster}/${id}`)}">${escapeHtml(id)}</a>`).join(',');
+    const links = clause.ids.map(id => dependencyLink(job, clause, id)).join(',');
     return `${escapeHtml(clause.type)}${links ? ` ${links}` : ''}`;
   }).join(', ');
   return `dependency:${rendered || escapeHtml(expression)}`;
@@ -398,12 +455,13 @@ function sortedJobs(jobs, listName) {
   });
 }
 
-const JOB_GROUP_ORDER = ['RUNNING', 'PENDING', 'COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED', 'OTHER'];
-const JOB_GROUP_LABELS = { RUNNING:'Running', PENDING:'Pending', COMPLETED:'Completed', FAILED_EARLY:'Failed (Early)', FAILED_TIMEOUT:'Failed (Timeout)', CANCELLED:'Cancelled', OTHER:'Other' };
+const JOB_GROUP_ORDER = ['RUNNING', 'PENDING', 'FAILED_DEPENDENCY', 'COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED', 'OTHER'];
+const JOB_GROUP_LABELS = { RUNNING:'Running', PENDING:'Pending', FAILED_DEPENDENCY:'Failed Dependency', COMPLETED:'Completed', FAILED_EARLY:'Failed (Early)', FAILED_TIMEOUT:'Failed (Timeout)', CANCELLED:'Cancelled', OTHER:'Other' };
 const ACTIVE_JOB_STATES = new Set(['CONFIGURING', 'PENDING', 'REQUEUED', 'REQUEUE_FED', 'REQUEUE_HOLD', 'RESIZING', 'SIGNALING', 'STAGE_OUT', 'SUSPENDED']);
 function jobGroup(job) {
   const state = String(job.state || 'UNKNOWN').toUpperCase();
   if (state === 'RUNNING' || state === 'COMPLETED' || state === 'CANCELLED') return state;
+  if (hasFailedDependency(job)) return 'FAILED_DEPENDENCY';
   if (ACTIVE_JOB_STATES.has(state)) return 'PENDING';
   if (state === 'TIMEOUT') return 'FAILED_TIMEOUT';
   if (FAILED_JOB_STATES.has(state)) return 'FAILED_EARLY';
@@ -414,8 +472,8 @@ function jobGroup(job) {
 function jobLifecycleRows(job, submittedAt, submittedText) {
   const group = jobGroup(job);
   const rows = [`<dt>Submitted</dt><dd><time datetime="${escapeHtml(submittedAt || '')}">${escapeHtml(submittedText)}</time></dd>`];
-  if (group !== 'PENDING') rows.push(`<dt>Launched</dt><dd>${jobLifecycleCell(job, 'launched')}</dd>`);
-  if (group !== 'RUNNING' && group !== 'PENDING') rows.push(`<dt>Ended</dt><dd>${jobLifecycleCell(job, 'ended')}</dd>`);
+  if (!['PENDING', 'FAILED_DEPENDENCY'].includes(group)) rows.push(`<dt>Launched</dt><dd>${jobLifecycleCell(job, 'launched')}</dd>`);
+  if (group !== 'RUNNING' && !['PENDING', 'FAILED_DEPENDENCY'].includes(group)) rows.push(`<dt>Ended</dt><dd>${jobLifecycleCell(job, 'ended')}</dd>`);
   return rows.join('');
 }
 
@@ -441,7 +499,7 @@ function jobCard(job, listName) {
   const group = jobGroup(job);
   let timing;
   if (group === 'RUNNING') timing = runningJobProgress(job);
-  else if (group === 'PENDING') timing = pendingJobProgress(job);
+  else if (group === 'PENDING' || group === 'FAILED_DEPENDENCY') timing = pendingJobProgress(job);
   else {
     const ended = jobLifecycleDate(job, 'ended');
     const label = `${formatSeconds(job.elapsed_seconds)} elapsed${ended.value ? ` · ended ${ended.value.toLocaleString()}` : ''}`;
@@ -453,7 +511,7 @@ function jobCard(job, listName) {
   const action = listName === 'archived' ? 'restore' : 'archive';
   const actionLabel = listName === 'archived' ? 'Restore' : 'Archive';
   const actionButton = `<button data-job-action="${action}" data-job-key="${escapeHtml(jobArchiveKey(job))}">${actionLabel}</button>`;
-  const logButtons = jobsApiEnabled && group !== 'PENDING' ? `<button class="log-button" data-log-stream="err" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .err</button><button class="log-button" data-log-stream="out" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .out</button>` : '';
+  const logButtons = jobsApiEnabled && !['PENDING', 'FAILED_DEPENDENCY'].includes(group) ? `<button class="log-button" data-log-stream="err" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .err</button><button class="log-button" data-log-stream="out" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .out</button>` : '';
   const disclosureKey = `card:${listName}:${jobArchiveKey(job)}`;
   return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(`${job.cluster}/${identifier}`)}"${jobDisclosureAttribute(disclosureKey)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
 }

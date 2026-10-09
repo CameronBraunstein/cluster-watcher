@@ -72,7 +72,12 @@ def _active_record(cluster: str, job: dict[str, object]) -> dict[str, object]:
     job_id = canonical_job_id(str(job.get("id", "")))
     state = normalize_job_state(str(job.get("state", "UNKNOWN")))
     dependency = _present(job.get("dependency"))
-    reason = f"Dependency: {dependency}" if dependency else _present(job.get("reason"))
+    slurm_reason = _present(job.get("reason"))
+    # Preserve DependencyNeverSatisfied so clients can distinguish an
+    # impossible dependency. Ordinary dependency waits retain the established
+    # descriptive fallback used by the terminal and older clients.
+    dependency_failed = (slurm_reason or "").casefold() == "dependencyneversatisfied"
+    reason = slurm_reason if dependency_failed or not dependency else f"Dependency: {dependency}"
     start = _present(job.get("start_time"))
     return {
         "cluster": cluster,

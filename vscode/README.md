@@ -42,8 +42,13 @@ cards. The copyable job-ID badge has rectangular corners and an inset blue
 hover/focus border whose four edges remain visible.
 Dependency-blocked cards omit the empty progress bar and show
 `dependency:<type> <job ID>`; the ID links to the relevant card and a popup
-reports when it cannot be found. The expanded **Depends on** row also retains
-the complete dependency. Open cards use a horizontal
+reports when it cannot be found. A clock marks a waiting ID, a green check a
+satisfied condition, and a red x a failed one. Because Slurm normally removes
+satisfied IDs from its remaining-dependencies field, checks appear only while
+the ID remains available in the expression or a retained snapshot. Jobs whose
+overall condition is impossible appear under **Failed Dependency** instead of
+**Pending**. The expanded **Depends on** row also retains the complete
+dependency. Open cards use a horizontal
 divider between the always-visible summary and their details instead of a
 disclosure icon. Opening or closing highlights the card border immediately,
 then fades that highlight more slowly.
@@ -60,10 +65,12 @@ Enter) to copy it. A running job's calculated limit and a terminal job's end
 time appear with the expanded lifecycle details. Elapsed time is not repeated
 there because it is already in the compact progress fraction. Running cards
 omit **Ended**; pending cards omit both **Launched** and **Ended**. Expanded
-timestamps and the compact icon/short-label action row remain
-on one line at that width. Long progress labels and metadata ellipsize, with
-full values retained in hover text, while dependency expressions and expanded
-job names wrap inside the card. Expand a card to see details and to:
+resource metadata wraps across as many lines as needed. Lifecycle timestamps
+stay on one line when space permits; on a narrow card, the date remains on the
+first line and the time wraps onto a right-aligned second line. The compact
+icon/short-label action row remains on one line. Long progress labels ellipsize,
+while dependency expressions and expanded job names wrap inside the card.
+Expand a card to see details and to:
 
 - select the archive-box icon and move it into the collapsed **Archive** group
   at the bottom, or **Restore** it later;
@@ -85,7 +92,8 @@ job names wrap inside the card. Expand a card to see details and to:
   turns red and the button disappears until Slurm stops listing the job;
 - for jobs with a Slurm dependency, read the **Depends on** row. Each job ID in
   it is a link that opens and scrolls to that job's card (opening its group if
-  collapsed). A notification explains when the job is not in the list.
+  collapsed), with the same waiting/satisfied/failed icon as the compact row.
+  A notification explains when the job is not in the list.
 
 The archive is stored in VS Code extension global state and survives editor
 restarts. Group, card, and cluster disclosure choices survive live data

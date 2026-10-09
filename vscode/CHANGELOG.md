@@ -4,19 +4,23 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
-- Narrow job cards now keep progress, elapsed/total time, detail timestamps,
-  and the complete action row on single lines. Running-job deadlines moved to
-  expanded details, while archive/log/script/cancel actions use compact icons
-  or labels with full tooltips.
+- Narrow job cards keep progress, elapsed/total time, and the complete action
+  row on single lines. Expanded resource metadata wraps instead of truncating;
+  lifecycle dates keep their time on the same line when possible and wrap it
+  onto a right-aligned second line when necessary. Running-job deadlines moved
+  to expanded details, while archive/log/script/cancel actions use compact
+  icons or labels with full tooltips.
 - Collapsed cards now truncate long job names to one line and expose the full
   name on hover. Hover boxes now have a white outline and show the cluster, job
   ID, and full name in both interfaces. The copyable job ID moved beside
   expanded resource metadata, and elapsed/end text moved into expanded
   lifecycle details.
 - Dependency waits now use the compact `dependency:<type> <job ID>` label; the
-  ID opens its job card or reports that it could not be found. Unavailable
-  starts say **no estimate available**, and both cases omit the empty progress
-  bar. Open cards use a summary/detail divider instead of a disclosure icon,
+  ID opens its job card or reports that it could not be found. Waiting,
+  satisfied, and failed IDs receive clock, check, and x icons, respectively;
+  impossible jobs move from **Pending** to **Failed Dependency**. Unavailable
+  starts say **no estimate available**, and dependency/no-estimate cases omit
+  the empty progress bar. Open cards use a summary/detail divider instead of a disclosure icon,
   card borders flash immediately after layout changes and fade back more
   slowly, and full-name hover labels appear immediately.
 - Completed and failed cards keep the progress bar's `time run / time allotted`

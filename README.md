@@ -1078,6 +1078,8 @@ A shortened response is:
 
 Active (queued or running) jobs also carry `dependency`: Slurm's raw
 dependency expression such as `afterok:1000100(unfulfilled)`, or `null`.
+The `DependencyNeverSatisfied` reason is retained so clients can distinguish
+an ordinary wait from an impossible dependency.
 
 ### Cancel a job
 
@@ -1312,7 +1314,11 @@ using the compact `<duration> estimated wait` form. If Slurm cannot estimate a
 start, the card omits the empty progress bar and says **no estimate available**.
 A job with an unsatisfied dependency likewise omits the bar and uses
 `dependency:<type> <job ID>`; selecting the ID jumps to its card or reports
-that the card could not be found.
+that the card could not be found. Each ID has a clock while waiting, a green
+check when its condition is satisfied, or a red x when it failed. Slurm usually
+removes satisfied entries from `%E`, so a check is shown only while that ID is
+still available in the expression or another retained job snapshot. Jobs whose
+overall dependency is impossible move from **Pending** to **Failed Dependency**.
 
 Running jobs use Slurm's `%M` elapsed time and `%l` original full time limit to
 draw progress from the actual beginning of the allocation—not from when the
@@ -1408,8 +1414,10 @@ or the cluster's state.
 The extension source lives entirely in [`vscode/`](vscode/). It contributes a
 Cluster Watcher Activity Bar container with two sidebar views:
 
-- **My Jobs** groups jobs as running, pending, completed, failed early, failed
-  by timeout, and cancelled. Slurm `TIMEOUT` jobs use **Failed (Timeout)** and
+- **My Jobs** groups jobs as running, pending, failed dependency, completed,
+  failed early, failed by timeout, and cancelled. Slurm
+  `DependencyNeverSatisfied` jobs use **Failed Dependency**, `TIMEOUT` jobs use
+  **Failed (Timeout)**, and
   all other failure states use **Failed (Early)**. State groups and individual job cards
   are collapsible; a collapsed card retains a single-line, ellipsized job name
   (hover it for a white-outlined `<cluster> <job ID> <full job name>` label) and
@@ -1420,16 +1428,18 @@ Cluster Watcher Activity Bar container with two sidebar views:
   runtime comparison using the time limit preserved in Slurm accounting after
   the job leaves the live queue. Dependency-blocked jobs show
   `dependency:<type> <job ID>` without an empty progress bar; the job ID links
-  to its card and the dependency is also retained in expanded details. Open cards
+  to its card and a clock, green check, or red x marks that individual
+  condition as waiting, satisfied, or failed. The dependency is also retained
+  in expanded details. Open cards
   use a horizontal divider between their summary and details instead of a
   disclosure icon; opening or closing highlights the card border immediately,
   then lets the highlight fade more slowly.
   Pending cards with usable estimates use `<duration> estimated wait`; missing
   estimates say **no estimate available** without an empty bar. Timed progress
   labels remain on one line at the sidebar's narrowest expanded width. A zero
-  recorded job duration is shown as `<1m`, never `now`. Long progress
-  labels and metadata ellipsize as a final safeguard, while dependency
-  expressions and expanded job names wrap inside the card instead of
+  recorded job duration is shown as `<1m`, never `now`. Long progress labels
+  ellipsize as a final safeguard, while expanded resource metadata, dependency
+  expressions, and expanded job names wrap inside the card instead of
   overflowing it. The
   copyable job ID precedes the cluster, partition, and resources in the
   expanded metadata. Calculated running-job limits and terminal-job end times
@@ -1444,11 +1454,13 @@ Cluster Watcher Activity Bar container with two sidebar views:
   job ID jumps to its card), archive controls, stdout/stderr and batch-script
   actions (stdout/stderr are hidden while pending), and, for running or pending
   jobs, an **End** button that confirms
-  before cancelling the job. The detail timestamps and compact action row
-  remain on one line: archive uses an icon and the open actions use **.err**,
-  **.out**, and **script** labels. Those document-opening actions retain the
-  card list's scroll position. The rectangular job-ID copy badge uses an inset
-  focus-colored hover/focus border so none of its edges are clipped.
+  before cancelling the job. Detail timestamps stay on one line when space
+  permits; on narrow cards their time wraps below the date and remains
+  right-aligned. The compact action row remains on one line: archive uses an
+  icon and the open actions use **.err**, **.out**, and **script** labels. Those
+  document-opening actions retain the card list's scroll position. The
+  rectangular job-ID copy badge uses an inset focus-colored hover/focus border
+  so none of its edges are clipped.
 - **Cluster Status** follows `cluster-watcher status`: partitions are separated
   by collapsible cluster headings. Its columns begin **Partition**,
   **Available**, **GPU**, **VRAM**, and **TFLOPS/s**, followed by one-hour wait

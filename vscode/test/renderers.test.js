@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, escapeHtml, renderJobsApiDisabled, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
+const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
 
 test('jobs retain terminal state grouping and lifecycle visibility', () => {
   const jobs = [
@@ -182,11 +182,41 @@ test('dependencies are parsed and rendered as links to the referenced card', () 
     { job_id: '12', cluster: 'cluster_0', state: 'RUNNING' },
     { job_id: '13', cluster: 'cluster_0', state: 'PENDING', dependency: 'afterok:12(unfulfilled)' },
   ] });
-  assert.match(html, /<dt>Depends on<\/dt><dd class="dependency-value">afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"/);
-  assert.match(html, /dependency:afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"/);
+  assert.match(html, /<dt>Depends on<\/dt><dd class="dependency-value">afterok <span class="dependency-icon waiting"[^>]*>🕒<\/span><a class="dep-link" href="#" data-jump="cluster_0\/12"/);
+  assert.match(html, /dependency:afterok <span class="dependency-icon waiting"[^>]*>🕒<\/span><a class="dep-link" href="#" data-jump="cluster_0\/12"/);
   assert.match(html, /<details class="card" data-disclosure-key="[^"]+" data-job-ref="cluster_0\/12"/);
   assert.match(html, /type: 'missingJob'/);
   assert.equal((html.match(/<dt>Depends on/g) || []).length, 1);
+});
+
+test('dependency icons reflect referenced outcomes and impossible jobs get their own group', () => {
+  const completed = { job_id: '10', cluster: 'c', state: 'COMPLETED' };
+  const failed = { job_id: '11', cluster: 'c', state: 'FAILED' };
+  const waiting = { job_id: '12', cluster: 'c', state: 'RUNNING' };
+  const clauses = parseDependency('afterany:10,afterok:11,afterok:12');
+  const owner = { job_id: '20', cluster: 'c', state: 'PENDING' };
+  assert.equal(dependencyStatus(owner, clauses[0], '10', [completed, failed, waiting]), 'satisfied');
+  assert.equal(dependencyStatus(owner, clauses[1], '11', [completed, failed, waiting]), 'failed');
+  assert.equal(dependencyStatus(owner, clauses[2], '12', [completed, failed, waiting]), 'waiting');
+
+  const recoverableOr = { ...owner, dependency: 'afterok:10(failed)?afterok:12(unfulfilled)' };
+  const failedOr = { ...owner, dependency: 'afterok:10(failed)?afterok:11(failed)' };
+  const impossible = { ...owner, job_id: '21', dependency: 'afterok:11(failed)', reason: 'DependencyNeverSatisfied' };
+  assert.equal(hasFailedDependency(recoverableOr), false);
+  assert.equal(hasFailedDependency(failedOr), true);
+  assert.equal(jobGroup(impossible), 'FAILED_DEPENDENCY');
+
+  const html = renderJobs({ jobs: [
+    completed, failed, waiting, impossible,
+    { ...owner, dependency: 'afterany:10' },
+    { ...owner, job_id: '22', dependency: 'afterok:12' },
+  ] });
+  assert.match(html, /Failed Dependency \(1\)/);
+  assert.match(html, /class="dependency-icon satisfied"[^>]*>✓<\/span>/);
+  assert.match(html, /class="dependency-icon failed"[^>]*>✕<\/span>/);
+  assert.match(html, /class="dependency-icon waiting"[^>]*>🕒<\/span>/);
+  assert.match(html, /\.dependency-icon\.satisfied\{color:var\(--vscode-testing-iconPassed\)\}/);
+  assert.match(html, /\.dependency-icon\.failed\{color:var\(--vscode-errorForeground\)\}/);
 });
 
 test('webview buttons post allow-listed commands instead of using command URIs', () => {
@@ -295,7 +325,7 @@ test('pending jobs without an estimate explain why and omit the empty bar', () =
     job_id: '1', cluster: 'c', state: 'PENDING', dependency: 'afterok:123(unfulfilled)',
   }] });
   const dependencySummary = dependencyHtml.match(/<summary data-full-name="c 1 1">.*?<\/summary>/s)[0];
-  assert.match(dependencySummary, /dependency:afterok <a class="dep-link" href="#" data-jump="c\/123"[^>]*>123<\/a>/);
+  assert.match(dependencySummary, /dependency:afterok <span class="dependency-icon waiting"[^>]*>🕒<\/span><a class="dep-link" href="#" data-jump="c\/123"[^>]*>123<\/a>/);
   assert.match(dependencyHtml, /event\.preventDefault\(\);\s+event\.stopPropagation\(\);\s+const target = link\.dataset\.jump/);
   assert.doesNotMatch(dependencySummary, /class="progress"/);
 
@@ -337,8 +367,8 @@ test('narrow cards contain long metadata and dependency text', () => {
     partition: 'partition-with-a-very-long-name', state: 'PENDING', dependency: 'afterok:12345678901234567890(unfulfilled)',
   }] });
 
-  assert.match(html, /\.card-meta\{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\}/);
-  assert.match(html, /\.times dd\.dependency-value\{white-space:normal;overflow-wrap:anywhere\}/);
+  assert.match(html, /\.card-meta\{min-width:0;white-space:normal;overflow-wrap:anywhere\}/);
+  assert.match(html, /\.times dd\.dependency-value\{overflow-wrap:anywhere\}/);
   assert.match(html, /<div class="muted card-meta" title="cluster-with-a-very-long-name \/ partition-with-a-very-long-name/);
   assert.match(html, /<dd class="dependency-value">/);
 });
@@ -355,7 +385,8 @@ test('expanded card moves the running deadline down and keeps details and action
   assert.doesNotMatch(html, /<dt>Elapsed<\/dt>/);
   assert.doesNotMatch(html, /<dt>Ended<\/dt>/);
   assert.match(html, /<span class="muted progress-label" title="[^"]+ \/ 1h">[^<]+ \/ 1h<\/span>/);
-  assert.match(html, /\.times dt,\.times dd\{white-space:nowrap\}/);
+  assert.match(html, /\.times dt\{color:var\(--vscode-descriptionForeground\);white-space:nowrap\}/);
+  assert.match(html, /\.times dd\{margin:0;min-width:0;white-space:normal;text-align:right\}/);
   assert.match(html, /\.actions\{display:flex;flex-wrap:nowrap;/);
   assert.match(html, /title="Archive job" aria-label="Archive job"><svg class="action-icon"/);
   assert.match(html, /title="Open \.err log" aria-label="Open \.err log">\.err<\/button>/);
