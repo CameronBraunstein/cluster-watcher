@@ -16,8 +16,9 @@ All notable changes to the Cluster Watcher VS Code extension.
   expanded resource metadata, and elapsed/end text moved into expanded
   lifecycle details.
 - Dependency waits now use the compact `dependency:<type> <job ID>` label; the
-  ID opens its job card or reports that it could not be found. Waiting,
-  satisfied, and failed IDs receive clock, check, and x icons, respectively;
+  ID opens its job card or reports that it could not be found. In expanded
+  details, waiting, satisfied, and failed IDs are followed by clock, check, and
+  x icons with descriptive hover text instead of visible status parentheses;
   impossible jobs move from **Pending** to **Failed Dependency**. Unavailable
   starts say **no estimate available**, and dependency/no-estimate cases omit
   the empty progress bar. Open cards use a summary/detail divider instead of a disclosure icon,

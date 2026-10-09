@@ -182,8 +182,11 @@ test('dependencies are parsed and rendered as links to the referenced card', () 
     { job_id: '12', cluster: 'cluster_0', state: 'RUNNING' },
     { job_id: '13', cluster: 'cluster_0', state: 'PENDING', dependency: 'afterok:12(unfulfilled)' },
   ] });
-  assert.match(html, /<dt>Depends on<\/dt><dd class="dependency-value">afterok <span class="dependency-icon waiting"[^>]*>🕒<\/span><a class="dep-link" href="#" data-jump="cluster_0\/12"/);
-  assert.match(html, /dependency:afterok <span class="dependency-icon waiting"[^>]*>🕒<\/span><a class="dep-link" href="#" data-jump="cluster_0\/12"/);
+  assert.match(html, /<dt>Depends on<\/dt><dd class="dependency-value">afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"[^>]*>12<\/a> <span class="dependency-icon waiting"[^>]*title="Unfulfilled: waiting for job 12 to satisfy afterok"[^>]*>🕒<\/span>/);
+  const summary = html.match(/<summary data-full-name="cluster_0 13 13">.*?<\/summary>/s)[0];
+  assert.match(summary, /dependency:afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"[^>]*>12<\/a>/);
+  assert.doesNotMatch(summary, /dependency-icon/);
+  assert.doesNotMatch(html, /<span class="muted">\(unfulfilled\)<\/span>/);
   assert.match(html, /<details class="card" data-disclosure-key="[^"]+" data-job-ref="cluster_0\/12"/);
   assert.match(html, /type: 'missingJob'/);
   assert.equal((html.match(/<dt>Depends on/g) || []).length, 1);
@@ -215,6 +218,9 @@ test('dependency icons reflect referenced outcomes and impossible jobs get their
   assert.match(html, /class="dependency-icon satisfied"[^>]*>✓<\/span>/);
   assert.match(html, /class="dependency-icon failed"[^>]*>✕<\/span>/);
   assert.match(html, /class="dependency-icon waiting"[^>]*>🕒<\/span>/);
+  assert.match(html, /title="Satisfied: job 10 satisfied afterany"/);
+  assert.match(html, /title="Failed: job 11 cannot satisfy afterok"/);
+  assert.match(html, /title="Waiting: waiting for job 12 to satisfy afterok"/);
   assert.match(html, /\.dependency-icon\.satisfied\{color:var\(--vscode-testing-iconPassed\)\}/);
   assert.match(html, /\.dependency-icon\.failed\{color:var\(--vscode-errorForeground\)\}/);
 });
@@ -325,7 +331,8 @@ test('pending jobs without an estimate explain why and omit the empty bar', () =
     job_id: '1', cluster: 'c', state: 'PENDING', dependency: 'afterok:123(unfulfilled)',
   }] });
   const dependencySummary = dependencyHtml.match(/<summary data-full-name="c 1 1">.*?<\/summary>/s)[0];
-  assert.match(dependencySummary, /dependency:afterok <span class="dependency-icon waiting"[^>]*>🕒<\/span><a class="dep-link" href="#" data-jump="c\/123"[^>]*>123<\/a>/);
+  assert.match(dependencySummary, /dependency:afterok <a class="dep-link" href="#" data-jump="c\/123"[^>]*>123<\/a>/);
+  assert.doesNotMatch(dependencySummary, /dependency-icon/);
   assert.match(dependencyHtml, /event\.preventDefault\(\);\s+event\.stopPropagation\(\);\s+const target = link\.dataset\.jump/);
   assert.doesNotMatch(dependencySummary, /class="progress"/);
 

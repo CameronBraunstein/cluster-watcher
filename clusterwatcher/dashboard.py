@@ -63,7 +63,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .job-progress { display:block; margin-top:.5rem; } .job-progress-track { display:block; height:.62rem; overflow:hidden; border-radius:999px; background:#8883; }
 .job-progress-fill { display:block; height:100%; background:#2563eb; transition:width 1s linear; } .job-progress-text { display:block; max-width:100%; margin-top:.22rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.76rem; color:#666; }
 .job-progress-message { display:block; max-width:100%; margin-top:.5rem; overflow-wrap:anywhere; font-size:.76rem; line-height:1.3; color:#666; }
-.job-dependency-link { color:LinkText; font-family:ui-monospace, monospace; } .job-dependency-icon { display:inline-block; margin-right:.15rem; font-family:system-ui, sans-serif; font-weight:700; } .job-dependency-icon.waiting { font-weight:400; } .job-dependency-icon.satisfied { color:#16a34a; } .job-dependency-icon.failed { color:#dc2626; }
+.job-dependency-link { color:LinkText; font-family:ui-monospace, monospace; } .job-dependency-icon { display:inline-block; margin-left:.15rem; font-family:system-ui, sans-serif; font-weight:700; cursor:help; } .job-dependency-icon.waiting { font-weight:400; } .job-dependency-icon.satisfied { color:#16a34a; } .job-dependency-icon.failed { color:#dc2626; }
 .job-progress.pending .job-progress-fill { background:#7c3aed; } .job-message { margin-top:.5rem; font-size:.78rem; color:#666; }
 .job-progress.completed .job-progress-fill { background:#16a34a; } .job-progress.failed_early .job-progress-fill, .job-progress.failed_timeout .job-progress-fill { background:#dc2626; } .job-progress.cancelled .job-progress-fill, .job-progress.other .job-progress-fill { background:#6b7280; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; }
@@ -286,22 +286,48 @@ function dependencyStatus(owner, clause, id) {
   return hasFailedDependency(owner) ? 'failed' : 'waiting';
 }
 
-/** Render one accessible dependency icon and linked job ID. */
+/** Render a dependency job ID link without expanded-card status decoration. */
+function dependencyJobLink(owner, id) {
+  return `<a href="#" class="job-dependency-link" data-job-jump="${escapeHtml(`${owner.cluster}/${id}`)}" title="Show job ${escapeHtml(id)}">${escapeHtml(id)}</a>`;
+}
+
+/** Describe an expanded dependency icon for hover and assistive technology. */
+function dependencyStatusDescription(status, clause, id) {
+  const annotation = String(clause.status || '').trim();
+  const annotatedStatus = annotation ? annotation[0].toUpperCase() + annotation.slice(1) : '';
+  const type = String(clause.type || 'dependency');
+  if (status === 'satisfied') return `${annotatedStatus || 'Satisfied'}: job ${id} satisfied ${type}`;
+  if (status === 'failed') return `${annotatedStatus || 'Failed'}: job ${id} cannot satisfy ${type}`;
+  return `${annotatedStatus || 'Waiting'}: waiting for job ${id} to satisfy ${type}`;
+}
+
+/** Render a linked dependency job ID followed by its accessible state icon. */
 function dependencyLink(owner, clause, id) {
   const status = dependencyStatus(owner, clause, id);
   const icons = { waiting:'🕒', satisfied:'✓', failed:'✕' };
-  const labels = { waiting:'Waiting for', satisfied:'Satisfied by', failed:'Failed dependency' };
-  return `<span class="job-dependency-icon ${status}" role="img" aria-label="${labels[status]} job ${escapeHtml(id)}" title="${labels[status]} job ${escapeHtml(id)}">${icons[status]}</span><a href="#" class="job-dependency-link" data-job-jump="${escapeHtml(`${owner.cluster}/${id}`)}" title="Show job ${escapeHtml(id)}">${escapeHtml(id)}</a>`;
+  const description = dependencyStatusDescription(status, clause, id);
+  return `${dependencyJobLink(owner, id)} <span class="job-dependency-icon ${status}" role="img" aria-label="${escapeHtml(description)}" title="${escapeHtml(description)}">${icons[status]}</span>`;
 }
 
 /** Render the compact dependency label with links to jobs already on the page. */
 function pendingDependency(job, expression) {
   const clauses = dependencyClauses(expression);
   const rendered = clauses.map(clause => {
-    const links = clause.ids.map(id => dependencyLink(job, clause, id)).join(',');
+    const links = clause.ids.map(id => dependencyJobLink(job, id)).join(',');
     return `${escapeHtml(clause.type)}${links ? ` ${links}` : ''}`;
   }).join(', ');
   return `dependency:${rendered || escapeHtml(expression)}`;
+}
+
+/** Render dependency links and status icons only inside the expanded card. */
+function expandedDependency(job) {
+  const clauses = dependencyClauses(job.dependency);
+  if (!clauses.length) return '';
+  const rendered = clauses.map(clause => {
+    const links = clause.ids.map(id => dependencyLink(job, clause, id)).join(', ');
+    return `${escapeHtml(clause.type)}${links ? ` ${links}` : ''}`;
+  }).join('<br>');
+  return `<dt>Depends on</dt><dd class="job-dependency-value">${rendered}</dd>`;
 }
 
 function pendingJobProgress(job) {
@@ -505,7 +531,8 @@ function jobCard(job, listName) {
     const label = `${formatSeconds(job.elapsed_seconds)} elapsed${ended.value ? ` · ended ${ended.value.toLocaleString()}` : ''}`;
     timing = `<span class="job-progress ${group.toLowerCase()}" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="1"><span class="job-progress-track"><span class="job-progress-fill" style="width:100%"></span></span><span class="job-progress-text">${escapeHtml(label)}</span></span>`;
   }
-  const reason = job.reason ? `<div class="job-message">${escapeHtml(job.reason)}</div>` : '';
+  const rawReason = String(job.reason || '');
+  const reason = rawReason && !/^Dependency(?::|NeverSatisfied)/i.test(rawReason) ? `<div class="job-message">${escapeHtml(rawReason)}</div>` : '';
   const submittedAt = jobSubmittedAt(job), submitted = jobSubmissionDate(job);
   const submittedText = submitted ? submitted.toLocaleString() : 'Unavailable';
   const action = listName === 'archived' ? 'restore' : 'archive';
@@ -513,7 +540,7 @@ function jobCard(job, listName) {
   const actionButton = `<button data-job-action="${action}" data-job-key="${escapeHtml(jobArchiveKey(job))}">${actionLabel}</button>`;
   const logButtons = jobsApiEnabled && !['PENDING', 'FAILED_DEPENDENCY'].includes(group) ? `<button class="log-button" data-log-stream="err" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .err</button><button class="log-button" data-log-stream="out" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .out</button>` : '';
   const disclosureKey = `card:${listName}:${jobArchiveKey(job)}`;
-  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(`${job.cluster}/${identifier}`)}"${jobDisclosureAttribute(disclosureKey)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
+  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(`${job.cluster}/${identifier}`)}"${jobDisclosureAttribute(disclosureKey)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}${expandedDependency(job)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
 }
 
 function jobGroups(jobs, listName) {

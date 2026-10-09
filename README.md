@@ -1314,11 +1314,13 @@ using the compact `<duration> estimated wait` form. If Slurm cannot estimate a
 start, the card omits the empty progress bar and says **no estimate available**.
 A job with an unsatisfied dependency likewise omits the bar and uses
 `dependency:<type> <job ID>`; selecting the ID jumps to its card or reports
-that the card could not be found. Each ID has a clock while waiting, a green
-check when its condition is satisfied, or a red x when it failed. Slurm usually
-removes satisfied entries from `%E`, so a check is shown only while that ID is
-still available in the expression or another retained job snapshot. Jobs whose
-overall dependency is impossible move from **Pending** to **Failed Dependency**.
+that the card could not be found. In the expanded card, each ID is followed by
+a clock while waiting, a green check when its condition is satisfied, or a red
+x when it failed. Hovering the icon explains the condition, replacing the
+visible Slurm status parenthetical. Slurm usually removes satisfied entries
+from `%E`, so a check is shown only while that ID is still available in the
+expression or another retained job snapshot. Jobs whose overall dependency is
+impossible move from **Pending** to **Failed Dependency**.
 
 Running jobs use Slurm's `%M` elapsed time and `%l` original full time limit to
 draw progress from the actual beginning of the allocation—not from when the
@@ -1428,9 +1430,9 @@ Cluster Watcher Activity Bar container with two sidebar views:
   runtime comparison using the time limit preserved in Slurm accounting after
   the job leaves the live queue. Dependency-blocked jobs show
   `dependency:<type> <job ID>` without an empty progress bar; the job ID links
-  to its card and a clock, green check, or red x marks that individual
-  condition as waiting, satisfied, or failed. The dependency is also retained
-  in expanded details. Open cards
+  to its card. In expanded details, a clock, green check, or red x follows each
+  dependency ID and marks that condition as waiting, satisfied, or failed;
+  hovering the icon shows the Slurm status and a fuller explanation. Open cards
   use a horizontal divider between their summary and details instead of a
   disclosure icon; opening or closing highlights the card border immediately,
   then lets the highlight fade more slowly.

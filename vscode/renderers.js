@@ -187,7 +187,7 @@ function progressView(spec, now) {
 }
 
 /** Render a compact dependency link or no-estimate message without an empty bar. */
-function pendingExplanation(job, jobs = []) {
+function pendingExplanation(job) {
   const rawDependency = String(job.dependency || '').trim();
   const dependency = ['(null)', 'NULL', 'None', 'N/A'].includes(rawDependency) ? '' : rawDependency;
   const reasonMatch = /^dependency(?::\s*(.*))?$/i.exec(String(job.reason || '').trim());
@@ -195,7 +195,7 @@ function pendingExplanation(job, jobs = []) {
   if (expression || reasonMatch) {
     const clauses = parseDependency(expression);
     const rendered = clauses.map((clause) => {
-      const links = clause.ids.map((id) => dependencyLink(job, clause, id, jobs)).join(',');
+      const links = clause.ids.map((id) => dependencyJobLink(job, id)).join(',');
       return `${escapeHtml(clause.type)}${links ? ` ${links}` : ''}`;
     }).join(', ');
     return `dependency:${rendered || escapeHtml(expression)}`;
@@ -204,10 +204,10 @@ function pendingExplanation(job, jobs = []) {
 }
 
 /** Render state-appropriate elapsed/wait progress that the webview keeps current. */
-function jobProgress(job, asOf, now = Date.now(), jobs = []) {
+function jobProgress(job, asOf, now = Date.now()) {
   const spec = progressSpec(job, asOf);
   if (jobGroup(job) === 'FAILED_DEPENDENCY' || (spec.group === 'PENDING' && spec.expected == null)) {
-    const explanation = pendingExplanation(job, jobs);
+    const explanation = pendingExplanation(job);
     return `<span class="muted progress-message">${explanation}</span>`;
   }
   const view = progressView(spec, now);
@@ -246,7 +246,7 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 .card>summary[data-full-name]::after{outline:1px solid #fff}
 .card[open] .name{white-space:normal;overflow-wrap:anywhere}
 .progress-message{display:block;max-width:100%;font-size:.72em;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
-.dependency-icon{display:inline-block;margin-right:2px;font-family:system-ui,sans-serif;font-weight:700}.dependency-icon.waiting{font-weight:400}.dependency-icon.satisfied{color:var(--vscode-testing-iconPassed)}.dependency-icon.failed{color:var(--vscode-errorForeground)}
+.dependency-icon{display:inline-block;margin-left:2px;font-family:system-ui,sans-serif;font-weight:700;cursor:help}.dependency-icon.waiting{font-weight:400}.dependency-icon.satisfied{color:var(--vscode-testing-iconPassed)}.dependency-icon.failed{color:var(--vscode-errorForeground)}
 .job-id:hover,.job-id:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--vscode-focusBorder)}
 button.button{border:0;font:inherit;cursor:pointer}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
@@ -466,12 +466,27 @@ function dependencyStatus(owner, clause, id, jobs = []) {
   return hasFailedDependency(owner) ? 'failed' : 'waiting';
 }
 
-/** Render an accessible dependency-state icon followed by its linked job ID. */
+/** Render a dependency job ID link without expanded-card status decoration. */
+function dependencyJobLink(owner, id) {
+  return `<a class="dep-link" href="#" data-jump="${escapeHtml(`${owner.cluster}/${id}`)}" title="Show job ${escapeHtml(id)}">${escapeHtml(id)}</a>`;
+}
+
+/** Describe an expanded dependency icon for hover and assistive technology. */
+function dependencyStatusDescription(status, clause, id) {
+  const annotation = String(clause.status || '').trim();
+  const annotatedStatus = annotation ? annotation[0].toUpperCase() + annotation.slice(1) : '';
+  const type = String(clause.type || 'dependency');
+  if (status === 'satisfied') return `${annotatedStatus || 'Satisfied'}: job ${id} satisfied ${type}`;
+  if (status === 'failed') return `${annotatedStatus || 'Failed'}: job ${id} cannot satisfy ${type}`;
+  return `${annotatedStatus || 'Waiting'}: waiting for job ${id} to satisfy ${type}`;
+}
+
+/** Render a linked dependency job ID followed by its accessible state icon. */
 function dependencyLink(owner, clause, id, jobs = []) {
   const status = dependencyStatus(owner, clause, id, jobs);
   const icons = { waiting: '🕒', satisfied: '✓', failed: '✕' };
-  const labels = { waiting: 'Waiting for', satisfied: 'Satisfied by', failed: 'Failed dependency' };
-  return `<span class="dependency-icon ${status}" role="img" aria-label="${labels[status]} job ${escapeHtml(id)}" title="${labels[status]} job ${escapeHtml(id)}">${icons[status]}</span><a class="dep-link" href="#" data-jump="${escapeHtml(`${owner.cluster}/${id}`)}" title="Show job ${escapeHtml(id)}">${escapeHtml(id)}</a>`;
+  const description = dependencyStatusDescription(status, clause, id);
+  return `${dependencyJobLink(owner, id)} <span class="dependency-icon ${status}" role="img" aria-label="${escapeHtml(description)}" title="${escapeHtml(description)}">${icons[status]}</span>`;
 }
 
 /** Render dependency clauses with links that jump to the referenced cards. */
@@ -480,7 +495,7 @@ function dependencyLinks(job, jobs = []) {
   if (!clauses.length) return '';
   const rendered = clauses.map((clause) => {
     const links = clause.ids.map((id) => dependencyLink(job, clause, id, jobs)).join(', ');
-    return `${escapeHtml(clause.type)}${links ? ` ${links}` : ''}${clause.status ? ` <span class="muted">(${escapeHtml(clause.status)})</span>` : ''}`;
+    return `${escapeHtml(clause.type)}${links ? ` ${links}` : ''}`;
   }).join('<br>');
   return `<dt>Depends on</dt><dd class="dependency-value">${rendered}</dd>`;
 }
@@ -520,7 +535,7 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
   }
   const disclosureKey = `card:${archived ? 'archive' : 'active'}:${key}`;
   const metadata = `${job.cluster} / ${job.partition || 'no partition'} · ${resources}`;
-  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="card-summary-title"><span class="name">${escapeHtml(name)}</span></span><span class="card-summary-progress">${jobProgress(job, asOf, Date.now(), jobs)}</span></summary><div class="card-body"><div class="muted card-meta" title="${escapeHtml(metadata)}"><span class="badge job-id${ending ? ' ending' : ''}" role="button" tabindex="0" data-copy="${escapeHtml(identifier)}" title="${escapeHtml(identifier)}${ending ? ' · ending' : ''} — click to copy">${escapeHtml(identifier)}</span> ${escapeHtml(metadata)}</div><dl class="times">${lifecycleRows(job, asOf)}${dependencyLinks(job, jobs)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
+  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="card-summary-title"><span class="name">${escapeHtml(name)}</span></span><span class="card-summary-progress">${jobProgress(job, asOf)}</span></summary><div class="card-body"><div class="muted card-meta" title="${escapeHtml(metadata)}"><span class="badge job-id${ending ? ' ending' : ''}" role="button" tabindex="0" data-copy="${escapeHtml(identifier)}" title="${escapeHtml(identifier)}${ending ? ' · ending' : ''} — click to copy">${escapeHtml(identifier)}</span> ${escapeHtml(metadata)}</div><dl class="times">${lifecycleRows(job, asOf)}${dependencyLinks(job, jobs)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
 }
 
 /**

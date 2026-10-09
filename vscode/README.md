@@ -42,13 +42,14 @@ cards. The copyable job-ID badge has rectangular corners and an inset blue
 hover/focus border whose four edges remain visible.
 Dependency-blocked cards omit the empty progress bar and show
 `dependency:<type> <job ID>`; the ID links to the relevant card and a popup
-reports when it cannot be found. A clock marks a waiting ID, a green check a
-satisfied condition, and a red x a failed one. Because Slurm normally removes
-satisfied IDs from its remaining-dependencies field, checks appear only while
-the ID remains available in the expression or a retained snapshot. Jobs whose
-overall condition is impossible appear under **Failed Dependency** instead of
-**Pending**. The expanded **Depends on** row also retains the complete
-dependency. Open cards use a horizontal
+reports when it cannot be found. In the expanded **Depends on** row, a clock
+after an ID marks it as waiting, a green check marks it as satisfied, and a red
+x marks it as failed. Hovering an icon shows the Slurm status and a fuller
+description instead of displaying a status parenthetical. Because Slurm
+normally removes satisfied IDs from its remaining-dependencies field, checks
+appear only while the ID remains available in the expression or a retained
+snapshot. Jobs whose overall condition is impossible appear under **Failed
+Dependency** instead of **Pending**. Open cards use a horizontal
 divider between the always-visible summary and their details instead of a
 disclosure icon. Opening or closing highlights the card border immediately,
 then fades that highlight more slowly.
@@ -92,8 +93,9 @@ Expand a card to see details and to:
   turns red and the button disappears until Slurm stops listing the job;
 - for jobs with a Slurm dependency, read the **Depends on** row. Each job ID in
   it is a link that opens and scrolls to that job's card (opening its group if
-  collapsed), with the same waiting/satisfied/failed icon as the compact row.
-  A notification explains when the job is not in the list.
+  collapsed). The status icon follows the ID only in this expanded row and
+  provides its description on hover. A notification explains when the job is
+  not in the list.
 
 The archive is stored in VS Code extension global state and survives editor
 restarts. Group, card, and cluster disclosure choices survive live data
