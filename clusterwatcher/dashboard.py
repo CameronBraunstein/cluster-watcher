@@ -52,16 +52,17 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .my-jobs { border:1px solid #2563eb66; background:#2563eb0c; border-radius:.5rem; margin:1rem 0; padding:1rem; }
 .my-jobs h2 { margin:0 0 .75rem; } .job-group { margin:.7rem 0; } .job-group > summary { cursor:pointer; font-weight:700; }
 .job-card-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:.65rem; margin:.65rem 0; }
-.job-card { border:1px solid #8885; border-radius:.4rem; background:Canvas; } .job-card > summary { display:grid; position:relative; gap:.25rem; padding:.7rem; cursor:pointer; }
+.job-card { border:1px solid #8885; border-radius:.4rem; background:Canvas; min-width:0; } .job-card > summary { display:grid; position:relative; gap:.25rem; padding:.7rem; cursor:pointer; min-width:0; }
 .job-card > summary[data-full-name]::after { content:attr(data-full-name); position:absolute; z-index:10; left:.35rem; top:calc(100% + 2px); max-width:calc(100% - 1rem); padding:.25rem .4rem; border:1px solid #8888; outline:1px solid #fff; border-radius:2px; background:Canvas; color:CanvasText; font-size:.75rem; font-weight:400; line-height:1.25; white-space:normal; overflow-wrap:anywhere; visibility:hidden; opacity:0; pointer-events:none; }
 .job-card:not([open]) > summary[data-full-name]:hover::after { visibility:visible; opacity:1; }
-.job-card-summary-title { display:flex; justify-content:space-between; gap:.5rem; align-items:baseline; }
-.job-card-body { padding:0 .7rem .7rem; } .job-card-actions, .job-sort-controls { display:flex; flex-wrap:wrap; gap:.4rem; margin:.55rem 0; }
+.job-card-summary-title { display:flex; justify-content:space-between; gap:.5rem; align-items:baseline; min-width:0; }
+.job-card-body { padding:0 .7rem .7rem; min-width:0; } .job-card-actions, .job-sort-controls { display:flex; flex-wrap:wrap; gap:.4rem; margin:.55rem 0; }
 .job-card-actions button, .job-sort-controls button { cursor:pointer; }
 .job-times { display:grid; grid-template-columns:auto 1fr; gap:.2rem .7rem; margin:.55rem 0; font-size:.8rem; } .job-times dt { color:#666; } .job-times dd { margin:0; text-align:right; }
-.job-name { font-weight:700; overflow-wrap:anywhere; } .job-location, .job-resources, .job-id { color:#666; font-size:.78rem; } .job-state { font-size:.74rem; text-transform:uppercase; letter-spacing:.04em; }
+.job-name { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:700; } .job-card[open] .job-name { white-space:normal; overflow-wrap:anywhere; } .job-location, .job-resources, .job-id { color:#666; font-size:.78rem; } .job-id { flex:0 1 auto; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .job-location, .job-resources, .job-message { overflow-wrap:anywhere; } .job-state { font-size:.74rem; text-transform:uppercase; letter-spacing:.04em; overflow-wrap:anywhere; }
 .job-progress { display:block; margin-top:.5rem; } .job-progress-track { display:block; height:.62rem; overflow:hidden; border-radius:999px; background:#8883; }
-.job-progress-fill { display:block; height:100%; background:#2563eb; transition:width 1s linear; } .job-progress-text { display:block; margin-top:.22rem; font-size:.76rem; color:#666; }
+.job-progress-fill { display:block; height:100%; background:#2563eb; transition:width 1s linear; } .job-progress-text { display:block; max-width:100%; margin-top:.22rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.76rem; color:#666; }
+.job-progress-message { display:block; max-width:100%; margin-top:.5rem; overflow-wrap:anywhere; font-size:.76rem; line-height:1.3; color:#666; }
 .job-progress.pending .job-progress-fill { background:#7c3aed; } .job-message { margin-top:.5rem; font-size:.78rem; color:#666; }
 .job-progress.completed .job-progress-fill { background:#16a34a; } .job-progress.failed_early .job-progress-fill, .job-progress.failed_timeout .job-progress-fill { background:#dc2626; } .job-progress.cancelled .job-progress-fill, .job-progress.other .job-progress-fill { background:#6b7280; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; }
@@ -189,7 +190,7 @@ function durationLabel(minutes) {
 
 function waitLabel(startTime, thresholds) {
   const start = new Date(startTime);
-  if (Number.isNaN(start.getTime())) return 'estimate unavailable';
+  if (Number.isNaN(start.getTime())) return 'no wait estimate';
   const minutes = Math.max(0, (start.getTime() - Date.now()) / 60000);
   for (const threshold of thresholds) if (minutes < threshold) return `< ${durationLabel(threshold)}`;
   const hours = Math.max(1, Math.round(minutes / 60));
@@ -211,7 +212,7 @@ function allottedRuntime(job) {
   const total = Number(job.time_limit_seconds);
   if (job.time_limit_seconds != null && Number.isFinite(total) && total > 0) return `${formatSeconds(total)} allotted`;
   if (job.time_limit && !['N/A', 'NOT_SET'].includes(job.time_limit)) return `${job.time_limit} allotted`;
-  return 'allotted runtime unavailable';
+  return 'no time limit';
 }
 
 function runningJobProgress(job, compact = false) {
@@ -226,11 +227,13 @@ function runningJobProgress(job, compact = false) {
 function pendingJobProgress(job) {
   const dependency = String(job.dependency || '').trim(), runtime = allottedRuntime(job);
   if (dependency && !['(null)', 'NULL', 'None', 'N/A'].includes(dependency)) {
-    return `<span class="job-progress pending" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><span class="job-progress-track"><span class="job-progress-fill" style="width:0%"></span></span><span class="job-progress-text">Waiting for dependency: ${escapeHtml(dependency)}. No start estimate is available until it clears · ${escapeHtml(runtime)}.</span></span>`;
+    const explanation = `Waiting for dependency: ${dependency}. No start estimate until it clears · ${runtime}.`;
+    return `<span class="job-progress-message" title="${escapeHtml(explanation)}">${escapeHtml(explanation)}</span>`;
   }
   const submittedAt = new Date(job.submit_time).getTime(), startAt = new Date(job.start_time).getTime();
   if (!Number.isFinite(submittedAt) || !Number.isFinite(startAt) || startAt <= submittedAt) {
-    return `<span class="job-progress pending" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><span class="job-progress-track"><span class="job-progress-fill" style="width:0%"></span></span><span class="job-progress-text">Slurm cannot currently estimate when this job will start · ${escapeHtml(runtime)}.</span></span>`;
+    const explanation = `Slurm cannot currently estimate when this job will start · ${runtime}.`;
+    return `<span class="job-progress-message" title="${escapeHtml(explanation)}">${escapeHtml(explanation)}</span>`;
   }
   const waitSeconds = Math.max(1, Math.round((startAt - submittedAt) / 1000));
   return `<span class="job-progress pending" data-pending-progress data-submitted-at="${submittedAt}" data-start-at="${startAt}" data-wait-seconds="${waitSeconds}" data-runtime-label="${escapeHtml(runtime)}" role="progressbar" aria-valuemin="0" aria-valuemax="${waitSeconds}"><span class="job-progress-track"><span class="job-progress-fill"></span></span><span class="job-progress-text"></span></span>`;
@@ -590,7 +593,9 @@ function updateDynamicDisplays() {
     const remaining = Math.max(0, (startAt - Date.now()) / 1000), completed = Math.max(0, Math.min(100, elapsed / waitSeconds * 100));
     progress.querySelector('.job-progress-fill').style.width = `${completed}%`;
     const estimatedStart = new Date(startAt).toLocaleString(), submitted = new Date(submittedAt).toLocaleString(), runtime = progress.dataset.runtimeLabel;
-    progress.querySelector('.job-progress-text').textContent = remaining > 0 ? `${formatSeconds(remaining, true)} until estimated start (${estimatedStart}) · submitted ${submitted} · ${runtime}` : `Estimated start ${estimatedStart} has passed; waiting for Slurm to update · submitted ${submitted} · ${runtime}`;
+    const label = progress.querySelector('.job-progress-text');
+    label.textContent = remaining > 0 ? `${formatSeconds(remaining, true)} estimated wait` : 'estimate passed';
+    label.title = `Estimated start ${estimatedStart} · submitted ${submitted} · ${runtime}`;
     progress.setAttribute('aria-valuenow', String(Math.floor(elapsed)));
   });
 }

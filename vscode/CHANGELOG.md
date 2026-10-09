@@ -13,10 +13,11 @@ All notable changes to the Cluster Watcher VS Code extension.
   ID, and full name in both interfaces. The copyable job ID moved beside
   expanded resource metadata, and elapsed/end text moved into expanded
   lifecycle details.
-- Dependency waits now use the compact `dependency` label. Open cards use a
-  summary/detail divider instead of a disclosure icon, card borders flash
-  immediately after layout changes and fade back more slowly, and full-name
-  hover labels appear immediately.
+- Dependency waits and unavailable start estimates now omit their empty
+  progress bars and show wrapped explanations. Open cards use a summary/detail
+  divider instead of a disclosure icon, card borders flash immediately after
+  layout changes and fade back more slowly, and full-name hover labels appear
+  immediately.
 - Completed and failed cards keep the progress bar's `time run / time allotted`
   comparison. Elapsed time is no longer duplicated in expanded details;
   running cards omit **Ended**, and pending cards omit **Launched** and
@@ -47,6 +48,10 @@ All notable changes to the Cluster Watcher VS Code extension.
   view refreshes briefly show a spinning sync icon so fast and unchanged
   checks still provide immediate feedback, followed by a notification that
   distinguishes refreshed data from a check with no updates.
+- Narrow job cards use **estimated wait** when an estimate exists, ellipsize
+  long progress/metadata text, and safely wrap explanations and dependency
+  expressions so user- and cluster-provided values cannot escape the card.
+  Zero-length job durations render as `<1m` rather than `now`.
 
 ## 0.1.3 — 2026-10-07
 

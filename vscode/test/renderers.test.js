@@ -141,11 +141,12 @@ test('collapsed title truncates with a full-name tooltip and the job ID moves to
   assert.match(cardSummary, /<span class="name">a very long job title indeed<\/span>/);
   assert.doesNotMatch(cardSummary, /class="badge job-id/);
   assert.match(html, /\.name\{[^}]*overflow:hidden;text-overflow:ellipsis;white-space:nowrap;/);
+  assert.match(html, /\.card\[open\] \.name\{white-space:normal;overflow-wrap:anywhere\}/);
   assert.match(html, /\.card:not\(\[open\]\)>summary\[data-full-name\]:hover::after\{visibility:visible;opacity:1\}/);
   assert.match(html, /\.card>summary\[data-full-name\]::after\{outline:1px solid #fff\}/);
-  assert.doesNotMatch(cardSummary, / title=/);
+  assert.doesNotMatch(cardSummary, /<summary[^>]* title=/);
   assert.match(html, /<span class="badge job-id" role="button" tabindex="0" data-copy="2000068_123"/);
-  assert.match(html, /<div class="muted card-meta"><span class="badge job-id"[^>]*>2000068_123<\/span> cluster_0 \/ no partition · 0 node · 0 GPU · 0 CPU<\/div>/);
+  assert.match(html, /<div class="muted card-meta" title="cluster_0 \/ no partition · 0 node · 0 GPU · 0 CPU"><span class="badge job-id"[^>]*>2000068_123<\/span> cluster_0 \/ no partition · 0 node · 0 GPU · 0 CPU<\/div>/);
   assert.match(html, /\.card-meta>\.job-id\{display:inline-block;font-size:\.88em;margin-right:3px\}/);
   assert.match(html, /\.job-id\{[^}]*border-radius:0\}/);
   assert.doesNotMatch(html, /\.job-id\{[^}]*width:/);
@@ -180,7 +181,7 @@ test('dependencies are parsed and rendered as links to the referenced card', () 
     { job_id: '12', cluster: 'cluster_0', state: 'RUNNING' },
     { job_id: '13', cluster: 'cluster_0', state: 'PENDING', dependency: 'afterok:12(unfulfilled)' },
   ] });
-  assert.match(html, /<dt>Depends on<\/dt><dd>afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"/);
+  assert.match(html, /<dt>Depends on<\/dt><dd class="dependency-value">afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"/);
   assert.match(html, /<details class="card" data-disclosure-key="[^"]+" data-job-ref="cluster_0\/12"/);
   assert.match(html, /type: 'missingJob'/);
   assert.equal((html.match(/<dt>Depends on/g) || []).length, 1);
@@ -255,19 +256,23 @@ test('running progress keeps advancing from generated_at without new data', () =
   // Completed and failed cards compare recorded runtime with the allocation.
   const done = progressView(progressSpec({ state: 'COMPLETED', elapsed_seconds: 600, time_limit_seconds: 3600 }, asOf), asOf);
   const failed = progressView(progressSpec({ state: 'FAILED', elapsed_seconds: 1800, time_limit_seconds: 3600 }, asOf), asOf);
+  const immediateFailure = progressView(progressSpec({ state: 'FAILED', elapsed_seconds: 0, time_limit_seconds: 10800 }, asOf), asOf);
   assert.equal(done.label, '10m / 1h');
   assert.equal(done.percent, 600 / 3600 * 100);
   assert.equal(failed.label, '30m / 1h');
   assert.equal(failed.percent, 50);
+  assert.equal(immediateFailure.label, '<1m / 3h');
 });
 
 test('pending wait counts down and the webview re-runs the shared code', () => {
   const asOf = Date.parse('2026-10-06T10:00:00Z');
   const spec = progressSpec({ state: 'PENDING', submit_at: '2026-10-06T09:00:00Z', expected_start_at: '2026-10-06T11:00:00Z' }, asOf);
-  assert.match(progressView(spec, asOf).label, /^1h until estimated start/);
-  assert.match(progressView(spec, asOf + 30 * 60 * 1000).label, /^30m until estimated start/);
+  assert.equal(progressView(spec, asOf).label, '1h estimated wait');
+  assert.equal(progressView(spec, asOf + 30 * 60 * 1000).label, '30m estimated wait');
+  assert.equal(progressView(spec, Date.parse('2026-10-06T11:00:00Z')).label, '<1m estimated wait');
   const dependency = progressSpec({ state: 'PENDING', reason: 'Dependency: afterok:12(unfulfilled)' }, asOf);
   assert.equal(progressView(dependency, asOf).label, 'dependency');
+  assert.equal(progressView(progressSpec({ state: 'PENDING' }, asOf), asOf).label, 'no wait estimate');
 
   const html = renderJobs({ generated_at: '2026-10-06T10:00:00Z', jobs: [{ job_id: '1', cluster: 'c', state: 'RUNNING', elapsed_seconds: 1 }] });
   assert.match(html, /<span class="job-progress" data-progress="\{&quot;group&quot;:&quot;RUNNING&quot;/);
@@ -275,6 +280,21 @@ test('pending wait counts down and the webview re-runs the shared code', () => {
   assert.match(html, /setInterval\(tick, 5000\)/);
   assert.doesNotMatch(html, /<div class="meta"/);
   assert.match(html, /event\.data\?\.type !== 'checked'/);
+});
+
+test('pending jobs without an estimate explain why and omit the empty bar', () => {
+  const dependencyHtml = renderJobs({ jobs: [{
+    job_id: '1', cluster: 'c', state: 'PENDING', dependency: 'afterok:123(unfulfilled)',
+  }] });
+  const dependencySummary = dependencyHtml.match(/<summary data-full-name="c 1 1">.*?<\/summary>/s)[0];
+  assert.match(dependencySummary, /Waiting for dependency: afterok:123\(unfulfilled\)\. No start estimate until it clears\./);
+  assert.doesNotMatch(dependencySummary, /class="progress"/);
+
+  const unavailableHtml = renderJobs({ jobs: [{ job_id: '2', cluster: 'c', state: 'PENDING' }] });
+  const unavailableSummary = unavailableHtml.match(/<summary data-full-name="c 2 2">.*?<\/summary>/s)[0];
+  assert.match(unavailableSummary, /Slurm cannot currently estimate when this job will start\./);
+  assert.doesNotMatch(unavailableSummary, /class="progress"/);
+  assert.match(unavailableHtml, /\.progress-message\{[^}]*overflow-wrap:anywhere/);
 });
 
 test('status wait cells carry their estimate and as-of time for counting down', () => {
@@ -298,8 +318,20 @@ test('progress label stays beside the bar at the narrowest expanded width', () =
   const html = renderJobs({ generated_at: '2026-09-30T15:02:00Z', jobs: [{ job_id: '1', cluster: 'cluster_0', state: 'RUNNING', elapsed_seconds: 60, time_limit_seconds: 3600 }] });
   assert.match(html, /\.job-progress\{display:flex;flex-wrap:nowrap;/);
   assert.match(html, /\.job-progress>\.progress\{flex:1 1 auto;min-width:20px\}/);
-  assert.match(html, /\.progress-label\{flex:0 0 auto;white-space:nowrap;font-size:\.72em\}/);
-  assert.match(html, /<span class="job-progress"[^>]*><span class="progress">.*?<\/span><\/span><span class="muted progress-label">/);
+  assert.match(html, /\.progress-label\{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:\.72em\}/);
+  assert.match(html, /<span class="job-progress"[^>]*><span class="progress">.*?<\/span><\/span><span class="muted progress-label" title="[^"]*">/);
+});
+
+test('narrow cards contain long metadata and dependency text', () => {
+  const html = renderJobs({ jobs: [{
+    job_id: '12345678901234567890', name: 'long', cluster: 'cluster-with-a-very-long-name',
+    partition: 'partition-with-a-very-long-name', state: 'PENDING', dependency: 'afterok:12345678901234567890(unfulfilled)',
+  }] });
+
+  assert.match(html, /\.card-meta\{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\}/);
+  assert.match(html, /\.times dd\.dependency-value\{white-space:normal;overflow-wrap:anywhere\}/);
+  assert.match(html, /<div class="muted card-meta" title="cluster-with-a-very-long-name \/ partition-with-a-very-long-name/);
+  assert.match(html, /<dd class="dependency-value">/);
 });
 
 test('expanded card moves the running deadline down and keeps details and actions compact', () => {
@@ -313,7 +345,7 @@ test('expanded card moves the running deadline down and keeps details and action
   assert.ok(html.includes(`<dt>Limit</dt><dd>${localTime('2026-09-30T16:01:00Z')}</dd>`));
   assert.doesNotMatch(html, /<dt>Elapsed<\/dt>/);
   assert.doesNotMatch(html, /<dt>Ended<\/dt>/);
-  assert.match(html, /<span class="muted progress-label">[^<]+ \/ 1h<\/span>/);
+  assert.match(html, /<span class="muted progress-label" title="[^"]+ \/ 1h">[^<]+ \/ 1h<\/span>/);
   assert.match(html, /\.times dt,\.times dd\{white-space:nowrap\}/);
   assert.match(html, /\.actions\{display:flex;flex-wrap:nowrap;/);
   assert.match(html, /title="Archive job" aria-label="Archive job"><svg class="action-icon"/);
@@ -332,7 +364,7 @@ test('terminal cards keep elapsed time in the compact fraction and end time in d
     }],
   });
   const cardSummary = html.match(/<summary data-full-name="cluster_0 3 finished">.*?<\/summary>/s)[0];
-  assert.match(cardSummary, /<span class="muted progress-label">10m \/ 1h<\/span>/);
+  assert.match(cardSummary, /<span class="muted progress-label" title="10m \/ 1h">10m \/ 1h<\/span>/);
   assert.doesNotMatch(cardSummary, />[^<]*(?:elapsed|ended)[^<]*</i);
   assert.doesNotMatch(html, /<dt>Elapsed<\/dt>/);
   assert.match(html, /<dt>Ended<\/dt><dd>[^<]+<\/dd>/);

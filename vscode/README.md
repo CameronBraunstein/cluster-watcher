@@ -39,14 +39,18 @@ and end in an ellipsis; an immediate, white-outlined hover label shows the
 cluster, job ID, and full job name. Card
 summaries use tight internal padding and reduced spacing between neighboring
 cards. The copyable job-ID badge has rectangular corners.
-Dependency-blocked cards use the short label `dependency`; the expanded
-**Depends on** row retains the complete dependency. Open cards use a horizontal
+Dependency-blocked cards omit the empty progress bar and show a wrapped
+explanation; the expanded **Depends on** row also retains the complete
+dependency. Open cards use a horizontal
 divider between the always-visible summary and their details instead of a
 disclosure icon. Opening or closing highlights the card border immediately,
 then fades that highlight more slowly.
-The bar and run/allotted time stay on one line at the sidebar's narrowest
+Pending cards with usable estimates use `<duration> estimated wait`; missing
+estimates show an explanation without an empty bar. The bar and run/allotted
+time stay on one line at the sidebar's narrowest
 expanded width, including on completed and failed cards; their denominator
-comes from the time limit retained in Slurm accounting. Jobs are separated into
+comes from the time limit retained in Slurm accounting. Zero-length recorded
+durations appear as `<1m` rather than `now`. Jobs are separated into
 **Failed (Early)** and **Failed (Timeout)** groups; the latter is reserved for
 Slurm's explicit `TIMEOUT` state. Expand a card to see the job ID before the
 cluster, partition, and resource summary; click it (or focus it and press
@@ -55,7 +59,9 @@ time appear with the expanded lifecycle details. Elapsed time is not repeated
 there because it is already in the compact progress fraction. Running cards
 omit **Ended**; pending cards omit both **Launched** and **Ended**. Expanded
 timestamps and the compact icon/short-label action row remain
-on one line at that width. Expand a card to see details and to:
+on one line at that width. Long progress labels and metadata ellipsize, with
+full values retained in hover text, while dependency expressions and expanded
+job names wrap inside the card. Expand a card to see details and to:
 
 - select the archive-box icon and move it into the collapsed **Archive** group
   at the bottom, or **Restore** it later;

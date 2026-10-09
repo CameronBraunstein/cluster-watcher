@@ -1308,10 +1308,10 @@ may not provide an expected start time.
 The query also reads Slurm's `%V` submission time and `%E` remaining-dependencies
 field. When Slurm supplies an expected start, a pending-job progress bar begins
 at its submission time and advances toward that estimate. Its label counts down
-to the estimated start and also states the job's allotted runtime. If Slurm
-cannot estimate a start, the card says so explicitly. A job with an unsatisfied
-dependency identifies that dependency and explains that no start estimate is
-available until it clears.
+using the compact `<duration> estimated wait` form. If Slurm cannot estimate a
+start, the card omits the empty progress bar and explains that Slurm cannot
+currently estimate the start. A job with an unsatisfied dependency likewise
+uses wrapped explanatory text instead of an empty bar.
 
 Running jobs use Slurm's `%M` elapsed time and `%l` original full time limit to
 draw progress from the actual beginning of the allocation—not from when the
@@ -1417,12 +1417,19 @@ Cluster Watcher Activity Bar container with two sidebar views:
   reduced inter-card spacing; the copyable job-ID badge is rectangular.
   Completed and failed cards retain that
   runtime comparison using the time limit preserved in Slurm accounting after
-  the job leaves the live queue. Dependency-blocked jobs show the compact
-  label `dependency`, with the full dependency in expanded details. Open cards
+  the job leaves the live queue. Dependency-blocked jobs show a wrapped
+  explanation without an empty progress bar, with the dependency also retained
+  in expanded details. Open cards
   use a horizontal divider between their summary and details instead of a
   disclosure icon; opening or closing highlights the card border immediately,
   then lets the highlight fade more slowly.
-  These remain on one line at the sidebar's narrowest expanded width. The
+  Pending cards with usable estimates use `<duration> estimated wait`; missing
+  estimates use wrapped explanatory text without an empty bar. Timed progress
+  labels remain on one line at the sidebar's narrowest expanded width. A zero
+  recorded job duration is shown as `<1m`, never `now`. Long progress
+  labels and metadata ellipsize as a final safeguard, while dependency
+  expressions and expanded job names wrap inside the card instead of
+  overflowing it. The
   copyable job ID precedes the cluster, partition, and resources in the
   expanded metadata. Calculated running-job limits and terminal-job end times
   also appear in expanded details; elapsed time remains in the compact progress
