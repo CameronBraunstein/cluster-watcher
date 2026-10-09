@@ -38,15 +38,17 @@ progress color bar, and completion/start estimate. Long names stay on one line
 and end in an ellipsis; an immediate, white-outlined hover label shows the
 cluster, job ID, and full job name. Card
 summaries use tight internal padding and reduced spacing between neighboring
-cards. The copyable job-ID badge has rectangular corners.
-Dependency-blocked cards omit the empty progress bar and show a wrapped
-explanation; the expanded **Depends on** row also retains the complete
-dependency. Open cards use a horizontal
+cards. The copyable job-ID badge has rectangular corners and an inset blue
+hover/focus border whose four edges remain visible.
+Dependency-blocked cards omit the empty progress bar and show
+`dependency:<type> <job ID>`; the ID links to the relevant card and a popup
+reports when it cannot be found. The expanded **Depends on** row also retains
+the complete dependency. Open cards use a horizontal
 divider between the always-visible summary and their details instead of a
 disclosure icon. Opening or closing highlights the card border immediately,
 then fades that highlight more slowly.
 Pending cards with usable estimates use `<duration> estimated wait`; missing
-estimates show an explanation without an empty bar. The bar and run/allotted
+estimates show **no estimate available** without an empty bar. The bar and run/allotted
 time stay on one line at the sidebar's narrowest
 expanded width, including on completed and failed cards; their denominator
 comes from the time limit retained in Slurm accounting. Zero-length recorded
@@ -74,7 +76,9 @@ job names wrap inside the card. Expand a card to see details and to:
   Slurm's exact copy of the submitted script. Slurm usually discards that copy
   when a job ends, so for finished jobs the extension opens the script file
   named on the recorded `sbatch` command line instead, and a warning says that
-  it is the current file and may have changed since submission;
+  it is the current file and may have changed since submission. The **.err**,
+  **.out**, and **script** controls preserve the sidebar's current scroll
+  position when their document opens;
 - for running and pending jobs, select **End** in the card's lower-right
   corner. A modal dialog asks for
   confirmation, then the service runs `scancel` for that job. The ID badge

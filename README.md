@@ -1309,9 +1309,10 @@ The query also reads Slurm's `%V` submission time and `%E` remaining-dependencie
 field. When Slurm supplies an expected start, a pending-job progress bar begins
 at its submission time and advances toward that estimate. Its label counts down
 using the compact `<duration> estimated wait` form. If Slurm cannot estimate a
-start, the card omits the empty progress bar and explains that Slurm cannot
-currently estimate the start. A job with an unsatisfied dependency likewise
-uses wrapped explanatory text instead of an empty bar.
+start, the card omits the empty progress bar and says **no estimate available**.
+A job with an unsatisfied dependency likewise omits the bar and uses
+`dependency:<type> <job ID>`; selecting the ID jumps to its card or reports
+that the card could not be found.
 
 Running jobs use Slurm's `%M` elapsed time and `%l` original full time limit to
 draw progress from the actual beginning of the allocation—not from when the
@@ -1417,14 +1418,14 @@ Cluster Watcher Activity Bar container with two sidebar views:
   reduced inter-card spacing; the copyable job-ID badge is rectangular.
   Completed and failed cards retain that
   runtime comparison using the time limit preserved in Slurm accounting after
-  the job leaves the live queue. Dependency-blocked jobs show a wrapped
-  explanation without an empty progress bar, with the dependency also retained
-  in expanded details. Open cards
+  the job leaves the live queue. Dependency-blocked jobs show
+  `dependency:<type> <job ID>` without an empty progress bar; the job ID links
+  to its card and the dependency is also retained in expanded details. Open cards
   use a horizontal divider between their summary and details instead of a
   disclosure icon; opening or closing highlights the card border immediately,
   then lets the highlight fade more slowly.
   Pending cards with usable estimates use `<duration> estimated wait`; missing
-  estimates use wrapped explanatory text without an empty bar. Timed progress
+  estimates say **no estimate available** without an empty bar. Timed progress
   labels remain on one line at the sidebar's narrowest expanded width. A zero
   recorded job duration is shown as `<1m`, never `now`. Long progress
   labels and metadata ellipsize as a final safeguard, while dependency
@@ -1445,7 +1446,9 @@ Cluster Watcher Activity Bar container with two sidebar views:
   jobs, an **End** button that confirms
   before cancelling the job. The detail timestamps and compact action row
   remain on one line: archive uses an icon and the open actions use **.err**,
-  **.out**, and **script** labels.
+  **.out**, and **script** labels. Those document-opening actions retain the
+  card list's scroll position. The rectangular job-ID copy badge uses an inset
+  focus-colored hover/focus border so none of its edges are clipped.
 - **Cluster Status** follows `cluster-watcher status`: partitions are separated
   by collapsible cluster headings. Its columns begin **Partition**,
   **Available**, **GPU**, **VRAM**, and **TFLOPS/s**, followed by one-hour wait

@@ -63,6 +63,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .job-progress { display:block; margin-top:.5rem; } .job-progress-track { display:block; height:.62rem; overflow:hidden; border-radius:999px; background:#8883; }
 .job-progress-fill { display:block; height:100%; background:#2563eb; transition:width 1s linear; } .job-progress-text { display:block; max-width:100%; margin-top:.22rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.76rem; color:#666; }
 .job-progress-message { display:block; max-width:100%; margin-top:.5rem; overflow-wrap:anywhere; font-size:.76rem; line-height:1.3; color:#666; }
+.job-dependency-link { color:LinkText; font-family:ui-monospace, monospace; }
 .job-progress.pending .job-progress-fill { background:#7c3aed; } .job-message { margin-top:.5rem; font-size:.78rem; color:#666; }
 .job-progress.completed .job-progress-fill { background:#16a34a; } .job-progress.failed_early .job-progress-fill, .job-progress.failed_timeout .job-progress-fill { background:#dc2626; } .job-progress.cancelled .job-progress-fill, .job-progress.other .job-progress-fill { background:#6b7280; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; }
@@ -190,7 +191,7 @@ function durationLabel(minutes) {
 
 function waitLabel(startTime, thresholds) {
   const start = new Date(startTime);
-  if (Number.isNaN(start.getTime())) return 'no wait estimate';
+  if (Number.isNaN(start.getTime())) return 'no estimate available';
   const minutes = Math.max(0, (start.getTime() - Date.now()) / 60000);
   for (const threshold of thresholds) if (minutes < threshold) return `< ${durationLabel(threshold)}`;
   const hours = Math.max(1, Math.round(minutes / 60));
@@ -224,16 +225,36 @@ function runningJobProgress(job, compact = false) {
   return `<span class="job-progress" data-running-progress data-total-seconds="${total}" data-elapsed-seconds="${Math.max(0, elapsed)}" data-sampled-at="${Date.now()}" data-compact="${compact}" role="progressbar" aria-valuemin="0" aria-valuemax="${total}"><span class="job-progress-track"><span class="job-progress-fill"></span></span><span class="job-progress-text"></span></span>`;
 }
 
+/** Parse dependency clauses sufficiently to link their referenced job IDs. */
+function dependencyClauses(value) {
+  const text = String(value || '').trim();
+  if (!text || ['(null)', 'NULL', 'None', 'N/A'].includes(text)) return [];
+  return text.split(/[,?]/).map(part => part.trim()).filter(Boolean).map(part => {
+    const match = /^([A-Za-z_]+)(?::([^()]*))?(?:\\(([^)]*)\\))?$/.exec(part);
+    if (!match) return null;
+    const ids = (match[2] || '').split(':').map(id => id.replace(/\\+\\d+$/, '')).filter(id => /^\\d+(?:_(?:\\d+|\\*))?$/.test(id)).map(id => id.replace(/_\\*$/, ''));
+    return { type:match[1], ids };
+  }).filter(Boolean);
+}
+
+/** Render the compact dependency label with links to jobs already on the page. */
+function pendingDependency(job, expression) {
+  const clauses = dependencyClauses(expression);
+  const rendered = clauses.map(clause => {
+    const links = clause.ids.map(id => `<a href="#" class="job-dependency-link" data-job-jump="${escapeHtml(`${job.cluster}/${id}`)}">${escapeHtml(id)}</a>`).join(',');
+    return `${escapeHtml(clause.type)}${links ? ` ${links}` : ''}`;
+  }).join(', ');
+  return `dependency:${rendered || escapeHtml(expression)}`;
+}
+
 function pendingJobProgress(job) {
   const dependency = String(job.dependency || '').trim(), runtime = allottedRuntime(job);
   if (dependency && !['(null)', 'NULL', 'None', 'N/A'].includes(dependency)) {
-    const explanation = `Waiting for dependency: ${dependency}. No start estimate until it clears · ${runtime}.`;
-    return `<span class="job-progress-message" title="${escapeHtml(explanation)}">${escapeHtml(explanation)}</span>`;
+    return `<span class="job-progress-message">${pendingDependency(job, dependency)}</span>`;
   }
   const submittedAt = new Date(job.submit_time).getTime(), startAt = new Date(job.start_time).getTime();
   if (!Number.isFinite(submittedAt) || !Number.isFinite(startAt) || startAt <= submittedAt) {
-    const explanation = `Slurm cannot currently estimate when this job will start · ${runtime}.`;
-    return `<span class="job-progress-message" title="${escapeHtml(explanation)}">${escapeHtml(explanation)}</span>`;
+    return '<span class="job-progress-message">no estimate available</span>';
   }
   const waitSeconds = Math.max(1, Math.round((startAt - submittedAt) / 1000));
   return `<span class="job-progress pending" data-pending-progress data-submitted-at="${submittedAt}" data-start-at="${startAt}" data-wait-seconds="${waitSeconds}" data-runtime-label="${escapeHtml(runtime)}" role="progressbar" aria-valuemin="0" aria-valuemax="${waitSeconds}"><span class="job-progress-track"><span class="job-progress-fill"></span></span><span class="job-progress-text"></span></span>`;
@@ -434,7 +455,7 @@ function jobCard(job, listName) {
   const actionButton = `<button data-job-action="${action}" data-job-key="${escapeHtml(jobArchiveKey(job))}">${actionLabel}</button>`;
   const logButtons = jobsApiEnabled && group !== 'PENDING' ? `<button class="log-button" data-log-stream="err" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .err</button><button class="log-button" data-log-stream="out" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .out</button>` : '';
   const disclosureKey = `card:${listName}:${jobArchiveKey(job)}`;
-  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}"${jobDisclosureAttribute(disclosureKey)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
+  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(`${job.cluster}/${identifier}`)}"${jobDisclosureAttribute(disclosureKey)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
 }
 
 function jobGroups(jobs, listName) {
@@ -623,6 +644,18 @@ async function refresh() {
   } catch (error) { document.querySelector('#updated').textContent = `Dashboard error: ${error.message}`; scheduleRefresh(15); }
 }
 document.addEventListener('click', async event => {
+  const dependencyLink = event.target.closest('[data-job-jump]');
+  if (dependencyLink) {
+    event.preventDefault(); event.stopPropagation();
+    const target = dependencyLink.dataset.jobJump;
+    const cards = [...document.querySelectorAll('.job-card[data-job-ref]')];
+    const card = cards.find(candidate => candidate.dataset.jobRef === target)
+      || cards.find(candidate => candidate.dataset.jobRef.startsWith(target + '_'));
+    if (!card) { window.alert(`Job ${target} could not be found in My jobs.`); return; }
+    for (let node = card; node; node = node.parentElement?.closest('details')) node.open = true;
+    card.scrollIntoView({ behavior:'smooth', block:'center' });
+    return;
+  }
   const sortButton = event.target.closest('[data-job-sort]');
   if (sortButton) {
     const sort = jobSorts[sortButton.dataset.jobList];

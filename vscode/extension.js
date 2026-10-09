@@ -258,7 +258,7 @@ class SidebarProvider {
         () => vscode.window.setStatusBarMessage(`Copied job ID ${message.text}`, 2500),
       );
     } else if (message?.type === 'missingJob' && typeof message.ref === 'string') {
-      vscode.window.showInformationMessage(`Job ${message.ref} is not listed in My Jobs; it may be older than 24 hours or belong to another user.`);
+      vscode.window.showInformationMessage(`Job ${message.ref} could not be found in My Jobs; it may be older than 24 hours or belong to another user.`);
     }
   }
 

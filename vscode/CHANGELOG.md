@@ -13,11 +13,12 @@ All notable changes to the Cluster Watcher VS Code extension.
   ID, and full name in both interfaces. The copyable job ID moved beside
   expanded resource metadata, and elapsed/end text moved into expanded
   lifecycle details.
-- Dependency waits and unavailable start estimates now omit their empty
-  progress bars and show wrapped explanations. Open cards use a summary/detail
-  divider instead of a disclosure icon, card borders flash immediately after
-  layout changes and fade back more slowly, and full-name hover labels appear
-  immediately.
+- Dependency waits now use the compact `dependency:<type> <job ID>` label; the
+  ID opens its job card or reports that it could not be found. Unavailable
+  starts say **no estimate available**, and both cases omit the empty progress
+  bar. Open cards use a summary/detail divider instead of a disclosure icon,
+  card borders flash immediately after layout changes and fade back more
+  slowly, and full-name hover labels appear immediately.
 - Completed and failed cards keep the progress bar's `time run / time allotted`
   comparison. Elapsed time is no longer duplicated in expanded details;
   running cards omit **Ended**, and pending cards omit **Launched** and
@@ -27,8 +28,11 @@ All notable changes to the Cluster Watcher VS Code extension.
 - Job IDs now precede cluster and resource metadata. Failed jobs are split into
   **Failed (Early)** and **Failed (Timeout)** sections in both the sidebar and
   browser dashboard.
-- Job-ID badges now use rectangular corners, while compact cards use less
-  internal padding and tighter spacing between cards.
+- Job-ID badges now use rectangular corners and a four-sided inset hover/focus
+  highlight, while compact cards use less internal padding and tighter spacing
+  between cards.
+- Opening `.err`, `.out`, or `script` preserves the My Jobs list's scroll
+  position.
 - Pending cards now omit `.err` and `.out`. Archived pending jobs continue to
   refresh and gain both log actions as soon as their Slurm state advances.
 - **My Jobs** and **Cluster Status** now show compact `Last update:` text

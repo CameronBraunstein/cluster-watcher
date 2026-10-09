@@ -103,6 +103,11 @@ function commandAttributes(command, args = []) {
   return `href="#" data-command="${escapeHtml(command)}" data-args="${escapeHtml(JSON.stringify(args))}"`;
 }
 
+/** Build command attributes for a real button, avoiding hash navigation. */
+function commandButtonAttributes(command, args = []) {
+  return `type="button" data-command="${escapeHtml(command)}" data-args="${escapeHtml(JSON.stringify(args))}"`;
+}
+
 /**
  * Capture what a job's progress bar needs, relative to ``asOf`` (the
  * payload's ``generated_at`` in milliseconds). Elapsed time is reported at
@@ -148,7 +153,7 @@ function progressView(spec, now) {
     const percent = Number.isFinite(total) && total > 0 ? Math.max(0, Math.min(100, (now - spec.submit) / total * 100)) : 0;
     const remaining = spec.expected != null ? Math.max(0, (spec.expected - now) / 1000) : null;
     const label = remaining == null
-      ? (/^dependency:/i.test(spec.reason) ? 'dependency' : 'no wait estimate')
+      ? (/^dependency:/i.test(spec.reason) ? 'dependency' : 'no estimate available')
       : `${jobDuration(remaining)} estimated wait`;
     return { fill: 'pending', percent, label };
   }
@@ -160,16 +165,21 @@ function progressView(spec, now) {
   return { fill: spec.group.toLowerCase(), percent: 100, label: '' };
 }
 
-/** Explain why a pending job has no estimated start, without drawing an empty bar. */
+/** Render a compact dependency link or no-estimate message without an empty bar. */
 function pendingExplanation(job) {
   const rawDependency = String(job.dependency || '').trim();
   const dependency = ['(null)', 'NULL', 'None', 'N/A'].includes(rawDependency) ? '' : rawDependency;
   const reasonMatch = /^dependency(?::\s*(.*))?$/i.exec(String(job.reason || '').trim());
-  const detail = dependency || reasonMatch?.[1] || '';
-  if (dependency || reasonMatch) {
-    return `Waiting for dependency${detail ? `: ${detail}` : ''}. No start estimate until it clears.`;
+  const expression = dependency || reasonMatch?.[1] || '';
+  if (expression || reasonMatch) {
+    const clauses = parseDependency(expression);
+    const rendered = clauses.map((clause) => {
+      const links = clause.ids.map((id) => `<a class="dep-link" href="#" data-jump="${escapeHtml(`${job.cluster}/${id}`)}" title="Show job ${escapeHtml(id)}">${escapeHtml(id)}</a>`).join(',');
+      return `${escapeHtml(clause.type)}${links ? ` ${links}` : ''}`;
+    }).join(', ');
+    return `dependency:${rendered || escapeHtml(expression)}`;
   }
-  return 'Slurm cannot currently estimate when this job will start.';
+  return 'no estimate available';
 }
 
 /** Render state-appropriate elapsed/wait progress that the webview keeps current. */
@@ -177,7 +187,7 @@ function jobProgress(job, asOf, now = Date.now()) {
   const spec = progressSpec(job, asOf);
   if (spec.group === 'PENDING' && spec.expected == null) {
     const explanation = pendingExplanation(job);
-    return `<span class="muted progress-message" title="${escapeHtml(explanation)}">${escapeHtml(explanation)}</span>`;
+    return `<span class="muted progress-message">${explanation}</span>`;
   }
   const view = progressView(spec, now);
   return `<span class="job-progress" data-progress="${escapeHtml(JSON.stringify(spec))}"><span class="progress"><span class="progress-fill ${view.fill}" style="width:${view.percent}%"></span></span><span class="muted progress-label" title="${escapeHtml(view.label)}">${escapeHtml(view.label)}</span></span>`;
@@ -215,9 +225,19 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 .card>summary[data-full-name]::after{outline:1px solid #fff}
 .card[open] .name{white-space:normal;overflow-wrap:anywhere}
 .progress-message{display:block;max-width:100%;font-size:.72em;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
+.job-id:hover,.job-id:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--vscode-focusBorder)}
+button.button{border:0;font:inherit;cursor:pointer}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
+  const savedScrollY = Number(api.getState()?.scrollY) || 0;
+  const rememberScroll = () => api.setState({ ...(api.getState() || {}), scrollY: window.scrollY });
+  requestAnimationFrame(() => window.scrollTo(0, savedScrollY));
+  let scrollFrame;
+  window.addEventListener('scroll', () => {
+    if (scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => { scrollFrame = undefined; rememberScroll(); });
+  }, { passive: true });
   const AVAILABILITY_HOVER_DELAY_MS = 100;
   const availabilityTooltip = document.createElement('div');
   availabilityTooltip.className = 'availability-tooltip';
@@ -274,6 +294,7 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
     const button = event.target.closest('[data-command]');
     if (!button) return;
     event.preventDefault();
+    rememberScroll();
     let args = [];
     try { args = JSON.parse(button.dataset.args || '[]'); } catch (_error) { args = []; }
     api.postMessage({ type: 'command', command: button.dataset.command, args });
@@ -305,6 +326,7 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
   document.querySelectorAll('[data-jump]').forEach((link) => {
     link.addEventListener('click', (event) => {
       event.preventDefault();
+      event.stopPropagation();
       const target = link.dataset.jump;
       const cards = [...document.querySelectorAll('details.card[data-job-ref]')];
       const card = cards.find((candidate) => candidate.dataset.jobRef === target)
@@ -421,12 +443,12 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
     archived
       ? `<a class="button compact-action" role="button" ${commandAttributes(archiveCommand, [key])} title="Restore job">Restore</a>`
       : `<a class="button compact-action archive-action" role="button" ${commandAttributes(archiveCommand, [key])} title="Archive job" aria-label="Archive job">${archiveIcon()}</a>`,
-    `<a class="button secondary compact-action" role="button" ${commandAttributes('clusterWatcher.openScript', [job.cluster, identifier])} title="Open the Slurm batch script this job ran" aria-label="Open batch script">script</a>`,
+    `<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.openScript', [job.cluster, identifier])} title="Open the Slurm batch script this job ran" aria-label="Open batch script">script</button>`,
   ];
   if (stateGroup(job.state) !== 'PENDING') {
     actions.splice(1, 0,
-      `<a class="button secondary compact-action" role="button" ${commandAttributes('clusterWatcher.openLog', [job.cluster, identifier, 'err'])} title="Open .err log" aria-label="Open .err log">.err</a>`,
-      `<a class="button secondary compact-action" role="button" ${commandAttributes('clusterWatcher.openLog', [job.cluster, identifier, 'out'])} title="Open .out log" aria-label="Open .out log">.out</a>`,
+      `<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.openLog', [job.cluster, identifier, 'err'])} title="Open .err log" aria-label="Open .err log">.err</button>`,
+      `<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.openLog', [job.cluster, identifier, 'out'])} title="Open .out log" aria-label="Open .out log">.out</button>`,
     );
   }
   const ending = cancelling.has(jobRef(job));
@@ -618,4 +640,4 @@ function renderStatus(payload, disclosures = {}, freshness = {}) {
   return document('Cluster Status', clusters.join('') || '<p>No clusters returned.</p>', freshness);
 }
 
-module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, escapeHtml, isFailureGroup, jobRef, openAttribute, parseDependency, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };
+module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, escapeHtml, isFailureGroup, jobRef, openAttribute, parseDependency, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };
