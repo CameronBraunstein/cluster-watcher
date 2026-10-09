@@ -4,6 +4,8 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
+## 0.1.5 — 2026-10-09
+
 - Narrow job cards keep progress, elapsed/total time, and the complete action
   row on single lines. Expanded resource metadata wraps instead of truncating;
   lifecycle dates keep their time on the same line when possible and wrap it
