@@ -64,14 +64,14 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .job-progress-fill { display:block; height:100%; background:#2563eb; transition:width 1s linear; } .job-progress-text { display:block; max-width:100%; margin-top:.22rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.76rem; color:#666; }
 .job-progress-message { display:block; max-width:100%; margin-top:.5rem; overflow-wrap:anywhere; font-size:.76rem; line-height:1.3; color:#666; }
 .job-dependency-link { color:LinkText; font-family:ui-monospace, monospace; } .job-dependency-icon { display:inline-block; margin-left:.15rem; font-family:system-ui, sans-serif; font-weight:700; } .job-dependency-icon.waiting { font-weight:400; } .job-dependency-icon.satisfied { color:#16a34a; } .job-dependency-icon.failed { color:#dc2626; }
-.priority-context { display:flex; align-items:center; gap:.35rem; margin-top:.5rem; min-width:0; } .priority-label { flex:0 0 auto; color:#666; font-size:.76rem; } .priority-gauge { display:flex; align-items:center; gap:.15rem; flex:1 1 auto; min-width:4rem; max-width:10rem; font-size:.7rem; } .priority-track { position:relative; display:block; flex:1 1 auto; height:.3rem; border-radius:999px; background:linear-gradient(90deg,#dc2626,#777 50%,#16a34a); } .priority-marker { position:absolute; top:-.2rem; width:2px; height:.7rem; transform:translateX(-1px); background:CanvasText; box-shadow:0 0 0 1px Canvas; }
+.priority-context { display:flex; align-items:center; gap:.35rem; margin-top:.5rem; min-width:0; } .priority-label { flex:0 0 auto; color:#666; font-size:.76rem; } .priority-gauge { display:flex; align-items:center; flex:1 1 auto; min-width:4rem; max-width:10rem; } .priority-track { position:relative; display:block; flex:1 1 auto; height:.3rem; border-radius:999px; background:linear-gradient(90deg,#dc2626,#777 50%,#16a34a); } .priority-marker { position:absolute; top:-.2rem; width:2px; height:.7rem; transform:translateX(-1px); background:CanvasText; box-shadow:0 0 0 1px Canvas; } .priority-prominent { margin-top:.5rem; } .priority-prominent .priority-track { height:.62rem; } .priority-prominent .priority-marker { top:-.18rem; height:.98rem; }
 .job-progress.pending .job-progress-fill { background:#7c3aed; } .job-message { margin-top:.5rem; font-size:.78rem; color:#666; }
 .job-progress.completed .job-progress-fill { background:#16a34a; } .job-progress.failed_early .job-progress-fill, .job-progress.failed_timeout .job-progress-fill { background:#dc2626; } .job-progress.cancelled .job-progress-fill, .job-progress.other .job-progress-fill { background:#6b7280; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; }
 .archived-jobs { margin-top:1rem; border-top:1px solid #8884; padding-top:.75rem; } .archived-jobs > summary { cursor:pointer; font-weight:700; }
 .job-card .job-progress { margin-top:.5rem; } .log-tail { max-width:720px; max-height:20rem; overflow:auto; white-space:pre-wrap; font-size:.75rem; background:#111; color:#eee; padding:.5rem; border-radius:.3rem; }
 .log-button { white-space:nowrap; cursor:pointer; }
-.partition-section { margin:1.25rem 0; } .partition-heading { display:flex; align-items:center; gap:.65rem; margin:0 0 .55rem; } .partition-heading h3 { margin:0; }
+.partition-section { margin:1.25rem 0; } .partition-heading { display:flex; align-items:center; gap:.65rem; margin:0 0 .55rem; } .partition-heading h3 { margin:0; } .partition-heading > .priority-context { flex:0 1 12rem; margin:0; }
 .partition-status { display:flex; position:relative; flex-wrap:wrap; gap:2px; cursor:help; } .node-state-block { width:.75rem; height:.75rem; border-radius:2px; }
 .partition-status[data-availability]::after { content:attr(data-availability); position:absolute; z-index:20; left:0; top:calc(100% + 4px); width:max-content; max-width:min(24rem, 80vw); padding:.25rem .4rem; border:1px solid #8888; outline:1px solid #fff; border-radius:2px; background:Canvas; color:CanvasText; font-size:.75rem; font-weight:400; line-height:1.25; white-space:normal; visibility:hidden; opacity:0; pointer-events:none; }
 .fast-hover { display:inline-block; position:relative; cursor:help; }
@@ -333,13 +333,14 @@ function expandedDependency(job) {
   return `<dt>Depends on</dt><dd class="job-dependency-value">${rendered}</dd>`;
 }
 
-function pendingJobProgress(job) {
+function pendingJobProgress(job, noEstimatePriority = '') {
   const dependency = String(job.dependency || '').trim(), runtime = allottedRuntime(job);
   if (dependency && !['(null)', 'NULL', 'None', 'N/A'].includes(dependency)) {
     return `<span class="job-progress-message">${pendingDependency(job, dependency)}</span>`;
   }
   const submittedAt = new Date(job.submit_time).getTime(), startAt = new Date(job.start_time).getTime();
   if (!Number.isFinite(submittedAt) || !Number.isFinite(startAt) || startAt <= submittedAt) {
+    if (noEstimatePriority) return noEstimatePriority;
     return '<span class="job-progress-message">no estimate available</span>';
   }
   const waitSeconds = Math.max(1, Math.round((startAt - submittedAt) / 1000));
@@ -510,31 +511,38 @@ function relativeJobPriority(job, jobs) {
   const higher = values.length - lower - equal;
   const percent = (lower + (equal - 1) / 2) / (values.length - 1) * 100;
   const tie = equal > 1 ? `, tied with ${equal - 1}` : '';
-  return { percent, title:`Priority ${priority.toLocaleString()}: position ${higher + 1} of ${values.length}${tie} among your visible Pending jobs on ${job.cluster}. Higher is considered earlier, but reservations, partition tiers, resource fit, and backfill can change start order.` };
+  return { percent, title:`Priority ${priority.toLocaleString()}: position ${higher + 1} of ${values.length}${tie} among your visible Pending jobs on ${job.cluster}.` };
 }
 
 /** Render a compact number-free low-to-high gauge with details on fast hover. */
-function priorityGauge(markers, title, label) {
+function priorityGauge(markers, title, label, prominent = false) {
   if (!markers.length) return '';
   const ticks = markers.map(percent => `<i class="priority-marker" style="left:${Math.max(0, Math.min(100, percent))}%"></i>`).join('');
-  return `<div class="priority-context"><span class="priority-label">${escapeHtml(label)}</span><span class="priority-gauge fast-hover" role="img" aria-label="${escapeHtml(title)}" data-fast-tooltip="${escapeHtml(title)}"><span aria-hidden="true">←</span><span class="priority-track">${ticks}</span><span aria-hidden="true">→</span></span></div>`;
+  return `<span class="priority-context${prominent ? ' priority-prominent' : ''}"><span class="priority-label">${escapeHtml(label)}</span><span class="priority-gauge fast-hover" role="img" aria-label="${escapeHtml(title)}" data-fast-tooltip="${escapeHtml(title)}"><span class="priority-track">${ticks}</span></span></span>`;
 }
 
-function jobPriorityGauge(job, jobs) {
+function jobPriorityGauge(job, jobs, prominent = false) {
   const relative = relativeJobPriority(job, jobs);
-  return relative ? priorityGauge([relative.percent], relative.title, 'Priority') : '';
+  return relative ? priorityGauge([relative.percent], relative.title, 'Priority', prominent) : '';
 }
 
-/** Render every available per-account fair-share factor as a marker. */
-function clusterPriorityGauge(cluster) {
-  const associations = (cluster.fairshare || []).filter(association => association.fairshare != null && association.fairshare !== '' && Number.isFinite(Number(association.fairshare)) && Number(association.fairshare) >= 0 && Number(association.fairshare) <= 1);
-  if (!associations.length) return '';
-  const details = associations.map(association => {
-    const level = association.level_fs === 'inf' ? '∞' : Number.isFinite(Number(association.level_fs)) ? Number(association.level_fs).toFixed(3) : 'unavailable';
-    return `${association.account || 'default'}: fair-share ${Number(association.fairshare).toFixed(3)}, Level FS ${level}`;
-  }).join('; ');
-  const title = `Fair-share priority on ${cluster.name}. ${details}. Higher fair-share is better. This is one priority component, not a predicted start order.`;
-  return priorityGauge(associations.map(association => Number(association.fairshare) * 100), title, 'Fair-share');
+/** Render a partition's configured job-priority factor relative to its peers. */
+function partitionPriorityGauge(partition, partitions, scheduling = {}) {
+  if (partition.priority_job_factor == null || partition.priority_job_factor === '') return '';
+  const factor = Number(partition.priority_job_factor);
+  const factors = partitions.map(candidate => Number(candidate.priority_job_factor)).filter(value => Number.isFinite(value) && value >= 0);
+  if (!Number.isFinite(factor) || factor < 0 || !factors.length) return '';
+  const maximum = Math.max(...factors);
+  const percent = maximum > 0 ? factor / maximum * 100 : 0;
+  const details = [
+    `Scheduler: ${scheduling.scheduler_type || 'unavailable'}`,
+    `priority plugin: ${scheduling.priority_type || 'unavailable'}`,
+    `partition job factor: ${factor.toLocaleString()}`,
+    `priority tier: ${partition.priority_tier ?? 'unavailable'}`,
+  ];
+  if (scheduling.priority_weight_partition != null) details.push(`partition weight: ${Number(scheduling.priority_weight_partition).toLocaleString()}`);
+  if (scheduling.priority_flags) details.push(`priority flags: ${scheduling.priority_flags}`);
+  return priorityGauge([percent], details.join('; '), 'Priority');
 }
 
 /** Render only the lifecycle rows meaningful for this card's state group. */
@@ -566,9 +574,15 @@ function jobCard(job, listName, jobs) {
   const nodes = nodeCount(job), gpus = Number(job.gpus) || 0, cpus = Number(job.cpus) || 0;
   const resources = job.id || gpus || cpus ? `${nodes} node${nodes === 1 ? '' : 's'} · ${gpus} GPU${gpus === 1 ? '' : 's'} · ${cpus} CPU${cpus === 1 ? '' : 's'}` : `${nodes} node${nodes === 1 ? '' : 's'}`;
   const group = jobGroup(job);
+  const priority = listName === 'active' && group === 'PENDING' ? jobPriorityGauge(job, jobs) : '';
+  const dependency = String(job.dependency || '').trim();
+  const hasDependency = dependency && !['(null)', 'NULL', 'None', 'N/A'].includes(dependency);
+  const submittedMs = new Date(job.submit_time).getTime(), startMs = new Date(job.start_time).getTime();
+  const hasWaitEstimate = Number.isFinite(submittedMs) && Number.isFinite(startMs) && startMs > submittedMs;
+  const noEstimatePriority = priority && !hasDependency && !hasWaitEstimate ? jobPriorityGauge(job, jobs, true) : '';
   let timing;
   if (group === 'RUNNING') timing = runningJobProgress(job);
-  else if (group === 'PENDING' || group === 'FAILED_DEPENDENCY') timing = pendingJobProgress(job);
+  else if (group === 'PENDING' || group === 'FAILED_DEPENDENCY') timing = pendingJobProgress(job, noEstimatePriority);
   else {
     const ended = jobLifecycleDate(job, 'ended');
     const label = `${formatSeconds(job.elapsed_seconds)} elapsed${ended.value ? ` · ended ${ended.value.toLocaleString()}` : ''}`;
@@ -583,8 +597,7 @@ function jobCard(job, listName, jobs) {
   const actionButton = `<button data-job-action="${action}" data-job-key="${escapeHtml(jobArchiveKey(job))}">${actionLabel}</button>`;
   const logButtons = jobsApiEnabled && !['PENDING', 'FAILED_DEPENDENCY'].includes(group) ? `<button class="log-button" data-log-stream="err" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .err</button><button class="log-button" data-log-stream="out" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .out</button>` : '';
   const disclosureKey = `card:${listName}:${jobArchiveKey(job)}`;
-  const priority = listName === 'active' && group === 'PENDING' ? jobPriorityGauge(job, jobs) : '';
-  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(`${job.cluster}/${identifier}`)}"${jobDisclosureAttribute(disclosureKey)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}${priority}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}${expandedDependency(job)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
+  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(`${job.cluster}/${identifier}`)}"${jobDisclosureAttribute(disclosureKey)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}${noEstimatePriority ? '' : priority}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}${expandedDependency(job)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
 }
 
 function jobGroups(jobs, listName) {
@@ -695,14 +708,15 @@ function compactGpuName(value) {
   return withoutBrand.split(/\\s+/).slice(0, 2).join(' ');
 }
 
-function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, estimates, estimatesUpdatedAt) {
+function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, estimates, estimatesUpdatedAt, partition, partitions, scheduling) {
   const availability = availabilityDescription(nodes);
   const status = [...nodes].sort((left, right) => statePriority(left) - statePriority(right) || String(left.name).localeCompare(String(right.name))).map(node => `<i class="node-state-block ${summaryStateClass(node)}"></i>`).join('');
   const summary = compute.get(name);
   const best = summary && summary.best_gpu;
   const details = best ? `${summary.rank ? `#${summary.rank} · ` : ''}<span class="fast-hover" data-fast-tooltip="${escapeHtml(best.name)}" aria-label="${escapeHtml(best.name)}">${escapeHtml(compactGpuName(best.name))}</span> · ${escapeHtml(best.vram_gb)} GB VRAM/GPU · ${escapeHtml(best.tensor_tflops.toLocaleString())} FP16/BF16 Tensor TFLOPS/GPU · ${escapeHtml(summary.cpu_threads.toLocaleString())} CPU threads` : 'GPU model not catalogued';
   const badges = jobBadges(jobs, name, thresholds);
-  const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}</h3><div class="partition-status" data-availability="${escapeHtml(availability)}" aria-label="${escapeHtml(availability)}">${status}</div>${badges ? `<div class="job-badges">${badges}</div>` : ''}</div>`;
+  const priority = partitionPriorityGauge(partition || {}, partitions || [], scheduling || {});
+  const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}</h3>${priority}<div class="partition-status" data-availability="${escapeHtml(availability)}" aria-label="${escapeHtml(availability)}">${status}</div>${badges ? `<div class="job-badges">${badges}</div>` : ''}</div>`;
   const body = `<div class="partition-compute">${details}</div>${waitChart(estimates, name, estimatesUpdatedAt)}<div class="node-grid">${nodesByAvailableGpu(nodes).map(nodeCard).join('')}</div>`;
   const disclosureKey = JSON.stringify([clusterName, name]);
   return `<details class="partition-section${summary?.aggregate ? ' aggregate-partition' : ''}" data-partition-key="${escapeHtml(disclosureKey)}"${partitionDisclosure.get(disclosureKey) ? ' open' : ''}><summary>${heading}</summary>${body}</details>`;
@@ -712,9 +726,9 @@ function clusterView(cluster, waitThresholds) {
   let content;
   if (cluster.error) content = `<p class="error">${escapeHtml(cluster.error)}</p>` + (cluster.login_required ? `<p>The SSH session has closed. Log in again with <code>cluster-watcher login ${escapeHtml(cluster.name)}</code>.</p>` : '');
   else if (!cluster.nodes || !cluster.nodes.length) content = '<p>No individual node information was returned by scontrol.</p>';
-  else { const compute = new Map((cluster.partition_compute || []).map(summary => [summary.name, summary])); content = partitionGroups(cluster.nodes, compute).map(group => partitionView(cluster.name, group, compute, cluster.user_jobs, waitThresholds || [5, 30, 60, 120], cluster.wait_estimates, cluster.wait_estimates_updated_at)).join(''); }
+  else { const compute = new Map((cluster.partition_compute || []).map(summary => [summary.name, summary])); const partitions = cluster.partitions || []; const partitionInfo = new Map(partitions.map(partition => [partition.partition, partition])); content = partitionGroups(cluster.nodes, compute).map(group => partitionView(cluster.name, group, compute, cluster.user_jobs, waitThresholds || [5, 30, 60, 120], cluster.wait_estimates, cluster.wait_estimates_updated_at, partitionInfo.get(group[0]), partitions, cluster.scheduling)).join(''); }
   if (cluster.jobs) content += `<p><b>Jobs:</b> ${Object.entries(cluster.jobs).map(([state, count]) => `${escapeHtml(state)}=${count}`).join(', ') || 'none'}</p>`;
-  return `<section class="cluster"><h2>${escapeHtml(cluster.name)} <small>${escapeHtml(cluster.username)}@${escapeHtml(cluster.host)}</small></h2>${clusterPriorityGauge(cluster)}${content}</section>`;
+  return `<section class="cluster"><h2>${escapeHtml(cluster.name)} <small>${escapeHtml(cluster.username)}@${escapeHtml(cluster.host)}</small></h2>${content}</section>`;
 }
 
 let refreshTimer, refreshDeadline = 0, refreshPeriodMs = 1;

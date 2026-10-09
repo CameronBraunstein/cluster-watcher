@@ -75,8 +75,10 @@ while dependency expressions and expanded job names wrap inside the card.
 When a cluster exposes numeric Slurm priorities for at least two of the user's
 visible pending jobs, expanded Pending cards add a number-free low-to-high
 **Priority** gauge. Hover it for the raw priority, relative rank, comparison
-scope, and scheduling caveats; the gauge is omitted when no useful comparison
-is possible.
+scope; scheduling caveats are documented in the main README rather than the
+hover. If no wait estimate exists, the gauge moves into the always-visible
+summary and becomes as thick as a normal progress bar. It has no directional
+arrows and is omitted when no useful comparison is possible.
 Expand a card to see details and to:
 
 - select the archive-box icon and move it into the collapsed **Archive** group
@@ -182,11 +184,12 @@ the same roughly 100 ms delay as the availability bar. The availability bar
 and `idle/total` fraction stay together on one line for a more compact table.
 Green available capacity appears on the left and red unavailable capacity
 follows it. Hover the bar for a node-only state breakdown; zero-count
-categories are omitted. When Slurm's `sshare` command makes the current user's
-data available, each cluster also has a number-free **Fair-share** gauge with
-one tick per account association. Its fast hover gives the account and exact
-FairShare/Level FS values and explains that fair-share is one priority
-component, not a predicted queue order; unavailable data is simply omitted.
+categories are omitted. Each partition heading also shows a number-free
+**Priority** gauge when Slurm reports `PriorityJobFactor`, normalized against
+the largest displayed partition factor. Its fast hover contains only the exact
+factor and tier plus the cluster's scheduler, priority plugin, partition
+weight, and priority flags. The main README explains the scheduling semantics;
+unavailable data is simply omitted.
 
 Two settings control background feedback:
 

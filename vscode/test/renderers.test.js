@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, clusterPriorityGauge, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
+const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, partitionPriorityGauge, relativeJobPriority, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
 
 test('jobs retain terminal state grouping and lifecycle visibility', () => {
   const jobs = [
@@ -77,7 +77,7 @@ test('status shows GPU specifications, availability, and wait matrix', () => {
   assert.match(html, /CPU threads/);
   assert.ok(html.indexOf('<th>Available</th><th>GPU</th><th>VRAM</th><th>TFLOPS/s</th>') >= 0);
   assert.doesNotMatch(html, /<th>Partition<\/th>/);
-  assert.match(html, /<tbody class="partition-rows"><tr class="partition-name-row"><th colspan="12" scope="rowgroup">gpu-h100<\/th><\/tr><tr><td>/);
+  assert.match(html, /<tbody class="partition-rows"><tr class="partition-name-row"><th colspan="12" scope="rowgroup"><span class="partition-name-content"><span>gpu-h100<\/span><\/span><\/th><\/tr><tr><td>/);
   assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary>cluster_0<\/summary>/);
   assert.doesNotMatch(html, /## cluster_0 ##/);
   assert.doesNotMatch(html, /<body><h2>Cluster Status<\/h2>/);
@@ -230,8 +230,8 @@ test('dependency icons reflect referenced outcomes and impossible jobs get their
 });
 
 test('pending cards show a number-free relative-priority gauge only in expanded content', () => {
-  const low = { job_id: '1', cluster: 'c', state: 'PENDING', priority: 100 };
-  const high = { job_id: '2', cluster: 'c', state: 'PENDING', priority: 900 };
+  const low = { job_id: '1', cluster: 'c', state: 'PENDING', priority: 100, submit_at: '2026-01-01T00:00:00Z', expected_start_at: '2026-01-01T01:00:00Z' };
+  const high = { job_id: '2', cluster: 'c', state: 'PENDING', priority: 900, submit_at: '2026-01-01T00:00:00Z', expected_start_at: '2026-01-01T01:00:00Z' };
   assert.equal(relativeJobPriority(low, [low, high]).percent, 0);
   assert.equal(relativeJobPriority(high, [low, high]).percent, 100);
   assert.equal(relativeJobPriority({ ...low, priority: null }, [low, high]), null);
@@ -243,26 +243,45 @@ test('pending cards show a number-free relative-priority gauge only in expanded 
   assert.match(lowCard, /<span class="muted priority-label">Priority<\/span>/);
   assert.match(lowCard, /class="priority-marker" style="left:0%"/);
   assert.match(lowCard, /data-fast-tooltip="Priority 100: position 2 of 2/);
+  assert.doesNotMatch(lowCard, /Higher is considered earlier/);
+  assert.doesNotMatch(lowCard, /←|→/);
   assert.equal((html.match(/class="priority-gauge"/g) || []).length, 2);
+
+  const noEstimateHtml = renderJobs({ jobs: [
+    { ...low, expected_start_at: null },
+    { ...high, expected_start_at: null },
+  ] });
+  const noEstimateCard = noEstimateHtml.match(/<details class="card"[^>]*data-job-ref="c\/1".*?<\/details>/s)[0];
+  const noEstimateSummary = noEstimateCard.match(/<summary.*?<\/summary>/s)[0];
+  assert.match(noEstimateSummary, /priority-context priority-prominent/);
+  assert.doesNotMatch(noEstimateCard, /no estimate available/);
+  assert.equal((noEstimateCard.match(/class="priority-gauge"/g) || []).length, 1);
+  assert.match(noEstimateHtml, /\.priority-prominent \.priority-track\{height:6px\}/);
 });
 
-test('cluster fair-share gauges show association markers and details only on hover', () => {
-  const cluster = {
-    name: 'c', reachable: true, partitions: [],
-    fairshare: [
-      { account: 'research', fairshare: 0.75, level_fs: 1.5 },
-      { account: 'secondary', fairshare: 0.25, level_fs: 'inf' },
-    ],
+test('partition priority gauges show scheduler details only on hover', () => {
+  const partitions = [
+    { name: 'gpu-low', priority_job_factor: 100, priority_tier: 1, cpus: {}, gpus: {} },
+    { name: 'gpu-high', priority_job_factor: 400, priority_tier: 2, cpus: {}, gpus: {} },
+  ];
+  const scheduling = {
+    scheduler_type: 'sched/backfill', priority_type: 'priority/multifactor',
+    priority_weight_partition: 5000, priority_flags: 'NO_NORMAL_PART',
   };
-  const gauge = clusterPriorityGauge(cluster);
-  assert.match(gauge, /<span class="muted priority-label">Fair-share<\/span>/);
-  assert.match(gauge, /class="priority-marker" style="left:75%"/);
+  const cluster = {
+    name: 'c', reachable: true, partitions, scheduling,
+  };
+  const gauge = partitionPriorityGauge(partitions[0], partitions, scheduling);
+  assert.match(gauge, /<span class="muted priority-label">Priority<\/span>/);
   assert.match(gauge, /class="priority-marker" style="left:25%"/);
-  assert.match(gauge, /data-fast-tooltip="Fair-share priority on c\. research: fair-share 0\.750, Level FS 1\.500; secondary: fair-share 0\.250, Level FS ∞/);
-  assert.equal(clusterPriorityGauge({ name: 'c' }), '');
+  assert.match(gauge, /data-fast-tooltip="Scheduler: sched\/backfill; priority plugin: priority\/multifactor; partition job factor: 100; priority tier: 1; partition weight: 5,000; priority flags: NO_NORMAL_PART"/);
+  assert.doesNotMatch(gauge, /←|→|This is one priority component/);
+  assert.equal(partitionPriorityGauge({}, partitions, scheduling), '');
 
   const html = renderStatus({ clusters: [cluster] });
-  assert.ok(html.indexOf('Fair-share</span>') < html.indexOf('<div class="table-wrap">'));
+  assert.equal((html.match(/class="priority-gauge"/g) || []).length, 2);
+  assert.match(html, /gpu-low.*?priority-marker" style="left:25%"/s);
+  assert.match(html, /gpu-high.*?priority-marker" style="left:100%"/s);
 });
 
 test('webview buttons post allow-listed commands instead of using command URIs', () => {

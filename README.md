@@ -657,7 +657,8 @@ session. The service therefore:
    [Hypothetical GPU-job wait estimates](#hypothetical-gpu-job-wait-estimates)).
 2. **Refreshes capacity every 60 s and your jobs every refresh.** Partition
    and node detail (`sinfo`, `scontrol show node -d`, which is over 1 MB on
-   large clusters, and everyone's running-job end times) changes slowly; your
+   large clusters, scheduler/priority configuration, and everyone's
+   running-job end times) changes slowly; your
    own `squeue --me` queries run every `--refresh` interval. The snapshot and
    `/api/status` keep the capacity data's own `capacity_updated_at`.
 3. **Queries accounting only when your queue changes.** With `--jobs-api`, the
@@ -882,10 +883,9 @@ The top-level fields are:
 Each cluster contains its configured `name` and `host`, `reachable`,
 `resource_data_complete`, collection errors, unique cluster-wide resource
 totals, the time its wait estimates were last probed, and every known
-partition. When Slurm exposes it, `fairshare` contains the current user's
-per-account `fairshare` factor (0 to 1) and `level_fs` value; an empty array
-means that the site, priority plugin, accounting service, or user permissions
-did not make this information available. `error` means the cluster itself
+partition. When Slurm exposes them, `scheduling` contains `scheduler_type`,
+`priority_type`, `priority_weight_partition`, and `priority_flags`. An empty
+object means those settings were unavailable. `error` means the cluster itself
 could not be queried; `resource_error` means the basic partition query worked
 but detailed node/GPU collection failed. `login_required` is `true` when an
 `interactive_auth` cluster failed because its shared SSH session has closed
@@ -897,6 +897,7 @@ Each partition contains:
 | Field | Meaning |
 | --- | --- |
 | `name`, `rank`, `available` | Slurm name, compute rank, and whether the partition is administratively up (`null` if Slurm did not report it). |
+| `priority_job_factor`, `priority_tier` | Slurm's partition contribution to multifactor job priority and its separate scheduling/preemption tier; `null` when unavailable. |
 | `aggregate` | `true` when the partition reuses nodes from specific partitions; do not add its totals to those partitions. |
 | `reported_nodes`, `node_states` | Slurm node count and current state distribution. |
 | `cpus` | Total, allocated, and idle CPU threads. |
@@ -1314,18 +1315,24 @@ may not provide an expected start time.
 An expanded Pending card also shows a compact left-to-right **Priority** gauge
 when at least two visible pending jobs on that cluster have numeric Slurm
 priorities. Its tick is a rank among those jobs, not a universal Slurm scale;
-the hover text gives the raw priority, rank, comparison scope, and warns that
-reservations, partition tiers, resource fit, and backfill can change start
-order. The gauge is omitted when there is no meaningful comparison and adds
-no visible number to the card.
+the hover text gives only the raw priority, rank, and comparison scope. The
+gauge normally appears in expanded details. When no wait estimate exists, it
+replaces that message in the always-visible summary and uses the same thickness
+as a progress bar. The gauge is omitted when there is no meaningful comparison
+and adds no visible number or directional arrows to the card. Reservations,
+partition tiers, resource fit, and backfill can still change actual start
+order.
 
-Cluster Status shows a **Fair-share** gauge when `sshare` exposes the user's
-association data. It draws one tick per account association and puts the
-account, exact fair-share factor, and Level FS value in the fast hover text.
-This is only one possible input to job priority—not a queue-position or start
-time prediction—so unsupported or unavailable data is omitted rather than
-shown as zero. Fair-share is collected with the slower capacity refresh and
-does not add a separate SSH connection.
+Each Cluster Status partition heading shows a **Priority** gauge when Slurm
+reports `PriorityJobFactor`. Its marker is the factor divided by the largest
+factor among the displayed partitions. Hovering gives the exact job factor,
+the separate `PriorityTier`, and the cluster's `SchedulerType`, `PriorityType`,
+`PriorityWeightPartition`, and `PriorityFlags` when available. The job factor
+only contributes to job priority under `priority/multifactor` when the partition
+weight is nonzero; `PriorityTier` instead controls scheduling/preemption tiers,
+and `NO_NORMAL_PART` changes whether Slurm normalizes the factor. Consequently
+this gauge describes configured partition policy, not queue position or a
+predicted start time. Unsupported data is omitted rather than shown as zero.
 
 The query also reads Slurm's `%V` submission time and `%E` remaining-dependencies
 field. When Slurm supplies an expected start, a pending-job progress bar begins

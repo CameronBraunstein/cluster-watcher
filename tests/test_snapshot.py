@@ -19,7 +19,11 @@ def example_status() -> ClusterStatus:
         "cluster_0",
         "slurm.example",
         "alice",
-        partitions=[{"partition": "gpu-a100", "available": "up", "nodes": "2", "cpus": "1/143/0/144", "state": "mix"}],
+        partitions=[{
+            "partition": "gpu-a100", "available": "up", "nodes": "2",
+            "cpus": "1/143/0/144", "state": "mix",
+            "priority_job_factor": 200, "priority_tier": 2,
+        }],
         nodes=[
             {
                 "name": "gpu01",
@@ -57,7 +61,7 @@ def example_status() -> ClusterStatus:
             ]
         },
         wait_estimates_updated_at="2026-09-22T09:59:00+00:00",
-        fairshare=[{"account": "research", "fairshare": 0.75, "level_fs": 1.5}],
+        scheduling={"scheduler_type": "sched/backfill", "priority_type": "priority/multifactor"},
     )
 
 
@@ -114,7 +118,7 @@ class SnapshotTests(TimedTestCase):
         cluster = snapshot["clusters"][0]
         self.assertTrue(cluster["reachable"])
         self.assertTrue(cluster["resource_data_complete"])
-        self.assertEqual(cluster["fairshare"][0]["fairshare"], 0.75)
+        self.assertEqual(cluster["scheduling"]["scheduler_type"], "sched/backfill")
         self.assertNotIn("username", cluster)
         self.assertEqual(cluster["resources"]["gpus"]["total"], 8)
         self.assertEqual(cluster["resources"]["gpus"]["schedulable_idle"], 3)
@@ -123,6 +127,8 @@ class SnapshotTests(TimedTestCase):
         self.assertEqual(partition["name"], "gpu-a100")
         self.assertTrue(partition["available"])
         self.assertFalse(partition["aggregate"])
+        self.assertEqual(partition["priority_job_factor"], 200)
+        self.assertEqual(partition["priority_tier"], 2)
         self.assertEqual(partition["gpus"]["allocated"], 1)
         self.assertEqual(partition["gpus"]["idle"], 7)
         self.assertEqual(partition["gpus"]["schedulable_idle"], 3)

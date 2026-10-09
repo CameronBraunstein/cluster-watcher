@@ -61,13 +61,13 @@ class ClusterStatus:
     name: str
     host: str
     username: str
-    partitions: list[dict[str, str]] | None = None
+    partitions: list[dict[str, object]] | None = None
     nodes: list[dict[str, object]] | None = None
     partition_compute: list[dict[str, object]] | None = None
     wait_estimates: dict[str, list[dict[str, object]]] | None = None
     wait_estimates_updated_at: str | None = None
     user_jobs: list[dict[str, object]] | None = None
-    fairshare: list[dict[str, object]] | None = None
+    scheduling: dict[str, object] | None = None
     jobs: dict[str, int] | None = None
     resource_error: str | None = None
     error: str | None = None

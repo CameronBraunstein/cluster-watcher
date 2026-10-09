@@ -755,11 +755,28 @@ class ClusterWatcherTests(TimedTestCase):
 
     @patch("clusterwatcher.slurm.run_batch")
     def test_collect_status_parses_sinfo_and_jobs(self, run_batch):
-        run_batch.side_effect = fake_batch({"sinfo": "debug|up|2|0/64/0/64|idle\n", "queue": "RUNNING\nPENDING\nRUNNING\n"})
+        run_batch.side_effect = fake_batch({
+            "sinfo": "debug|up|2|0/64/0/64|idle|250|3\n",
+            "scheduler": (
+                "SchedulerType = sched/backfill\nPriorityType = priority/multifactor\n"
+                "PriorityWeightPartition = 5000\nPriorityFlags = NO_NORMAL_PART\n"
+            ),
+            "queue": "RUNNING\nPENDING\nRUNNING\n",
+        })
         status = collect_status(Machine("a", "host", "user"), 5, True)
         self.assertEqual(run_batch.call_count, 1)  # Every command shares one SSH call.
         self.assertIsNone(status.error)
-        self.assertEqual(status.partitions, [{"partition": "debug", "available": "up", "nodes": "2", "cpus": "0/64/0/64", "state": "idle"}])
+        self.assertEqual(status.partitions, [{
+            "partition": "debug", "available": "up", "nodes": "2",
+            "cpus": "0/64/0/64", "state": "idle",
+            "priority_job_factor": 250, "priority_tier": 3,
+        }])
+        self.assertEqual(status.scheduling, {
+            "scheduler_type": "sched/backfill",
+            "priority_type": "priority/multifactor",
+            "priority_weight_partition": 5000,
+            "priority_flags": "NO_NORMAL_PART",
+        })
         self.assertEqual(status.jobs, {"PENDING": 1, "RUNNING": 2})
 
     def test_job_parsing_marks_user_allocations_and_node_release_times(self):
@@ -767,9 +784,7 @@ class ClusterWatcherTests(TimedTestCase):
             SQUEUE_RUNNING_END_COMMAND,
             SQUEUE_USER_PENDING_COMMAND,
             SQUEUE_USER_RUNNING_COMMAND,
-            fairshare_command,
             node_release_estimates,
-            parse_fairshare,
             parse_jobs,
             slurm_duration_seconds,
             user_node_usage,
@@ -817,21 +832,6 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertEqual((array_jobs[0]["gpus"], array_jobs[0]["cpus"]), (2, 16))
         self.assertEqual(array_jobs[0]["priority"], 98765)
         self.assertIn("%Q", SQUEUE_USER_PENDING_COMMAND)
-
-        self.assertEqual(
-            parse_fairshare(
-                "research|alice|0.750000|1.500000\n"
-                "secondary|alice|0.250000|inf\n"
-                "other|bob|0.900000|2.0\n",
-                "alice",
-            ),
-            [
-                {"account": "research", "fairshare": 0.75, "level_fs": 1.5},
-                {"account": "secondary", "fairshare": 0.25, "level_fs": "inf"},
-            ],
-        )
-        self.assertIn("--Users", fairshare_command("alice"))
-        self.assertIn("--users='alice smith'", fairshare_command("alice smith"))
 
     def test_gpu_count_parses_typed_and_untyped_gres(self):
         from clusterwatcher.slurm import SCONTROL_NODES_COMMAND, gpu_count
@@ -1077,12 +1077,17 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertIn("dependencyStatusDescription", PAGE)
         self.assertIn("expandedDependency", PAGE)
         self.assertIn("function relativeJobPriority(job, jobs)", PAGE)
-        self.assertIn("function clusterPriorityGauge(cluster)", PAGE)
+        self.assertIn("function partitionPriorityGauge(partition, partitions, scheduling = {})", PAGE)
         self.assertIn("jobGroup(candidate) === 'PENDING'", PAGE)
         self.assertIn("among your visible Pending jobs", PAGE)
-        self.assertIn("This is one priority component, not a predicted start order", PAGE)
+        self.assertNotIn("Higher is considered earlier", PAGE)
         self.assertIn("data-fast-tooltip=\"${escapeHtml(title)}\"", PAGE)
-        self.assertIn("${clusterPriorityGauge(cluster)}${content}", PAGE)
+        self.assertIn("partitionPriorityGauge(partition || {}, partitions || [], scheduling || {})", PAGE)
+        self.assertIn(".priority-prominent .priority-track { height:.62rem; }", PAGE)
+        self.assertIn("priority_job_factor", PAGE)
+        self.assertIn("Scheduler: ${scheduling.scheduler_type || 'unavailable'}", PAGE)
+        self.assertNotIn('<span aria-hidden="true">←</span>', PAGE)
+        self.assertNotIn('<span aria-hidden="true">→</span>', PAGE)
         self.assertIn("job-dependency-icon", PAGE)
         self.assertIn("${dependencyJobLink(owner, id)} <span", PAGE)
         self.assertIn('data-fast-tooltip="${escapeHtml(description)}"', PAGE)

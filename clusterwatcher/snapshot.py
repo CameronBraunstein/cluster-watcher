@@ -196,11 +196,17 @@ def _partition_snapshot(status: ClusterStatus, name: str, generated_at: str | No
     gpu_allocated = sum(int(node["gpus"]["allocated"]) for node in node_details)
     gpu_idle = sum(int(node["gpus"]["idle"]) for node in node_details)
     schedulable_idle = sum(int(node["gpus"]["schedulable_idle"]) for node in node_details)
+    priority_row = next(
+        (row for row in slurm_rows if row.get("priority_job_factor") is not None),
+        {},
+    )
     return {
         "name": name,
         "rank": compute.get("rank"),
         "aggregate": bool(compute.get("aggregate", False)),
         "available": partition_available,
+        "priority_job_factor": priority_row.get("priority_job_factor"),
+        "priority_tier": priority_row.get("priority_tier"),
         "reported_nodes": sum(int(row["nodes"]) for row in slurm_rows if str(row.get("nodes", "")).isdigit()),
         "node_states": dict(sorted(Counter(str(node["state"]) for node in node_details).items())),
         "cpus": {
@@ -283,8 +289,7 @@ def build_snapshot(statuses: list[ClusterStatus], generated_at: str | None, refr
                 "error": status.error,
                 "resource_error": status.resource_error,
                 "wait_estimates_updated_at": status.wait_estimates_updated_at,
-                # Additive, optional user context from priority/multifactor.
-                "fairshare": status.fairshare or [],
+                "scheduling": status.scheduling or {},
                 "resources": _cluster_resources(status),
                 "partitions": [
                     _partition_snapshot(status, name, generated_at)

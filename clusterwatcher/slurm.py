@@ -2,7 +2,6 @@
 
 from collections import Counter
 from datetime import datetime, timezone
-import math
 import re
 import shlex
 import subprocess
@@ -16,7 +15,7 @@ from .compute import rank_partitions
 from .remote_batch import Section, run_batch
 from .ssh import run_remote
 
-SINFO_COMMAND = "sinfo --noheader --format='%P|%a|%D|%C|%T'"
+SINFO_COMMAND = "sinfo --noheader --format='%P|%a|%D|%C|%T|%I|%p'"
 SQUEUE_COMMAND = "squeue --noheader --format='%T'"
 SQUEUE_USER_RUNNING_COMMAND = "TZ=UTC squeue --me --array --states=RUNNING --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r|%Q'"
 SQUEUE_USER_PENDING_COMMAND = "TZ=UTC squeue --me --array --start --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r|%Q'"
@@ -24,6 +23,7 @@ SQUEUE_USER_JOBS_COMMAND = "TZ=UTC squeue --me --array --start --states=RUNNING,
 SQUEUE_RUNNING_END_COMMAND = "TZ=UTC squeue --states=RUNNING --noheader --format='%N|%e'"
 # GresUsed, which reports allocated GPUs, is emitted only in detailed output.
 SCONTROL_NODES_COMMAND = "scontrol show node --oneliner -d"
+SCONTROL_CONFIG_COMMAND = "scontrol show config"
 # Cheap identity of the user's queue: job IDs and states only, never times.
 SQUEUE_USER_FINGERPRINT_COMMAND = "squeue --me --array --noheader --format='%i|%T'"
 # Recent accounting records are re-fetched at least this often even if the
@@ -205,46 +205,22 @@ def parse_jobs(output: str) -> list[dict[str, object]]:
     return jobs
 
 
-def fairshare_command(username: str) -> str:
-    """Return a read-only query for the user's Fair Tree associations.
-
-    ``--Users`` removes parent-only rows while retaining separate accounts for
-    users who can submit through more than one association. The command is an
-    optional capability: callers deliberately tolerate sites without
-    ``slurmdbd``, ``priority/multifactor``, or permission to inspect shares.
-    """
-    return (
-        "sshare --noheader --parsable2 --long --Users "
-        f"--users={shlex.quote(username)} --format=Account,User,FairShare,LevelFS"
-    )
-
-
-def parse_fairshare(output: str, username: str) -> list[dict[str, object]]:
-    """Parse usable per-account fair-share factors from ``sshare`` output."""
-    associations: list[dict[str, object]] = []
+def parse_scheduling_config(output: str) -> dict[str, object]:
+    """Extract scheduler and priority settings relevant to partition priority."""
+    fields = {
+        "SchedulerType": "scheduler_type",
+        "PriorityType": "priority_type",
+        "PriorityWeightPartition": "priority_weight_partition",
+        "PriorityFlags": "priority_flags",
+    }
+    result: dict[str, object] = {}
     for line in output.splitlines():
-        fields = [field.strip() for field in line.split("|")]
-        if len(fields) != 4 or fields[1] != username:
+        match = re.match(r"\s*([A-Za-z]+)\s*=\s*(.*?)\s*$", line)
+        if not match or match.group(1) not in fields:
             continue
-        try:
-            fairshare = float(fields[2])
-        except ValueError:
-            continue
-        if not math.isfinite(fairshare) or not 0 <= fairshare <= 1:
-            continue
-        level_text = fields[3].lower()
-        try:
-            level_fs: float | str | None = float(level_text)
-            if not math.isfinite(level_fs):
-                level_fs = "inf" if level_fs > 0 else None
-        except ValueError:
-            level_fs = "inf" if level_text in {"inf", "infinity"} else None
-        associations.append({
-            "account": fields[0] or "default",
-            "fairshare": fairshare,
-            "level_fs": level_fs,
-        })
-    return associations
+        key, value = fields[match.group(1)], match.group(2)
+        result[key] = int(value) if key == "priority_weight_partition" and value.isdigit() else value
+    return result
 
 
 def normalize_job_state(state: str) -> str:
@@ -496,10 +472,10 @@ def collect_status(
 ) -> ClusterStatus:
     """Collect one cluster's status with a single SSH call.
 
-    Capacity data (``sinfo``, node detail, everyone's running-job end times,
-    and the optional queue summary) changes slowly and is large on big
-    clusters, so with ``refresh_capacity=False`` it is copied from
-    ``previous`` and only the user's own jobs are queried. With
+    Capacity data (``sinfo``, node detail, scheduling configuration,
+    everyone's running-job end times, and the optional queue summary) changes
+    slowly and is large on big clusters, so with ``refresh_capacity=False`` it
+    is copied from ``previous`` and only the user's own jobs are queried. With
     ``include_accounting``, recent ``sacct`` records are fetched in the same
     call when the user's queue fingerprint changed (see
     :func:`accounting_gate_command`) and reused from ``previous`` otherwise.
@@ -510,12 +486,12 @@ def collect_status(
     if capacity:
         commands["sinfo"] = SINFO_COMMAND
         commands["nodes"] = SCONTROL_NODES_COMMAND
+        commands["scheduler"] = SCONTROL_CONFIG_COMMAND
     if include_personal_details:
         commands["running"] = SQUEUE_USER_RUNNING_COMMAND
         commands["pending"] = SQUEUE_USER_PENDING_COMMAND
         if capacity:
             commands["releases"] = SQUEUE_RUNNING_END_COMMAND
-            commands["fairshare"] = fairshare_command(machine.username)
     if include_jobs and capacity:
         commands["queue"] = SQUEUE_COMMAND
     previous_accounting = previous.accounting if previous else None
@@ -532,9 +508,18 @@ def collect_status(
             status.partitions = []
             for line in sections["sinfo"].output().splitlines():
                 fields = line.strip().split("|")
-                if len(fields) == 5:
-                    partition, available, nodes, cpus, state = fields
-                    status.partitions.append({"partition": partition.rstrip("*"), "available": available, "nodes": nodes, "cpus": cpus, "state": state})
+                if len(fields) in {5, 7}:
+                    partition, available, nodes, cpus, state = fields[:5]
+                    job_factor, tier = fields[5:] if len(fields) == 7 else ("", "")
+                    status.partitions.append({
+                        "partition": partition.rstrip("*"),
+                        "available": available,
+                        "nodes": nodes,
+                        "cpus": cpus,
+                        "state": state,
+                        "priority_job_factor": int(job_factor) if job_factor.isdigit() else None,
+                        "priority_tier": int(tier) if tier.isdigit() else None,
+                    })
             status.capacity_updated_at = datetime.now(timezone.utc).isoformat()
         else:
             assert previous is not None
@@ -543,11 +528,16 @@ def collect_status(
             status.partition_compute = deepcopy(previous.partition_compute)
             status.jobs = deepcopy(previous.jobs)
             status.resource_error = previous.resource_error
-            status.fairshare = deepcopy(previous.fairshare)
+            status.scheduling = deepcopy(previous.scheduling)
             status.capacity_updated_at = previous.capacity_updated_at
         try:
             if capacity:
                 status.nodes = parse_node_status(sections["nodes"].output())
+                scheduler_section = sections["scheduler"]
+                status.scheduling = (
+                    parse_scheduling_config(scheduler_section.stdout)
+                    if scheduler_section.returncode == 0 else {}
+                )
             if include_personal_details:
                 running_jobs = parse_jobs(sections["running"].output())
                 pending_jobs = parse_jobs(sections["pending"].output())
@@ -558,15 +548,8 @@ def collect_status(
                     if releases is not None:
                         node["next_release"] = releases.get(str(node["name"]))
                 status.user_jobs = [*running_jobs, *pending_jobs]
-                if capacity:
-                    fairshare_section = sections["fairshare"]
-                    status.fairshare = (
-                        parse_fairshare(fairshare_section.stdout, machine.username)
-                        if fairshare_section.returncode == 0 else []
-                    )
             else:
                 status.user_jobs = []
-                status.fairshare = []
             if capacity:
                 status.partition_compute = rank_partitions(machine.name, status.nodes)
         except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
