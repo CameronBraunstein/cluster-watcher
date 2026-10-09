@@ -4,6 +4,12 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
+- Expanded Pending cards show a compact, number-free gauge ranking each job's
+  Slurm priority against the user's other visible pending jobs on that
+  cluster. Cluster Status shows per-account fair-share markers when `sshare`
+  makes them available. Exact values, scope, and scheduling caveats stay in
+  fast hover text, and unsupported or non-comparable data is omitted.
+
 ## 0.1.5 — 2026-10-09
 
 - Narrow job cards keep progress, elapsed/total time, and the complete action

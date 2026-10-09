@@ -283,6 +283,8 @@ def build_snapshot(statuses: list[ClusterStatus], generated_at: str | None, refr
                 "error": status.error,
                 "resource_error": status.resource_error,
                 "wait_estimates_updated_at": status.wait_estimates_updated_at,
+                # Additive, optional user context from priority/multifactor.
+                "fairshare": status.fairshare or [],
                 "resources": _cluster_resources(status),
                 "partitions": [
                     _partition_snapshot(status, name, generated_at)

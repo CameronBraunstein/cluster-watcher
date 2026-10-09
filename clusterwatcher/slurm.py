@@ -2,6 +2,7 @@
 
 from collections import Counter
 from datetime import datetime, timezone
+import math
 import re
 import shlex
 import subprocess
@@ -17,9 +18,9 @@ from .ssh import run_remote
 
 SINFO_COMMAND = "sinfo --noheader --format='%P|%a|%D|%C|%T'"
 SQUEUE_COMMAND = "squeue --noheader --format='%T'"
-SQUEUE_USER_RUNNING_COMMAND = "TZ=UTC squeue --me --array --states=RUNNING --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r'"
-SQUEUE_USER_PENDING_COMMAND = "TZ=UTC squeue --me --array --start --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r'"
-SQUEUE_USER_JOBS_COMMAND = "TZ=UTC squeue --me --array --start --states=RUNNING,PENDING --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r'"
+SQUEUE_USER_RUNNING_COMMAND = "TZ=UTC squeue --me --array --states=RUNNING --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r|%Q'"
+SQUEUE_USER_PENDING_COMMAND = "TZ=UTC squeue --me --array --start --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r|%Q'"
+SQUEUE_USER_JOBS_COMMAND = "TZ=UTC squeue --me --array --start --states=RUNNING,PENDING --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r|%Q'"
 SQUEUE_RUNNING_END_COMMAND = "TZ=UTC squeue --states=RUNNING --noheader --format='%N|%e'"
 # GresUsed, which reports allocated GPUs, is emitted only in detailed output.
 SCONTROL_NODES_COMMAND = "scontrol show node --oneliner -d"
@@ -168,8 +169,9 @@ def parse_jobs(output: str) -> list[dict[str, object]]:
     jobs: list[dict[str, object]] = []
     for line in output.splitlines():
         fields = line.split("|")
-        if len(fields) not in {14, 15}:
+        if len(fields) not in {14, 15, 16}:
             continue
+        priority = fields.pop() if len(fields) == 16 else ""
         reason = fields.pop() if len(fields) == 15 else ""
         (job_id, name, state, partition, node_list, node_count, cpus, gres,
          start_time, submit_time, dependency, elapsed, time_limit, time_left) = fields
@@ -198,8 +200,51 @@ def parse_jobs(output: str) -> list[dict[str, object]]:
             "time_limit_seconds": limit_seconds,
             "time_left": time_left,
             "time_left_seconds": left_seconds,
+            "priority": int(priority) if priority.isdigit() else None,
         })
     return jobs
+
+
+def fairshare_command(username: str) -> str:
+    """Return a read-only query for the user's Fair Tree associations.
+
+    ``--Users`` removes parent-only rows while retaining separate accounts for
+    users who can submit through more than one association. The command is an
+    optional capability: callers deliberately tolerate sites without
+    ``slurmdbd``, ``priority/multifactor``, or permission to inspect shares.
+    """
+    return (
+        "sshare --noheader --parsable2 --long --Users "
+        f"--users={shlex.quote(username)} --format=Account,User,FairShare,LevelFS"
+    )
+
+
+def parse_fairshare(output: str, username: str) -> list[dict[str, object]]:
+    """Parse usable per-account fair-share factors from ``sshare`` output."""
+    associations: list[dict[str, object]] = []
+    for line in output.splitlines():
+        fields = [field.strip() for field in line.split("|")]
+        if len(fields) != 4 or fields[1] != username:
+            continue
+        try:
+            fairshare = float(fields[2])
+        except ValueError:
+            continue
+        if not math.isfinite(fairshare) or not 0 <= fairshare <= 1:
+            continue
+        level_text = fields[3].lower()
+        try:
+            level_fs: float | str | None = float(level_text)
+            if not math.isfinite(level_fs):
+                level_fs = "inf" if level_fs > 0 else None
+        except ValueError:
+            level_fs = "inf" if level_text in {"inf", "infinity"} else None
+        associations.append({
+            "account": fields[0] or "default",
+            "fairshare": fairshare,
+            "level_fs": level_fs,
+        })
+    return associations
 
 
 def normalize_job_state(state: str) -> str:
@@ -470,6 +515,7 @@ def collect_status(
         commands["pending"] = SQUEUE_USER_PENDING_COMMAND
         if capacity:
             commands["releases"] = SQUEUE_RUNNING_END_COMMAND
+            commands["fairshare"] = fairshare_command(machine.username)
     if include_jobs and capacity:
         commands["queue"] = SQUEUE_COMMAND
     previous_accounting = previous.accounting if previous else None
@@ -497,6 +543,7 @@ def collect_status(
             status.partition_compute = deepcopy(previous.partition_compute)
             status.jobs = deepcopy(previous.jobs)
             status.resource_error = previous.resource_error
+            status.fairshare = deepcopy(previous.fairshare)
             status.capacity_updated_at = previous.capacity_updated_at
         try:
             if capacity:
@@ -511,8 +558,15 @@ def collect_status(
                     if releases is not None:
                         node["next_release"] = releases.get(str(node["name"]))
                 status.user_jobs = [*running_jobs, *pending_jobs]
+                if capacity:
+                    fairshare_section = sections["fairshare"]
+                    status.fairshare = (
+                        parse_fairshare(fairshare_section.stdout, machine.username)
+                        if fairshare_section.returncode == 0 else []
+                    )
             else:
                 status.user_jobs = []
+                status.fairshare = []
             if capacity:
                 status.partition_compute = rank_partitions(machine.name, status.nodes)
         except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:

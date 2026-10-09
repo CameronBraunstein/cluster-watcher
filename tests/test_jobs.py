@@ -239,10 +239,12 @@ class JobServiceTests(TimedTestCase):
                 "state": "PENDING",
                 "dependency": "afterok:10(failed)",
                 "reason": "DependencyNeverSatisfied",
+                "priority": 43210,
             },
         )
         self.assertEqual(record["dependency"], "afterok:10(failed)")
         self.assertEqual(record["reason"], "DependencyNeverSatisfied")
+        self.assertEqual(record["priority"], 43210)
         waiting = _active_record(
             "alpha",
             {

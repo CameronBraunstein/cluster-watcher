@@ -882,12 +882,15 @@ The top-level fields are:
 Each cluster contains its configured `name` and `host`, `reachable`,
 `resource_data_complete`, collection errors, unique cluster-wide resource
 totals, the time its wait estimates were last probed, and every known
-partition. `error` means the cluster itself could not be queried;
-`resource_error` means the basic partition query worked but detailed node/GPU
-collection failed. `login_required` is `true` when an `interactive_auth`
-cluster failed because its shared SSH session has closed (fix it with
-`cluster-watcher login NAME`). Login usernames and personal job details are deliberately
-excluded from this public contract.
+partition. When Slurm exposes it, `fairshare` contains the current user's
+per-account `fairshare` factor (0 to 1) and `level_fs` value; an empty array
+means that the site, priority plugin, accounting service, or user permissions
+did not make this information available. `error` means the cluster itself
+could not be queried; `resource_error` means the basic partition query worked
+but detailed node/GPU collection failed. `login_required` is `true` when an
+`interactive_auth` cluster failed because its shared SSH session has closed
+(fix it with `cluster-watcher login NAME`). Login usernames and individual
+personal job details are deliberately excluded from this public contract.
 
 Each partition contains:
 
@@ -1026,7 +1029,8 @@ curl --get --fail --silent \
 
 Every job contains `cluster`, `job_id`, `array_task_id`, `name`, normalized
 `state`, `exit_code`, `submit_at`, `start_at`, `end_at`, `elapsed_seconds`,
-`partition`, `nodes`, `expected_start_at`, and `reason`. Array tasks remain
+`partition`, `nodes`, `expected_start_at`, `reason`, and, for active jobs,
+Slurm's numeric `priority` when available. Array tasks remain
 separate records and use canonical `ARRAY_JOB_ID_TASK_ID` IDs consistently
 across live and accounting data. Slurm annotations such as
 `CANCELLED by 12345` are normalized to `CANCELLED`, while `exit_code` is
@@ -1306,6 +1310,22 @@ expected-start fields. This is the scheduler's current backfill projection,
 not a reservation or guarantee: a priority change, new job, reservation, or a
 running job ending early can move it. Clusters without the backfill scheduler
 may not provide an expected start time.
+
+An expanded Pending card also shows a compact left-to-right **Priority** gauge
+when at least two visible pending jobs on that cluster have numeric Slurm
+priorities. Its tick is a rank among those jobs, not a universal Slurm scale;
+the hover text gives the raw priority, rank, comparison scope, and warns that
+reservations, partition tiers, resource fit, and backfill can change start
+order. The gauge is omitted when there is no meaningful comparison and adds
+no visible number to the card.
+
+Cluster Status shows a **Fair-share** gauge when `sshare` exposes the user's
+association data. It draws one tick per account association and puts the
+account, exact fair-share factor, and Level FS value in the fast hover text.
+This is only one possible input to job priority—not a queue-position or start
+time prediction—so unsupported or unavailable data is omitted rather than
+shown as zero. Fair-share is collected with the slower capacity refresh and
+does not add a separate SSH connection.
 
 The query also reads Slurm's `%V` submission time and `%E` remaining-dependencies
 field. When Slurm supplies an expected start, a pending-job progress bar begins

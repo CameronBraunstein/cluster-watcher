@@ -767,7 +767,9 @@ class ClusterWatcherTests(TimedTestCase):
             SQUEUE_RUNNING_END_COMMAND,
             SQUEUE_USER_PENDING_COMMAND,
             SQUEUE_USER_RUNNING_COMMAND,
+            fairshare_command,
             node_release_estimates,
+            parse_fairshare,
             parse_jobs,
             slurm_duration_seconds,
             user_node_usage,
@@ -809,10 +811,27 @@ class ClusterWatcherTests(TimedTestCase):
 
         array_jobs = parse_jobs(
             "2000068_[1]|grid_search|PENDING|apu|None assigned|1|16|gres/gpu:2|"
-            "N/A|2026-09-28T11:24:00|NULL|00:00:18|01:00:00|00:59:42|Resources\n"
+            "N/A|2026-09-28T11:24:00|NULL|00:00:18|01:00:00|00:59:42|Resources|98765\n"
         )
         self.assertEqual(array_jobs[0]["id"], "2000068_1")
         self.assertEqual((array_jobs[0]["gpus"], array_jobs[0]["cpus"]), (2, 16))
+        self.assertEqual(array_jobs[0]["priority"], 98765)
+        self.assertIn("%Q", SQUEUE_USER_PENDING_COMMAND)
+
+        self.assertEqual(
+            parse_fairshare(
+                "research|alice|0.750000|1.500000\n"
+                "secondary|alice|0.250000|inf\n"
+                "other|bob|0.900000|2.0\n",
+                "alice",
+            ),
+            [
+                {"account": "research", "fairshare": 0.75, "level_fs": 1.5},
+                {"account": "secondary", "fairshare": 0.25, "level_fs": "inf"},
+            ],
+        )
+        self.assertIn("--Users", fairshare_command("alice"))
+        self.assertIn("--users='alice smith'", fairshare_command("alice smith"))
 
     def test_gpu_count_parses_typed_and_untyped_gres(self):
         from clusterwatcher.slurm import SCONTROL_NODES_COMMAND, gpu_count
@@ -1057,6 +1076,13 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertIn("dependencyStatus", PAGE)
         self.assertIn("dependencyStatusDescription", PAGE)
         self.assertIn("expandedDependency", PAGE)
+        self.assertIn("function relativeJobPriority(job, jobs)", PAGE)
+        self.assertIn("function clusterPriorityGauge(cluster)", PAGE)
+        self.assertIn("jobGroup(candidate) === 'PENDING'", PAGE)
+        self.assertIn("among your visible Pending jobs", PAGE)
+        self.assertIn("This is one priority component, not a predicted start order", PAGE)
+        self.assertIn("data-fast-tooltip=\"${escapeHtml(title)}\"", PAGE)
+        self.assertIn("${clusterPriorityGauge(cluster)}${content}", PAGE)
         self.assertIn("job-dependency-icon", PAGE)
         self.assertIn("${dependencyJobLink(owner, id)} <span", PAGE)
         self.assertIn('data-fast-tooltip="${escapeHtml(description)}"', PAGE)

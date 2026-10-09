@@ -84,6 +84,7 @@ class CapacityCadenceTests(TimedTestCase):
             partitions=[{"partition": "gpu", "available": "up", "nodes": "1", "cpus": "0/8/0/8", "state": "idle"}],
             nodes=[{"name": "node01", "partitions": "gpu", "cpu": {"total": 8}, "gpu": {"total": 1}, "next_release": "soon"}],
             partition_compute=[{"name": "gpu"}], jobs={"RUNNING": 3},
+            fairshare=[{"account": "research", "fairshare": 0.75, "level_fs": 1.5}],
             capacity_updated_at="2026-09-22T10:00:00+00:00",
         )
 
@@ -98,6 +99,7 @@ class CapacityCadenceTests(TimedTestCase):
         self.assertEqual(list(run_batch.call_args.args[2]), ["running", "pending"])
         self.assertEqual(status.partitions, previous.partitions)
         self.assertEqual(status.jobs, {"RUNNING": 3})
+        self.assertEqual(status.fairshare, previous.fairshare)
         self.assertEqual(status.capacity_updated_at, previous.capacity_updated_at)
         self.assertEqual(status.nodes[0]["my_usage"], {"cpus": 4, "gpus": 1})
         self.assertEqual(status.nodes[0]["next_release"], "soon")
@@ -105,11 +107,33 @@ class CapacityCadenceTests(TimedTestCase):
 
     @patch("clusterwatcher.slurm.run_batch")
     def test_first_refresh_or_due_capacity_collects_everything(self, run_batch):
-        run_batch.return_value = {name: Section("", "", 0) for name in ("sinfo", "nodes", "running", "pending", "releases", "queue")}
+        run_batch.return_value = {
+            name: Section("", "", 0)
+            for name in ("sinfo", "nodes", "running", "pending", "releases", "fairshare", "queue")
+        }
 
         collect_status(MACHINE, 5, True, previous=None, refresh_capacity=False)
 
-        self.assertEqual(list(run_batch.call_args.args[2]), ["sinfo", "nodes", "running", "pending", "releases", "queue"])
+        self.assertEqual(
+            list(run_batch.call_args.args[2]),
+            ["sinfo", "nodes", "running", "pending", "releases", "fairshare", "queue"],
+        )
+
+    @patch("clusterwatcher.slurm.run_batch")
+    def test_unavailable_fairshare_does_not_hide_other_status(self, run_batch):
+        run_batch.return_value = {
+            name: Section("", "", 0)
+            for name in ("sinfo", "nodes", "running", "pending", "releases", "queue")
+        }
+        run_batch.return_value["sinfo"] = Section("gpu|up|1|0/8/0/8|idle\n", "", 0)
+        run_batch.return_value["fairshare"] = Section("", "sshare unavailable", 1)
+
+        status = collect_status(MACHINE, 5, True)
+
+        self.assertIsNone(status.error)
+        self.assertIsNone(status.resource_error)
+        self.assertEqual(status.partitions[0]["partition"], "gpu")
+        self.assertEqual(status.fairshare, [])
 
     @patch("clusterwatcher.dashboard.collect_status")
     def test_status_store_refreshes_capacity_at_most_every_minute(self, collect):

@@ -72,6 +72,11 @@ stay on one line when space permits; on a narrow card, the date remains on the
 first line and the time wraps onto a right-aligned second line. The compact
 icon/short-label action row remains on one line. Long progress labels ellipsize,
 while dependency expressions and expanded job names wrap inside the card.
+When a cluster exposes numeric Slurm priorities for at least two of the user's
+visible pending jobs, expanded Pending cards add a number-free low-to-high
+**Priority** gauge. Hover it for the raw priority, relative rank, comparison
+scope, and scheduling caveats; the gauge is omitted when no useful comparison
+is possible.
 Expand a card to see details and to:
 
 - select the archive-box icon and move it into the collapsed **Archive** group
@@ -177,7 +182,11 @@ the same roughly 100 ms delay as the availability bar. The availability bar
 and `idle/total` fraction stay together on one line for a more compact table.
 Green available capacity appears on the left and red unavailable capacity
 follows it. Hover the bar for a node-only state breakdown; zero-count
-categories are omitted.
+categories are omitted. When Slurm's `sshare` command makes the current user's
+data available, each cluster also has a number-free **Fair-share** gauge with
+one tick per account association. Its fast hover gives the account and exact
+FairShare/Level FS values and explains that fair-share is one priority
+component, not a predicted queue order; unavailable data is simply omitted.
 
 Two settings control background feedback:
 

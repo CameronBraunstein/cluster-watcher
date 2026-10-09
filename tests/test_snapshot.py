@@ -57,6 +57,7 @@ def example_status() -> ClusterStatus:
             ]
         },
         wait_estimates_updated_at="2026-09-22T09:59:00+00:00",
+        fairshare=[{"account": "research", "fairshare": 0.75, "level_fs": 1.5}],
     )
 
 
@@ -113,6 +114,7 @@ class SnapshotTests(TimedTestCase):
         cluster = snapshot["clusters"][0]
         self.assertTrue(cluster["reachable"])
         self.assertTrue(cluster["resource_data_complete"])
+        self.assertEqual(cluster["fairshare"][0]["fairshare"], 0.75)
         self.assertNotIn("username", cluster)
         self.assertEqual(cluster["resources"]["gpus"]["total"], 8)
         self.assertEqual(cluster["resources"]["gpus"]["schedulable_idle"], 3)

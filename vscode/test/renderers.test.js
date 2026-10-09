@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
+const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, clusterPriorityGauge, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
 
 test('jobs retain terminal state grouping and lifecycle visibility', () => {
   const jobs = [
@@ -227,6 +227,42 @@ test('dependency icons reflect referenced outcomes and impossible jobs get their
   assert.match(html, /data-fast-tooltip="Waiting: waiting for job 12 to satisfy afterok"/);
   assert.match(html, /\.dependency-icon\.satisfied\{color:var\(--vscode-testing-iconPassed\)\}/);
   assert.match(html, /\.dependency-icon\.failed\{color:var\(--vscode-errorForeground\)\}/);
+});
+
+test('pending cards show a number-free relative-priority gauge only in expanded content', () => {
+  const low = { job_id: '1', cluster: 'c', state: 'PENDING', priority: 100 };
+  const high = { job_id: '2', cluster: 'c', state: 'PENDING', priority: 900 };
+  assert.equal(relativeJobPriority(low, [low, high]).percent, 0);
+  assert.equal(relativeJobPriority(high, [low, high]).percent, 100);
+  assert.equal(relativeJobPriority({ ...low, priority: null }, [low, high]), null);
+
+  const html = renderJobs({ jobs: [low, high] });
+  const lowCard = html.match(/<details class="card"[^>]*data-job-ref="c\/1".*?<\/details>/s)[0];
+  const lowSummary = lowCard.match(/<summary.*?<\/summary>/s)[0];
+  assert.doesNotMatch(lowSummary, /priority-gauge/);
+  assert.match(lowCard, /<span class="muted priority-label">Priority<\/span>/);
+  assert.match(lowCard, /class="priority-marker" style="left:0%"/);
+  assert.match(lowCard, /data-fast-tooltip="Priority 100: position 2 of 2/);
+  assert.equal((html.match(/class="priority-gauge"/g) || []).length, 2);
+});
+
+test('cluster fair-share gauges show association markers and details only on hover', () => {
+  const cluster = {
+    name: 'c', reachable: true, partitions: [],
+    fairshare: [
+      { account: 'research', fairshare: 0.75, level_fs: 1.5 },
+      { account: 'secondary', fairshare: 0.25, level_fs: 'inf' },
+    ],
+  };
+  const gauge = clusterPriorityGauge(cluster);
+  assert.match(gauge, /<span class="muted priority-label">Fair-share<\/span>/);
+  assert.match(gauge, /class="priority-marker" style="left:75%"/);
+  assert.match(gauge, /class="priority-marker" style="left:25%"/);
+  assert.match(gauge, /data-fast-tooltip="Fair-share priority on c\. research: fair-share 0\.750, Level FS 1\.500; secondary: fair-share 0\.250, Level FS ∞/);
+  assert.equal(clusterPriorityGauge({ name: 'c' }), '');
+
+  const html = renderStatus({ clusters: [cluster] });
+  assert.ok(html.indexOf('Fair-share</span>') < html.indexOf('<div class="table-wrap">'));
 });
 
 test('webview buttons post allow-listed commands instead of using command URIs', () => {

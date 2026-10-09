@@ -64,6 +64,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .job-progress-fill { display:block; height:100%; background:#2563eb; transition:width 1s linear; } .job-progress-text { display:block; max-width:100%; margin-top:.22rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.76rem; color:#666; }
 .job-progress-message { display:block; max-width:100%; margin-top:.5rem; overflow-wrap:anywhere; font-size:.76rem; line-height:1.3; color:#666; }
 .job-dependency-link { color:LinkText; font-family:ui-monospace, monospace; } .job-dependency-icon { display:inline-block; margin-left:.15rem; font-family:system-ui, sans-serif; font-weight:700; } .job-dependency-icon.waiting { font-weight:400; } .job-dependency-icon.satisfied { color:#16a34a; } .job-dependency-icon.failed { color:#dc2626; }
+.priority-context { display:flex; align-items:center; gap:.35rem; margin-top:.5rem; min-width:0; } .priority-label { flex:0 0 auto; color:#666; font-size:.76rem; } .priority-gauge { display:flex; align-items:center; gap:.15rem; flex:1 1 auto; min-width:4rem; max-width:10rem; font-size:.7rem; } .priority-track { position:relative; display:block; flex:1 1 auto; height:.3rem; border-radius:999px; background:linear-gradient(90deg,#dc2626,#777 50%,#16a34a); } .priority-marker { position:absolute; top:-.2rem; width:2px; height:.7rem; transform:translateX(-1px); background:CanvasText; box-shadow:0 0 0 1px Canvas; }
 .job-progress.pending .job-progress-fill { background:#7c3aed; } .job-message { margin-top:.5rem; font-size:.78rem; color:#666; }
 .job-progress.completed .job-progress-fill { background:#16a34a; } .job-progress.failed_early .job-progress-fill, .job-progress.failed_timeout .job-progress-fill { background:#dc2626; } .job-progress.cancelled .job-progress-fill, .job-progress.other .job-progress-fill { background:#6b7280; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; }
@@ -496,6 +497,46 @@ function jobGroup(job) {
   return 'OTHER';
 }
 
+/** Return a pending job's relative position among visible peers on its cluster. */
+function relativeJobPriority(job, jobs) {
+  if (job.priority == null || job.priority === '') return null;
+  const priority = Number(job.priority);
+  if (!Number.isFinite(priority)) return null;
+  const peers = jobs.filter(candidate => candidate.cluster === job.cluster && jobGroup(candidate) === 'PENDING' && candidate.priority != null && candidate.priority !== '' && Number.isFinite(Number(candidate.priority)));
+  if (peers.length < 2) return null;
+  const values = peers.map(candidate => Number(candidate.priority));
+  const lower = values.filter(value => value < priority).length;
+  const equal = values.filter(value => value === priority).length;
+  const higher = values.length - lower - equal;
+  const percent = (lower + (equal - 1) / 2) / (values.length - 1) * 100;
+  const tie = equal > 1 ? `, tied with ${equal - 1}` : '';
+  return { percent, title:`Priority ${priority.toLocaleString()}: position ${higher + 1} of ${values.length}${tie} among your visible Pending jobs on ${job.cluster}. Higher is considered earlier, but reservations, partition tiers, resource fit, and backfill can change start order.` };
+}
+
+/** Render a compact number-free low-to-high gauge with details on fast hover. */
+function priorityGauge(markers, title, label) {
+  if (!markers.length) return '';
+  const ticks = markers.map(percent => `<i class="priority-marker" style="left:${Math.max(0, Math.min(100, percent))}%"></i>`).join('');
+  return `<div class="priority-context"><span class="priority-label">${escapeHtml(label)}</span><span class="priority-gauge fast-hover" role="img" aria-label="${escapeHtml(title)}" data-fast-tooltip="${escapeHtml(title)}"><span aria-hidden="true">←</span><span class="priority-track">${ticks}</span><span aria-hidden="true">→</span></span></div>`;
+}
+
+function jobPriorityGauge(job, jobs) {
+  const relative = relativeJobPriority(job, jobs);
+  return relative ? priorityGauge([relative.percent], relative.title, 'Priority') : '';
+}
+
+/** Render every available per-account fair-share factor as a marker. */
+function clusterPriorityGauge(cluster) {
+  const associations = (cluster.fairshare || []).filter(association => association.fairshare != null && association.fairshare !== '' && Number.isFinite(Number(association.fairshare)) && Number(association.fairshare) >= 0 && Number(association.fairshare) <= 1);
+  if (!associations.length) return '';
+  const details = associations.map(association => {
+    const level = association.level_fs === 'inf' ? '∞' : Number.isFinite(Number(association.level_fs)) ? Number(association.level_fs).toFixed(3) : 'unavailable';
+    return `${association.account || 'default'}: fair-share ${Number(association.fairshare).toFixed(3)}, Level FS ${level}`;
+  }).join('; ');
+  const title = `Fair-share priority on ${cluster.name}. ${details}. Higher fair-share is better. This is one priority component, not a predicted start order.`;
+  return priorityGauge(associations.map(association => Number(association.fairshare) * 100), title, 'Fair-share');
+}
+
 /** Render only the lifecycle rows meaningful for this card's state group. */
 function jobLifecycleRows(job, submittedAt, submittedText) {
   const group = jobGroup(job);
@@ -519,7 +560,7 @@ function jobDisclosureAttribute(key, defaultOpen = false) {
   return open ? ' open' : '';
 }
 
-function jobCard(job, listName) {
+function jobCard(job, listName, jobs) {
   const identifier = jobId(job), name = job.name || identifier;
   const hoverText = [job.cluster, identifier, name].filter(Boolean).join(' ');
   const nodes = nodeCount(job), gpus = Number(job.gpus) || 0, cpus = Number(job.cpus) || 0;
@@ -542,7 +583,8 @@ function jobCard(job, listName) {
   const actionButton = `<button data-job-action="${action}" data-job-key="${escapeHtml(jobArchiveKey(job))}">${actionLabel}</button>`;
   const logButtons = jobsApiEnabled && !['PENDING', 'FAILED_DEPENDENCY'].includes(group) ? `<button class="log-button" data-log-stream="err" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .err</button><button class="log-button" data-log-stream="out" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .out</button>` : '';
   const disclosureKey = `card:${listName}:${jobArchiveKey(job)}`;
-  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(`${job.cluster}/${identifier}`)}"${jobDisclosureAttribute(disclosureKey)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}${expandedDependency(job)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
+  const priority = listName === 'active' && group === 'PENDING' ? jobPriorityGauge(job, jobs) : '';
+  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(`${job.cluster}/${identifier}`)}"${jobDisclosureAttribute(disclosureKey)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}${priority}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}${expandedDependency(job)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
 }
 
 function jobGroups(jobs, listName) {
@@ -551,7 +593,7 @@ function jobGroups(jobs, listName) {
     const grouped = sorted.filter(job => jobGroup(job) === group);
     if (!grouped.length) return '';
     const disclosureKey = `group:${listName}:${group}`;
-    return `<details class="job-group" data-job-disclosure-key="${disclosureKey}"${jobDisclosureAttribute(disclosureKey, true)}><summary>${JOB_GROUP_LABELS[group]} (${grouped.length})</summary><div class="job-card-grid">${grouped.map(job => jobCard(job, listName)).join('')}</div></details>`;
+    return `<details class="job-group" data-job-disclosure-key="${disclosureKey}"${jobDisclosureAttribute(disclosureKey, true)}><summary>${JOB_GROUP_LABELS[group]} (${grouped.length})</summary><div class="job-card-grid">${grouped.map(job => jobCard(job, listName, sorted)).join('')}</div></details>`;
   }).join('');
 }
 
@@ -672,7 +714,7 @@ function clusterView(cluster, waitThresholds) {
   else if (!cluster.nodes || !cluster.nodes.length) content = '<p>No individual node information was returned by scontrol.</p>';
   else { const compute = new Map((cluster.partition_compute || []).map(summary => [summary.name, summary])); content = partitionGroups(cluster.nodes, compute).map(group => partitionView(cluster.name, group, compute, cluster.user_jobs, waitThresholds || [5, 30, 60, 120], cluster.wait_estimates, cluster.wait_estimates_updated_at)).join(''); }
   if (cluster.jobs) content += `<p><b>Jobs:</b> ${Object.entries(cluster.jobs).map(([state, count]) => `${escapeHtml(state)}=${count}`).join(', ') || 'none'}</p>`;
-  return `<section class="cluster"><h2>${escapeHtml(cluster.name)} <small>${escapeHtml(cluster.username)}@${escapeHtml(cluster.host)}</small></h2>${content}</section>`;
+  return `<section class="cluster"><h2>${escapeHtml(cluster.name)} <small>${escapeHtml(cluster.username)}@${escapeHtml(cluster.host)}</small></h2>${clusterPriorityGauge(cluster)}${content}</section>`;
 }
 
 let refreshTimer, refreshDeadline = 0, refreshPeriodMs = 1;

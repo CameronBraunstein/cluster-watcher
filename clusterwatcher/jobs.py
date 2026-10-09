@@ -98,6 +98,7 @@ def _active_record(cluster: str, job: dict[str, object]) -> dict[str, object]:
         "time_limit": job.get("time_limit"),
         "time_limit_seconds": job.get("time_limit_seconds"),
         "time_left_seconds": job.get("time_left_seconds"),
+        "priority": job.get("priority"),
         "expected_start_at": start if state == "PENDING" else None,
         "reason": reason,
         "dependency": dependency,
