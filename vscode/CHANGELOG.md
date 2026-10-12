@@ -11,6 +11,17 @@ All notable changes to the Cluster Watcher VS Code extension.
   every partition name. Exact values and scheduler configuration stay in fast
   hover text, directional arrows are omitted, and unsupported or
   non-comparable data is hidden.
+- Priority gauges no longer carry a visible "Priority" label.
+- A collapsed job card shows its full-name hover label only while the pointer
+  is over the title, not anywhere on the card. The copyable job-ID badge moved
+  from the expanded metadata line to the right of the progress bar (or
+  priority gauge), and appears only while the card is expanded.
+- Cluster Status shows each partition as a collapsible card instead of a table
+  row. The collapsed card shows the partition name, priority gauge, GPU model,
+  VRAM, and TFLOPS/s; expanding it adds GPU availability, the full GPU name,
+  CPU threads, and a line chart of estimated wait against requested GPU count
+  with logarithmic axes. Hover a chart column for its exact, live-counting
+  estimate or Slurm's error message.
 
 ## 0.1.5 — 2026-10-09
 

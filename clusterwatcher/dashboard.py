@@ -53,9 +53,9 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .my-jobs h2 { margin:0 0 .75rem; } .job-group { margin:.7rem 0; } .job-group > summary { cursor:pointer; font-weight:700; }
 .job-card-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:.65rem; margin:.65rem 0; }
 .job-card { border:1px solid #8885; border-radius:.4rem; background:Canvas; min-width:0; } .job-card > summary { display:grid; position:relative; gap:.25rem; padding:.7rem; cursor:pointer; min-width:0; }
-.job-card > summary[data-full-name]::after { content:attr(data-full-name); position:absolute; z-index:10; left:.35rem; top:calc(100% + 2px); max-width:calc(100% - 1rem); padding:.25rem .4rem; border:1px solid #8888; outline:1px solid #fff; border-radius:2px; background:Canvas; color:CanvasText; font-size:.75rem; font-weight:400; line-height:1.25; white-space:normal; overflow-wrap:anywhere; visibility:hidden; opacity:0; pointer-events:none; }
-.job-card:not([open]) > summary[data-full-name]:hover::after { visibility:visible; opacity:1; }
-.job-card-summary-title { display:flex; justify-content:space-between; gap:.5rem; align-items:baseline; min-width:0; }
+.job-card-summary-title[data-full-name]::after { content:attr(data-full-name); position:absolute; z-index:10; left:0; top:calc(100% + 2px); max-width:100%; padding:.25rem .4rem; border:1px solid #8888; outline:1px solid #fff; border-radius:2px; background:Canvas; color:CanvasText; font-size:.75rem; font-weight:400; line-height:1.25; white-space:normal; overflow-wrap:anywhere; visibility:hidden; opacity:0; pointer-events:none; }
+.job-card:not([open]) .job-card-summary-title[data-full-name]:hover::after { visibility:visible; opacity:1; }
+.job-card-summary-title { position:relative; display:flex; justify-content:space-between; gap:.5rem; align-items:baseline; min-width:0; }
 .job-card-body { padding:0 .7rem .7rem; min-width:0; } .job-card-actions, .job-sort-controls { display:flex; flex-wrap:wrap; gap:.4rem; margin:.55rem 0; }
 .job-card-actions button, .job-sort-controls button { cursor:pointer; }
 .job-times { display:grid; grid-template-columns:auto minmax(0, 1fr); gap:.2rem .7rem; margin:.55rem 0; font-size:.8rem; } .job-times dt { color:#666; white-space:nowrap; } .job-times dd { min-width:0; margin:0; white-space:normal; text-align:right; }
@@ -64,7 +64,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .job-progress-fill { display:block; height:100%; background:#2563eb; transition:width 1s linear; } .job-progress-text { display:block; max-width:100%; margin-top:.22rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.76rem; color:#666; }
 .job-progress-message { display:block; max-width:100%; margin-top:.5rem; overflow-wrap:anywhere; font-size:.76rem; line-height:1.3; color:#666; }
 .job-dependency-link { color:LinkText; font-family:ui-monospace, monospace; } .job-dependency-icon { display:inline-block; margin-left:.15rem; font-family:system-ui, sans-serif; font-weight:700; } .job-dependency-icon.waiting { font-weight:400; } .job-dependency-icon.satisfied { color:#16a34a; } .job-dependency-icon.failed { color:#dc2626; }
-.priority-context { display:flex; align-items:center; gap:.35rem; margin-top:.5rem; min-width:0; } .priority-label { flex:0 0 auto; color:#666; font-size:.76rem; } .priority-gauge { display:flex; align-items:center; flex:1 1 auto; min-width:4rem; max-width:10rem; } .priority-track { position:relative; display:block; flex:1 1 auto; height:.3rem; border-radius:999px; background:linear-gradient(90deg,#dc2626,#777 50%,#16a34a); } .priority-marker { position:absolute; top:-.2rem; width:2px; height:.7rem; transform:translateX(-1px); background:CanvasText; box-shadow:0 0 0 1px Canvas; } .priority-prominent { margin-top:.5rem; } .priority-prominent .priority-track { height:.62rem; } .priority-prominent .priority-marker { top:-.18rem; height:.98rem; }
+.priority-context { display:flex; align-items:center; gap:.35rem; margin-top:.5rem; min-width:0; } .priority-gauge { display:flex; align-items:center; flex:1 1 auto; min-width:4rem; max-width:10rem; } .priority-track { position:relative; display:block; flex:1 1 auto; height:.3rem; border-radius:999px; background:linear-gradient(90deg,#dc2626,#777 50%,#16a34a); } .priority-marker { position:absolute; top:-.2rem; width:2px; height:.7rem; transform:translateX(-1px); background:CanvasText; box-shadow:0 0 0 1px Canvas; } .priority-prominent { margin-top:.5rem; } .priority-prominent .priority-track { height:.62rem; } .priority-prominent .priority-marker { top:-.18rem; height:.98rem; }
 .job-progress.pending .job-progress-fill { background:#7c3aed; } .job-message { margin-top:.5rem; font-size:.78rem; color:#666; }
 .job-progress.completed .job-progress-fill { background:#16a34a; } .job-progress.failed_early .job-progress-fill, .job-progress.failed_timeout .job-progress-fill { background:#dc2626; } .job-progress.cancelled .job-progress-fill, .job-progress.other .job-progress-fill { background:#6b7280; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; }
@@ -514,16 +514,16 @@ function relativeJobPriority(job, jobs) {
   return { percent, title:`Priority ${priority.toLocaleString()}: position ${higher + 1} of ${values.length}${tie} among your visible Pending jobs on ${job.cluster}.` };
 }
 
-/** Render a compact number-free low-to-high gauge with details on fast hover. */
-function priorityGauge(markers, title, label, prominent = false) {
+/** Render a compact, unlabeled, number-free low-to-high gauge with details on fast hover. */
+function priorityGauge(markers, title, prominent = false) {
   if (!markers.length) return '';
   const ticks = markers.map(percent => `<i class="priority-marker" style="left:${Math.max(0, Math.min(100, percent))}%"></i>`).join('');
-  return `<span class="priority-context${prominent ? ' priority-prominent' : ''}"><span class="priority-label">${escapeHtml(label)}</span><span class="priority-gauge fast-hover" role="img" aria-label="${escapeHtml(title)}" data-fast-tooltip="${escapeHtml(title)}"><span class="priority-track">${ticks}</span></span></span>`;
+  return `<span class="priority-context${prominent ? ' priority-prominent' : ''}"><span class="priority-gauge fast-hover" role="img" aria-label="${escapeHtml(title)}" data-fast-tooltip="${escapeHtml(title)}"><span class="priority-track">${ticks}</span></span></span>`;
 }
 
 function jobPriorityGauge(job, jobs, prominent = false) {
   const relative = relativeJobPriority(job, jobs);
-  return relative ? priorityGauge([relative.percent], relative.title, 'Priority', prominent) : '';
+  return relative ? priorityGauge([relative.percent], relative.title, prominent) : '';
 }
 
 /** Render a partition's configured job-priority factor relative to its peers. */
@@ -542,7 +542,7 @@ function partitionPriorityGauge(partition, partitions, scheduling = {}) {
   ];
   if (scheduling.priority_weight_partition != null) details.push(`partition weight: ${Number(scheduling.priority_weight_partition).toLocaleString()}`);
   if (scheduling.priority_flags) details.push(`priority flags: ${scheduling.priority_flags}`);
-  return priorityGauge([percent], details.join('; '), 'Priority');
+  return priorityGauge([percent], details.join('; '));
 }
 
 /** Render only the lifecycle rows meaningful for this card's state group. */
@@ -597,7 +597,7 @@ function jobCard(job, listName, jobs) {
   const actionButton = `<button data-job-action="${action}" data-job-key="${escapeHtml(jobArchiveKey(job))}">${actionLabel}</button>`;
   const logButtons = jobsApiEnabled && !['PENDING', 'FAILED_DEPENDENCY'].includes(group) ? `<button class="log-button" data-log-stream="err" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .err</button><button class="log-button" data-log-stream="out" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .out</button>` : '';
   const disclosureKey = `card:${listName}:${jobArchiveKey(job)}`;
-  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(`${job.cluster}/${identifier}`)}"${jobDisclosureAttribute(disclosureKey)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="job-card-summary-title"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}${noEstimatePriority ? '' : priority}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}${expandedDependency(job)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
+  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(`${job.cluster}/${identifier}`)}"${jobDisclosureAttribute(disclosureKey)}><summary><span class="job-card-summary-title" data-full-name="${escapeHtml(hoverText)}"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}${noEstimatePriority ? '' : priority}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}${expandedDependency(job)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
 }
 
 function jobGroups(jobs, listName) {

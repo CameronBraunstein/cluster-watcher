@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, partitionPriorityGauge, relativeJobPriority, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
+const { waitAxis, waitChart, waitSeconds } = require('../wait-chart');
 
 test('jobs retain terminal state grouping and lifecycle visibility', () => {
   const jobs = [
@@ -42,7 +43,7 @@ test('jobs retain terminal state grouping and lifecycle visibility', () => {
   assert.match(jobKey(jobs[0]), /cluster_1/);
 });
 
-test('status shows GPU specifications, availability, and wait matrix', () => {
+test('status shows each partition as a card: specs collapsed, availability and wait chart expanded', () => {
   const partition = {
     name: 'gpu-h100', rank: 1, aggregate: false,
     cpus: { total: 128 },
@@ -62,10 +63,16 @@ test('status shows GPU specifications, availability, and wait matrix', () => {
     clusters: [{ name: 'cluster_0', reachable: true, partitions: [partition] }],
   });
 
-  assert.match(html, /<td class="gpu-model" data-fast-tooltip="NVIDIA H100 NVL" aria-label="NVIDIA H100 NVL">H100<\/td>/);
-  assert.match(html, /80G/);
-  assert.match(html, /2\/8/);
-  assert.match(html, /<div class="availability-cell"><div class="availability"[^>]*>.*?<\/div><span>2\/8<\/span><\/div>/);
+  const card = html.match(/<details class="card partition-card" data-disclosure-key="partition:cluster_0:gpu-h100">.*?<\/details>/s)[0];
+  const summary = card.match(/<summary>.*?<\/summary>/s)[0];
+  assert.match(summary, /<span class="card-summary-title partition-title"><span class="name">gpu-h100<\/span><\/span>/);
+  assert.match(summary, /<span class="muted partition-specs"><span class="gpu-model" data-fast-tooltip="NVIDIA H100 NVL" aria-label="NVIDIA H100 NVL">H100<\/span> · 80G · 989 TFLOPS\/s<\/span>/);
+  assert.doesNotMatch(summary, /availability|wait-chart|CPU threads/);
+  const body = card.slice(summary.length);
+  assert.match(body, /<dt>Available GPUs<\/dt><dd><div class="availability-cell"><div class="availability"[^>]*>.*?<\/div><span>2\/8<\/span><\/div><\/dd>/);
+  assert.match(body, /<dt>GPU<\/dt><dd>NVIDIA H100 NVL<\/dd>/);
+  assert.match(body, /<dt>CPU threads<\/dt><dd>128<\/dd>/);
+  assert.match(body, /<svg class="wait-chart"/);
   assert.match(html, /\.availability-cell\{display:flex;align-items:center;gap:3px;white-space:nowrap\}/);
   assert.ok(html.indexOf('class="available"') < html.indexOf('class="unavailable"'));
   assert.match(html, /data-availability="Nodes: 2 idle, 3 full, 1 reserved, 1 down"/);
@@ -74,10 +81,7 @@ test('status shows GPU specifications, availability, and wait matrix', () => {
   assert.match(html, /const FAST_HOVER_DELAY_MS = 100/);
   assert.match(html, /querySelectorAll\('\[data-fast-tooltip\]'\)/);
   assert.doesNotMatch(html, /0 mixed/);
-  assert.match(html, /CPU threads/);
-  assert.ok(html.indexOf('<th>Available</th><th>GPU</th><th>VRAM</th><th>TFLOPS/s</th>') >= 0);
-  assert.doesNotMatch(html, /<th>Partition<\/th>/);
-  assert.match(html, /<tbody class="partition-rows"><tr class="partition-name-row"><th colspan="12" scope="rowgroup"><span class="partition-name-content"><span>gpu-h100<\/span><\/span><\/th><\/tr><tr><td>/);
+  assert.doesNotMatch(html, /<table/);
   assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary>cluster_0<\/summary>/);
   assert.doesNotMatch(html, /## cluster_0 ##/);
   assert.doesNotMatch(html, /<body><h2>Cluster Status<\/h2>/);
@@ -139,23 +143,31 @@ test('openAttribute falls back to the renderer default', () => {
   assert.equal(openAttribute({ key: false }, 'key', true), '');
 });
 
-test('collapsed title truncates with a full-name tooltip and the job ID moves to expanded metadata', () => {
+test('collapsed title hover shows the full name and the job ID sits beside the progress when expanded', () => {
   const html = renderJobs({ jobs: [{ job_id: '2000068_123', name: 'a very long job title indeed', cluster: 'cluster_0', state: 'RUNNING' }] });
-  const cardSummary = html.match(/<summary data-full-name="cluster_0 2000068_123 a very long job title indeed">.*?<\/summary>/s)[0];
-  assert.match(cardSummary, /<span class="name">a very long job title indeed<\/span>/);
-  assert.doesNotMatch(cardSummary, /class="badge job-id/);
+  const cardSummary = html.match(/<summary><span class="card-summary-title".*?<\/summary>/s)[0];
+  assert.match(cardSummary, /^<summary><span class="card-summary-title" data-full-name="cluster_0 2000068_123 a very long job title indeed"><span class="name">a very long job title indeed<\/span><\/span>/);
+  assert.match(cardSummary, /<span class="card-summary-progress"><span class="job-progress"[^>]*>.*?<\/span><\/span><span class="badge job-id" role="button" tabindex="0" data-copy="2000068_123"[^>]*>2000068_123<\/span><\/span><\/summary>$/s);
   assert.match(html, /\.name\{[^}]*overflow:hidden;text-overflow:ellipsis;white-space:nowrap;/);
   assert.match(html, /\.card\[open\] \.name\{white-space:normal;overflow-wrap:anywhere\}/);
-  assert.match(html, /\.card:not\(\[open\]\)>summary\[data-full-name\]:hover::after\{visibility:visible;opacity:1\}/);
-  assert.match(html, /\.card>summary\[data-full-name\]::after\{outline:1px solid #fff\}/);
+  assert.match(html, /\.card:not\(\[open\]\) \.card-summary-title\[data-full-name\]:hover::after\{visibility:visible;opacity:1\}/);
+  assert.doesNotMatch(html, /summary\[data-full-name\]/);
+  assert.match(html, /\.card-summary-title\[data-full-name\]::after\{outline:1px solid #fff\}/);
+  assert.match(html, /\.card:not\(\[open\]\) \.card-summary-progress>\.job-id\{display:none\}/);
   assert.doesNotMatch(cardSummary, /<summary[^>]* title=/);
-  assert.match(html, /<span class="badge job-id" role="button" tabindex="0" data-copy="2000068_123"/);
-  assert.match(html, /<div class="muted card-meta" title="cluster_0 \/ no partition · 0 node · 0 GPU · 0 CPU"><span class="badge job-id"[^>]*>2000068_123<\/span> cluster_0 \/ no partition · 0 node · 0 GPU · 0 CPU<\/div>/);
-  assert.match(html, /\.card-meta>\.job-id\{display:inline-block;font-size:\.88em;margin-right:3px\}/);
+  assert.match(html, /<div class="muted card-meta" title="cluster_0 \/ no partition · 0 node · 0 GPU · 0 CPU">cluster_0 \/ no partition · 0 node · 0 GPU · 0 CPU<\/div>/);
+  assert.equal((html.match(/data-copy=/g) || []).length, 1);
   assert.match(html, /\.job-id\{[^}]*border-radius:0\}/);
   assert.match(html, /\.job-id:hover,\.job-id:focus-visible\{outline:none;box-shadow:inset 0 0 0 1px var\(--vscode-focusBorder\)\}/);
   assert.doesNotMatch(html, /\.job-id\{[^}]*width:/);
   assert.match(html, /type: 'copy'/);
+});
+
+test('the job ID also follows a no-estimate priority gauge in the summary', () => {
+  const low = { job_id: '1', cluster: 'c', state: 'PENDING', priority: 1 };
+  const high = { job_id: '2', cluster: 'c', state: 'PENDING', priority: 2 };
+  const summary = renderJobs({ jobs: [low, high] }).match(/<summary><span class="card-summary-title" data-full-name="c 1 1">.*?<\/summary>/s)[0];
+  assert.match(summary, /priority-prominent.*<span class="badge job-id"[^>]*>1<\/span><\/span><\/summary>/s);
 });
 
 test('End appears only for running and pending jobs and hides while ending', () => {
@@ -187,7 +199,7 @@ test('dependencies are parsed and rendered as links to the referenced card', () 
     { job_id: '13', cluster: 'cluster_0', state: 'PENDING', dependency: 'afterok:12(unfulfilled)' },
   ] });
   assert.match(html, /<dt>Depends on<\/dt><dd class="dependency-value">afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"[^>]*>12<\/a> <span class="dependency-icon waiting"[^>]*data-fast-tooltip="Unfulfilled: waiting for job 12 to satisfy afterok"[^>]*>🕒<\/span>/);
-  const summary = html.match(/<summary data-full-name="cluster_0 13 13">.*?<\/summary>/s)[0];
+  const summary = html.match(/<summary><span class="card-summary-title" data-full-name="cluster_0 13 13">.*?<\/summary>/s)[0];
   assert.match(summary, /dependency:afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"[^>]*>12<\/a>/);
   assert.doesNotMatch(summary, /dependency-icon/);
   assert.doesNotMatch(html, /<span class="muted">\(unfulfilled\)<\/span>/);
@@ -240,7 +252,7 @@ test('pending cards show a number-free relative-priority gauge only in expanded 
   const lowCard = html.match(/<details class="card"[^>]*data-job-ref="c\/1".*?<\/details>/s)[0];
   const lowSummary = lowCard.match(/<summary.*?<\/summary>/s)[0];
   assert.doesNotMatch(lowSummary, /priority-gauge/);
-  assert.match(lowCard, /<span class="muted priority-label">Priority<\/span>/);
+  assert.doesNotMatch(lowCard, /priority-label|>Priority</);
   assert.match(lowCard, /class="priority-marker" style="left:0%"/);
   assert.match(lowCard, /data-fast-tooltip="Priority 100: position 2 of 2/);
   assert.doesNotMatch(lowCard, /Higher is considered earlier/);
@@ -272,7 +284,8 @@ test('partition priority gauges show scheduler details only on hover', () => {
     name: 'c', reachable: true, partitions, scheduling,
   };
   const gauge = partitionPriorityGauge(partitions[0], partitions, scheduling);
-  assert.match(gauge, /<span class="muted priority-label">Priority<\/span>/);
+  assert.match(gauge, /^<span class="priority-context"><span class="priority-gauge" role="img"/);
+  assert.doesNotMatch(gauge, /priority-label|>Priority</);
   assert.match(gauge, /class="priority-marker" style="left:25%"/);
   assert.match(gauge, /data-fast-tooltip="Scheduler: sched\/backfill; priority plugin: priority\/multifactor; partition job factor: 100; priority tier: 1; partition weight: 5,000; priority flags: NO_NORMAL_PART"/);
   assert.doesNotMatch(gauge, /←|→|This is one priority component/);
@@ -280,7 +293,7 @@ test('partition priority gauges show scheduler details only on hover', () => {
 
   const html = renderStatus({ clusters: [cluster] });
   assert.equal((html.match(/class="priority-gauge"/g) || []).length, 2);
-  assert.match(html, /gpu-low.*?priority-marker" style="left:25%"/s);
+  assert.match(html, /<span class="card-summary-title partition-title"><span class="name">gpu-low<\/span><span class="priority-context">.*?priority-marker" style="left:25%"/s);
   assert.match(html, /gpu-high.*?priority-marker" style="left:100%"/s);
 });
 
@@ -316,7 +329,7 @@ test('pending jobs hide log actions until a refreshed archived snapshot leaves p
   const pending = { job_id: '7', name: 'pending', cluster: 'cluster_0', state: 'PENDING', submit_at: '2026-10-01T10:00:00Z' };
   const completedArchive = { ...pending, name: 'archived-completed', state: 'COMPLETED', end_at: '2026-10-01T10:05:00Z' };
   const html = renderJobs({ jobs: [pending], archived_jobs: [completedArchive] });
-  const card = name => html.match(new RegExp(`<summary data-full-name="cluster_0 7 ${name}">.*?</details>`, 's'))[0];
+  const card = name => html.match(new RegExp(`<summary><span class="card-summary-title" data-full-name="cluster_0 7 ${name}">.*?</details>`, 's'))[0];
 
   assert.doesNotMatch(card('pending'), /clusterWatcher\.openLog/);
   assert.match(card('pending'), /clusterWatcher\.openScript/);
@@ -389,27 +402,65 @@ test('pending jobs without an estimate explain why and omit the empty bar', () =
   const dependencyHtml = renderJobs({ jobs: [{
     job_id: '1', cluster: 'c', state: 'PENDING', dependency: 'afterok:123(unfulfilled)',
   }] });
-  const dependencySummary = dependencyHtml.match(/<summary data-full-name="c 1 1">.*?<\/summary>/s)[0];
+  const dependencySummary = dependencyHtml.match(/<summary><span class="card-summary-title" data-full-name="c 1 1">.*?<\/summary>/s)[0];
   assert.match(dependencySummary, /dependency:afterok <a class="dep-link" href="#" data-jump="c\/123"[^>]*>123<\/a>/);
   assert.doesNotMatch(dependencySummary, /dependency-icon/);
   assert.match(dependencyHtml, /event\.preventDefault\(\);\s+event\.stopPropagation\(\);\s+const target = link\.dataset\.jump/);
   assert.doesNotMatch(dependencySummary, /class="progress"/);
 
   const unavailableHtml = renderJobs({ jobs: [{ job_id: '2', cluster: 'c', state: 'PENDING' }] });
-  const unavailableSummary = unavailableHtml.match(/<summary data-full-name="c 2 2">.*?<\/summary>/s)[0];
+  const unavailableSummary = unavailableHtml.match(/<summary><span class="card-summary-title" data-full-name="c 2 2">.*?<\/summary>/s)[0];
   assert.match(unavailableSummary, /no estimate available/);
   assert.doesNotMatch(unavailableSummary, /class="progress"/);
   assert.match(unavailableHtml, /\.progress-message\{[^}]*overflow-wrap:anywhere/);
 });
 
-test('status wait cells carry their estimate and as-of time for counting down', () => {
+test('wait chart hover targets carry their estimate and as-of time for counting down', () => {
   const partition = {
     name: 'gpu', gpus: { total: 8, schedulable_idle: 0, models: [] },
     wait_estimates: [{ gpus: 1, estimated_wait_seconds: 900, error: null }, { gpus: 2, estimated_wait_seconds: null, error: 'denied' }],
   };
   const html = renderStatus({ generated_at: '2026-10-06T10:00:00Z', clusters: [{ name: 'c', reachable: true, partitions: [partition] }] });
-  assert.match(html, /<td title="Wait for 1 GPU" data-wait="\[900,1791280800000\]">15m<\/td>/);
-  assert.match(html, /<td title="Wait for 2 GPUs: denied">ERR<\/td>/);
+  assert.match(html, /<rect class="wait-hit"[^>]*data-fast-tooltip="Wait for 1 GPU: 15m" data-wait="\[900,1791280800000,&quot;Wait for 1 GPU&quot;\]"\/>/);
+  assert.match(html, /<rect class="wait-hit"[^>]*data-fast-tooltip="Wait for 2 GPUs: denied"\/>/);
+  assert.match(html, /<text class="wait-status"[^>]*>ERR<\/text>/);
+  assert.match(html, /target\.dataset\.fastTooltip = label \+ ': ' \+ formatDuration/);
+});
+
+test('wait chart plots log wait over log GPU count and breaks the line at gaps', () => {
+  const partition = {
+    name: 'gpu', gpus: { total: 16 },
+    wait_estimates: [
+      { gpus: 1, estimated_wait_seconds: 0 },
+      { gpus: 2, estimated_wait_seconds: 3600 },
+      { gpus: 4, error: 'Slurm probe timed out', error_kind: 'timeout' },
+      { gpus: 8, estimated_wait_seconds: 86400 },
+      { gpus: 16, estimated_wait_seconds: 172800 },
+    ],
+  };
+  assert.equal(waitSeconds(partition, 1), 0);
+  assert.equal(waitSeconds(partition, 4), null);
+  assert.equal(waitSeconds(partition, 32), null);
+  const chart = waitChart(partition, false, 0);
+  const points = [...chart.matchAll(/<circle class="wait-point" cx="([\d.]+)" cy="([\d.]+)"/g)].map((match) => [Number(match[1]), Number(match[2])]);
+  assert.equal(points.length, 4);
+  // GPU counts are powers of two, so log2 spacing is even: 1, 2, 8, 16 sit at columns 0, 1, 3, 4.
+  const step = points[1][0] - points[0][0];
+  assert.ok(Math.abs(points[2][0] - points[0][0] - 3 * step) < 0.2);
+  assert.ok(Math.abs(points[3][0] - points[0][0] - 4 * step) < 0.2);
+  // Log wait axis: 1m floor, 1h, 1d, 1w ceiling; 1h→1d spans as much height as 1d→~24d would.
+  assert.deepEqual(waitAxis(172800).ticks.map(([, label]) => label), ['1m', '1h', '1d', '1w']);
+  const [, now, hour, day, twoDays] = [null, ...points.map(([, y]) => y)];
+  assert.ok(now > hour && hour > day && day > twoDays);
+  assert.ok(Math.abs((hour - day) / (now - hour) - Math.log(24) / Math.log(60)) < 0.01);
+  // The line breaks across the failed 4-GPU probe instead of interpolating.
+  assert.match(chart, /<path class="wait-line" d="M[\d.]+ [\d.]+L[\d.]+ [\d.]+M[\d.]+ [\d.]+L[\d.]+ [\d.]+"\/>/);
+  assert.match(chart, /<text class="wait-status"[^>]*>ERR<\/text>/);
+  assert.equal((chart.match(/<text class="wait-status"[^>]*>—<\/text>/g) || []).length, 2);
+  assert.match(chart, /aria-label="Estimated wait by GPUs requested \(1: now, 2: 1h, 4: ERR, 8: 1d, 16: 2d, 32: —, 64: —\)"/);
+  assert.match(chart, /log scales/);
+  assert.equal(waitChart({ name: 'cpu', gpus: { total: 0 } }), '');
+  assert.equal(waitAxis(0).ceiling, 3600);
 });
 
 test('heading sizes: groups and cluster names match the 11px view headings, job titles are smaller', () => {
@@ -469,7 +520,7 @@ test('terminal cards keep elapsed time in the compact fraction and end time in d
       submit_at: '2026-09-30T15:00:00Z', start_at: '2026-09-30T15:01:00Z', end_at: '2026-09-30T15:11:00Z',
     }],
   });
-  const cardSummary = html.match(/<summary data-full-name="cluster_0 3 finished">.*?<\/summary>/s)[0];
+  const cardSummary = html.match(/<summary><span class="card-summary-title" data-full-name="cluster_0 3 finished">.*?<\/summary>/s)[0];
   assert.match(cardSummary, /<span class="muted progress-label" title="10m \/ 1h">10m \/ 1h<\/span>/);
   assert.doesNotMatch(cardSummary, />[^<]*(?:elapsed|ended)[^<]*</i);
   assert.doesNotMatch(html, /<dt>Elapsed<\/dt>/);
@@ -486,7 +537,7 @@ test('expanded lifecycle rows are state-specific and failure groups distinguish 
   ];
   const html = renderJobs({ jobs });
   const identifiers = { 'running-job': '1', 'pending-job': '2', 'early-job': '3', 'timeout-job': '4' };
-  const card = name => html.match(new RegExp(`<summary data-full-name="c ${identifiers[name]} ${name}">.*?</details>`, 's'))[0];
+  const card = name => html.match(new RegExp(`<summary><span class="card-summary-title" data-full-name="c ${identifiers[name]} ${name}">.*?</details>`, 's'))[0];
 
   assert.doesNotMatch(card('running-job'), /<dt>Ended<\/dt>/);
   assert.doesNotMatch(card('pending-job'), /<dt>(?:Launched|Ended)<\/dt>/);
@@ -550,7 +601,8 @@ test('wait cells label policy refusals separately from real errors', () => {
   const partition = { name: 'gpu', gpus: { total: 64 }, wait_estimates: rows };
   assert.deepEqual([1, 2, 4, 8, 16, 32, 64].map((count) => waitCell(partition, count)), ['min', 'limit', 'n/a', 'ERR', '?', 'DENY', '?']);
   const html = renderStatus({ clusters: [{ name: 'cluster_0', reachable: true, wait_estimates_updated_at: '2026-10-06T16:00:00Z', partitions: [partition] }] });
-  assert.match(html, /<td title="Wait for 2 GPUs: More than 4 gpus per node were requested"[^>]*>limit<\/td>/);
+  assert.match(html, /data-fast-tooltip="Wait for 2 GPUs: More than 4 gpus per node were requested"/);
+  assert.match(html, /<text class="wait-status"[^>]*>limit<\/text>/);
 });
 
 test('wait cells show … until the first probe round finishes', () => {
@@ -558,7 +610,9 @@ test('wait cells show … until the first probe round finishes', () => {
   assert.equal(waitCell(partition, 4, true), '…');
   assert.equal(waitCell(partition, 16, true), '—');
   const html = renderStatus({ clusters: [{ name: 'cluster_0', reachable: true, partitions: [partition] }] });
-  assert.match(html, /<td title="Wait for 1 GPU: still checking">…<\/td>/);
+  assert.match(html, /data-fast-tooltip="Wait for 1 GPU: still checking"/);
+  assert.match(html, /<text class="wait-status"[^>]*>…<\/text>/);
   const done = renderStatus({ clusters: [{ name: 'cluster_0', reachable: true, wait_estimates_updated_at: '2026-10-06T16:00:00Z', partitions: [partition] }] });
-  assert.match(done, /<td title="Wait for 1 GPU">\?<\/td>/);
+  assert.match(done, /data-fast-tooltip="Wait for 1 GPU: not probed"/);
+  assert.match(done, /data-fast-tooltip="Wait for 16 GPUs: exceeds the partition&#39;s 8 GPUs"/);
 });

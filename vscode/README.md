@@ -35,8 +35,8 @@ MFA, Slurm queries, and refresh scheduling.
 **My Jobs** uses collapsible state groups instead of terminal-style banners.
 Each job is another collapsible card whose compact form contains its name,
 progress color bar, and completion/start estimate. Long names stay on one line
-and end in an ellipsis; an immediate, white-outlined hover label shows the
-cluster, job ID, and full job name. Card
+and end in an ellipsis; hovering the title (not the rest of the card) shows an
+immediate, white-outlined label with the cluster, job ID, and full job name. Card
 summaries use tight internal padding and reduced spacing between neighboring
 cards. The copyable job-ID badge has rectangular corners and an inset blue
 hover/focus border whose four edges remain visible.
@@ -61,9 +61,10 @@ expanded width, including on completed and failed cards; their denominator
 comes from the time limit retained in Slurm accounting. Zero-length recorded
 durations appear as `<1m` rather than `now`. Jobs are separated into
 **Failed (Early)** and **Failed (Timeout)** groups; the latter is reserved for
-Slurm's explicit `TIMEOUT` state. Expand a card to see the job ID before the
-cluster, partition, and resource summary; click it (or focus it and press
-Enter) to copy it. A running job's calculated limit and a terminal job's end
+Slurm's explicit `TIMEOUT` state. Expanding a card reveals the job-ID badge to
+the right of its progress bar (or priority gauge); click it (or focus it and
+press Enter) to copy it without collapsing the card. The cluster, partition,
+and resource summary follow in the details. A running job's calculated limit and a terminal job's end
 time appear with the expanded lifecycle details. Elapsed time is not repeated
 there because it is already in the compact progress fraction. Running cards
 omit **Ended**; pending cards omit both **Launched** and **Ended**. Expanded
@@ -73,8 +74,8 @@ first line and the time wraps onto a right-aligned second line. The compact
 icon/short-label action row remains on one line. Long progress labels ellipsize,
 while dependency expressions and expanded job names wrap inside the card.
 When a cluster exposes numeric Slurm priorities for at least two of the user's
-visible pending jobs, expanded Pending cards add a number-free low-to-high
-**Priority** gauge. Hover it for the raw priority, relative rank, comparison
+visible pending jobs, expanded Pending cards add an unlabeled, number-free
+low-to-high priority gauge. Hover it for the raw priority, relative rank, comparison
 scope; scheduling caveats are documented in the main README rather than the
 hover. If no wait estimate exists, the gauge moves into the always-visible
 summary and becomes as thick as a normal progress bar. It has no directional
@@ -106,7 +107,7 @@ Expand a card to see details and to:
   not in the list.
 
 The archive is stored in VS Code extension global state and survives editor
-restarts. Group, card, and cluster disclosure choices survive live data
+restarts. Group, job-card, cluster, and partition-card disclosure choices survive live data
 refreshes: the webview reports each expand/collapse to the extension, which
 renders the remembered state into every refreshed page (for the current VS Code
 session). Cluster names are collapsible headings in **Cluster Status**. The
@@ -171,24 +172,30 @@ hover are kept). Progress bars, elapsed times, and wait estimates still count
 on their own every few seconds. The compact freshness line below each heading
 shows only when data last changed, with exact second precision.
 
-In **Cluster Status**, a wait cell without an estimate says why: `DENY` (your
-account may not use the partition), `min` (below its minimum GPU request),
-`limit` (over a limit for your account), `n/a` (no node can run it now, e.g.
-all drained), `ERR` (a real failure, such as Slurm not answering), `?` (not
-probed), or `…` (the first probes are still running). Hover a cell for
-Slurm's message. Each partition name has a full-width row above its capacity
-data; the remaining columns begin **Available**, **GPU**, **VRAM**, and
-**TFLOPS/s**, followed by the wait estimates and CPU total. Catalog names are
-shortened to model labels such as `H100`; hover one for its full GPU name after
-the same roughly 100 ms delay as the availability bar. The availability bar
-and `idle/total` fraction stay together on one line for a more compact table.
-Green available capacity appears on the left and red unavailable capacity
-follows it. Hover the bar for a node-only state breakdown; zero-count
-categories are omitted. Each partition heading also shows a number-free
-**Priority** gauge when Slurm reports `PriorityJobFactor`, normalized against
-the largest displayed partition factor. Its fast hover contains only the exact
-factor and tier plus the cluster's scheduler, priority plugin, partition
-weight, and priority flags. The main README explains the scheduling semantics;
+**Cluster Status** shows each partition as a collapsible card, like a job
+card. Collapsed, it shows the partition name, a number-free priority gauge
+(when Slurm reports `PriorityJobFactor`, normalized against the largest
+displayed partition factor), and the best GPU's compact model label (such as
+`H100`), VRAM, and TFLOPS/s. Hover the model label for its full name, or the
+gauge for the exact factor and tier plus the cluster's scheduler, priority
+plugin, partition weight, and priority flags. Click the card to expand it:
+
+- **Available GPUs** is a green/red bar with its `idle/total` fraction; hover
+  the bar for a node-only state breakdown (zero-count categories are omitted).
+- **GPU** gives the full model name, and **CPU threads** the partition total.
+- A line chart plots the estimated wait for a one-hour job against the number
+  of GPUs requested (1–64). Both axes are logarithmic, so short and multi-day
+  waits stay readable together. Hover a column for the exact estimate, which
+  keeps counting down between refreshes, or Slurm's message. A shape without
+  an estimate shows a short label instead of a point: `DENY` (your account may
+  not use the partition), `min` (below its minimum GPU request), `limit` (over
+  a limit for your account), `n/a` (no node can run it now, e.g. all drained),
+  `ERR` (a real failure, such as Slurm not answering), `?` (not probed), `…`
+  (the first probes are still running), or `—` (more GPUs than the partition
+  has).
+
+Partition cards start collapsed, and their open/closed state survives
+refreshes like job cards. The main README explains the scheduling semantics;
 unavailable data is simply omitted.
 
 Two settings control background feedback:

@@ -1,28 +1,10 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { escapeHtml, formatDuration } = require('./format');
+const { waitCell, waitChart } = require('./wait-chart');
 
-const WAIT_GPU_COUNTS = [1, 2, 4, 8, 16, 32, 64];
 const FAILURE_STATES = new Set(['BOOT_FAIL', 'DEADLINE', 'FAILED', 'NODE_FAIL', 'OUT_OF_MEMORY', 'PREEMPTED', 'REVOKED', 'SPECIAL_EXIT', 'TIMEOUT']);
-
-/** Escape untrusted API text before inserting it into a webview document. */
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
-}
-
-/** Format a non-negative duration compactly. */
-function formatDuration(value) {
-  if (value == null || !Number.isFinite(Number(value))) return '?';
-  let seconds = Math.max(0, Math.floor(Number(value)));
-  if (seconds === 0) return 'now';
-  const days = Math.floor(seconds / 86400); seconds %= 86400;
-  const hours = Math.floor(seconds / 3600); seconds %= 3600;
-  const minutes = Math.floor(seconds / 60);
-  if (days) return `${days}d${hours ? ` ${hours}h` : ''}`;
-  if (hours) return `${hours}h${minutes ? ` ${minutes}m` : ''}`;
-  if (minutes) return `${minutes}m`;
-  return '<1m';
-}
 
 const DEFAULT_DATE_FORMAT = 'DD.MM.YYYY';
 /** The ``clusterWatcher.dateFormat`` pattern; the webview script receives its own copy. */
@@ -116,17 +98,20 @@ function relativeJobPriority(job, jobs = []) {
   };
 }
 
-/** Render a compact number-free low-to-high gauge with details on fast hover. */
-function priorityGauge(markers, title, label = 'Priority', prominent = false) {
+/**
+ * Render a compact, unlabeled, number-free low-to-high gauge. The exact
+ * details live in its fast hover and accessible label.
+ */
+function priorityGauge(markers, title, prominent = false) {
   if (!markers.length) return '';
   const ticks = markers.map((percent) => `<i class="priority-marker" style="left:${Math.max(0, Math.min(100, percent))}%"></i>`).join('');
-  return `<span class="priority-context${prominent ? ' priority-prominent' : ''}"><span class="muted priority-label">${escapeHtml(label)}</span><span class="priority-gauge" role="img" aria-label="${escapeHtml(title)}" data-fast-tooltip="${escapeHtml(title)}"><span class="priority-track">${ticks}</span></span></span>`;
+  return `<span class="priority-context${prominent ? ' priority-prominent' : ''}"><span class="priority-gauge" role="img" aria-label="${escapeHtml(title)}" data-fast-tooltip="${escapeHtml(title)}"><span class="priority-track">${ticks}</span></span></span>`;
 }
 
 /** Render a pending card's relative priority without adding visible numbers. */
 function jobPriorityGauge(job, jobs, prominent = false) {
   const relative = relativeJobPriority(job, jobs);
-  return relative ? priorityGauge([relative.percent], relative.title, 'Priority', prominent) : '';
+  return relative ? priorityGauge([relative.percent], relative.title, prominent) : '';
 }
 
 /** Render a partition's configured job-priority factor relative to its peers. */
@@ -301,13 +286,14 @@ function archiveIcon() {
 function document(title, body, freshness = {}) {
   const nonce = crypto.randomBytes(16).toString('base64');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:3px 0;background:var(--vscode-sideBar-background);min-width:0}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none;min-width:0}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card>summary[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:4px;top:calc(100% + 2px);max-width:calc(100% - 18px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open])>summary[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{display:flex;min-width:0}.card-summary-progress{display:block;min-width:0}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0;max-width:100%}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px;min-width:0}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta{min-width:0;white-space:normal;overflow-wrap:anywhere}.card-meta>.job-id{display:inline-block;font-size:.88em;margin-right:3px}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:3px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0;cursor:help}.available{background:var(--vscode-testing-iconPassed)}.fast-tooltip{position:fixed;z-index:100;display:none;max-width:220px;padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));outline:1px solid #fff;border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;pointer-events:none}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em;min-width:0}.times dt{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd{margin:0;min-width:0;white-space:normal;text-align:right}.times dd.dependency-value{overflow-wrap:anywhere}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px;min-width:0}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.78em}th,td{text-align:left;padding:3px 5px;border-bottom:1px solid var(--vscode-panel-border);white-space:nowrap}th{color:var(--vscode-descriptionForeground)}thead th:first-child,tbody td:first-child{padding-left:0}.partition-name-row th{padding:6px 0 1px;border-bottom:0;color:var(--vscode-foreground);font-weight:600}.gpu-model{cursor:help}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
-.card>summary[data-full-name]::after{outline:1px solid #fff}
+body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:3px 0;background:var(--vscode-sideBar-background);min-width:0}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none;min-width:0}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card-summary-title[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:0;top:calc(100% + 2px);max-width:calc(100% - 14px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open]) .card-summary-title[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{position:relative;display:flex;min-width:0}.card-summary-progress{display:flex;align-items:center;gap:5px;min-width:0}.card-summary-progress>:not(.job-id){flex:1 1 auto;min-width:0}.card-summary-progress>.job-id{flex:0 0 auto;font-size:.72em}.card:not([open]) .card-summary-progress>.job-id{display:none}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0;max-width:100%}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px;min-width:0}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta{min-width:0;white-space:normal;overflow-wrap:anywhere}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:3px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0;cursor:help}.available{background:var(--vscode-testing-iconPassed)}.fast-tooltip{position:fixed;z-index:100;display:none;max-width:220px;padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));outline:1px solid #fff;border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;pointer-events:none}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em;min-width:0}.times dt{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd{margin:0;min-width:0;white-space:normal;text-align:right}.times dd.dependency-value{overflow-wrap:anywhere}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px;min-width:0}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
+.card-summary-title[data-full-name]::after{outline:1px solid #fff}
 .card[open] .name{white-space:normal;overflow-wrap:anywhere}
 .progress-message{display:block;max-width:100%;font-size:.72em;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
 .dependency-icon{display:inline-block;margin-left:2px;font-family:system-ui,sans-serif;font-weight:700;cursor:help}.dependency-icon.waiting{font-weight:400}.dependency-icon.satisfied{color:var(--vscode-testing-iconPassed)}.dependency-icon.failed{color:var(--vscode-errorForeground)}
-.priority-context{display:flex;align-items:center;gap:5px;margin-top:6px;min-width:0}.priority-label{flex:0 0 auto;font-size:.72em}.priority-gauge{display:flex;align-items:center;flex:1 1 auto;min-width:54px;max-width:150px;cursor:help}.priority-track{position:relative;display:block;flex:1 1 auto;height:4px;border-radius:3px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed))}.priority-marker{position:absolute;top:-3px;width:2px;height:10px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.priority-prominent{margin-top:5px}.priority-prominent .priority-track{height:6px}.priority-prominent .priority-marker{top:-3px;height:12px}
-.partition-name-content{display:flex;align-items:center;gap:7px}.partition-name-content>.priority-context{margin:0;flex:1 1 auto;max-width:190px}
+.priority-context{display:flex;align-items:center;gap:5px;margin-top:6px;min-width:0}.priority-gauge{display:flex;align-items:center;flex:1 1 auto;min-width:54px;max-width:150px;cursor:help}.priority-track{position:relative;display:block;flex:1 1 auto;height:4px;border-radius:3px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed))}.priority-marker{position:absolute;top:-3px;width:2px;height:10px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.priority-prominent{margin-top:5px}.priority-prominent .priority-track{height:6px}.priority-prominent .priority-marker{top:-3px;height:12px}
+.partition-title{align-items:center;gap:7px}.partition-title>.name{flex:0 1 auto}.partition-title>.priority-context{margin:0;flex:1 1 auto;max-width:190px}.partition-specs{display:block;margin-top:3px;font-size:.72em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gpu-model{cursor:help}.times dd>.availability-cell{justify-content:flex-end}
+.wait-figure{margin:8px 0 0}.wait-chart{display:block;width:100%;max-width:340px;height:auto;overflow:hidden}.wait-caption{display:block;margin-top:2px;font-size:.72em;text-align:center}.wait-grid{stroke:var(--vscode-panel-border);stroke-width:.5}.wait-baseline{stroke:var(--vscode-descriptionForeground);stroke-width:.75}.wait-axis,.wait-status{fill:var(--vscode-descriptionForeground);font-family:var(--vscode-font-family);font-size:8.5px}.wait-status{font-size:7.5px}.wait-line{fill:none;stroke:var(--vscode-charts-blue,var(--vscode-progressBar-background));stroke-width:2;stroke-linejoin:round;stroke-linecap:round}.wait-point{fill:var(--vscode-charts-blue,var(--vscode-progressBar-background));stroke:var(--vscode-sideBar-background);stroke-width:1.5}.wait-hit{fill:transparent;cursor:help}.wait-hit:hover{fill:color-mix(in srgb,var(--vscode-foreground) 7%,transparent)}
 .job-id:hover,.job-id:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--vscode-focusBorder)}
 button.button{border:0;font:inherit;cursor:pointer}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
@@ -362,9 +348,9 @@ button.button{border:0;font:inherit;cursor:pointer}
       label.textContent = view.label;
       label.title = view.label;
     });
-    document.querySelectorAll('[data-wait]').forEach((cell) => {
-      const [seconds, asOf] = JSON.parse(cell.dataset.wait);
-      cell.textContent = formatDuration(Math.max(0, seconds - (now - asOf) / 1000));
+    document.querySelectorAll('[data-wait]').forEach((target) => {
+      const [seconds, asOf, label] = JSON.parse(target.dataset.wait);
+      target.dataset.fastTooltip = label + ': ' + formatDuration(Math.max(0, seconds - (now - asOf) / 1000));
     });
   };
   setInterval(tick, 5000);
@@ -393,7 +379,7 @@ button.button{border:0;font:inherit;cursor:pointer}
       setTimeout(() => details.classList.remove('layout-flash'), 950);
     });
   });
-  // Copy a job ID from the expanded detail row.
+  // Copy a job ID from the expanded card's summary without toggling the card.
   const copy = (event, badge) => {
     event.preventDefault();
     event.stopPropagation();
@@ -569,6 +555,8 @@ function jobRef(job) {
 /**
  * Render one collapsible job card with archive, log, and (for active jobs)
  * cancellation actions. ``cancelling`` holds refs whose cancellation was sent.
+ * Hovering the collapsed title reveals the full cluster/ID/name; the copyable
+ * job-ID badge sits right of the progress bar and shows only when expanded.
  */
 function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date.now(), jobs = [], priorityJobs = jobs) {
   const identifier = String(job.job_id || job.id || 'unknown');
@@ -601,7 +589,8 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
     && pendingExplanation(job) === 'no estimate available'
     ? jobPriorityGauge(job, priorityJobs, true) : '';
   const expandedPriority = noEstimatePriority ? '' : priority;
-  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary data-full-name="${escapeHtml(hoverText)}"><span class="card-summary-title"><span class="name">${escapeHtml(name)}</span></span><span class="card-summary-progress">${jobProgress(job, asOf, Date.now(), noEstimatePriority)}</span></summary><div class="card-body"><div class="muted card-meta" title="${escapeHtml(metadata)}"><span class="badge job-id${ending ? ' ending' : ''}" role="button" tabindex="0" data-copy="${escapeHtml(identifier)}" title="${escapeHtml(identifier)}${ending ? ' · ending' : ''} — click to copy">${escapeHtml(identifier)}</span> ${escapeHtml(metadata)}</div>${expandedPriority}<dl class="times">${lifecycleRows(job, asOf)}${dependencyLinks(job, jobs)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
+  const idBadge = `<span class="badge job-id${ending ? ' ending' : ''}" role="button" tabindex="0" data-copy="${escapeHtml(identifier)}" title="${escapeHtml(identifier)}${ending ? ' · ending' : ''} — click to copy">${escapeHtml(identifier)}</span>`;
+  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary><span class="card-summary-title" data-full-name="${escapeHtml(hoverText)}"><span class="name">${escapeHtml(name)}</span></span><span class="card-summary-progress">${jobProgress(job, asOf, Date.now(), noEstimatePriority)}${idBadge}</span></summary><div class="card-body"><div class="muted card-meta" title="${escapeHtml(metadata)}">${escapeHtml(metadata)}</div>${expandedPriority}<dl class="times">${lifecycleRows(job, asOf)}${dependencyLinks(job, jobs)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
 }
 
 /**
@@ -661,50 +650,6 @@ function compactGpuName(value) {
 }
 
 /**
- * Short labels for why a wait probe failed (the service's ``error_kind``).
- * Policy refusals get their own words, so ERR only marks real failures.
- */
-const WAIT_ERROR_LABELS = { denied: 'DENY', minimum: 'min', limit: 'limit', unavailable: 'n/a', timeout: 'ERR', error: 'ERR', budget: '?' };
-
-/** Classify a probe error from a service too old to send ``error_kind``. */
-function waitErrorKind(estimate) {
-  if (estimate.error_kind) return estimate.error_kind;
-  return /permission denied|invalid account/i.test(estimate.error) ? 'denied' : 'error';
-}
-
-/**
- * Format a terminal-compatible wait cell: a duration, a failure label,
- * ``…`` while the cluster's first probes are still running (``pending``),
- * ``?`` when the shape was not probed, or ``—`` when it cannot fit.
- */
-function waitCell(partition, count, pending = false) {
-  const total = Number(partition.gpus?.total) || 0;
-  if (count > total) return '—';
-  const estimate = (partition.wait_estimates || []).find((row) => Number(row.gpus) === count);
-  if (!estimate) return pending ? '…' : '?';
-  if (estimate.error) return WAIT_ERROR_LABELS[waitErrorKind(estimate)] || 'ERR';
-  return formatDuration(estimate.estimated_wait_seconds);
-}
-
-/** Return the hover text of a wait cell, including Slurm's message on failure. */
-function waitTitle(partition, count, pending) {
-  const estimate = (partition.wait_estimates || []).find((row) => Number(row.gpus) === count);
-  const label = `Wait for ${count} GPU${count === 1 ? '' : 's'}`;
-  if (estimate?.error) return `${label}: ${estimate.error}`;
-  if (!estimate && pending && count <= (Number(partition.gpus?.total) || 0)) return `${label}: still checking`;
-  return label;
-}
-
-/** Return a ``data-wait`` attribute so the webview can count a wait estimate down. */
-function waitData(partition, count, asOf) {
-  if (count > (Number(partition.gpus?.total) || 0)) return '';
-  const estimate = (partition.wait_estimates || []).find((row) => Number(row.gpus) === count);
-  const seconds = Number(estimate?.estimated_wait_seconds);
-  if (!estimate || estimate.error || estimate.estimated_wait_seconds == null || !Number.isFinite(seconds)) return '';
-  return ` data-wait="${escapeHtml(JSON.stringify([seconds, asOf]))}"`;
-}
-
-/**
  * Offer to re-open a cluster's closed SSH session. The login also covers
  * other closed clusters that share its password (credential group).
  */
@@ -750,8 +695,46 @@ function availabilityTitle(partition) {
   return nodes ? `Nodes: ${nodes}` : 'Node state details unavailable';
 }
 
+/** Render the compact GPU name, VRAM, and tensor throughput shown on a collapsed partition card. */
+function partitionSpecs(partition, profile) {
+  if (!profile) return Number(partition.gpus?.total) > 0 ? 'GPU details unavailable' : 'No GPUs';
+  const fullGpuName = profile.name || '—';
+  const vram = profile.vram_gb == null ? '—' : `${escapeHtml(profile.vram_gb)}G`;
+  const tflops = profile.fp16_bf16_tensor_tflops == null ? '—' : escapeHtml(profile.fp16_bf16_tensor_tflops);
+  return `<span class="gpu-model" data-fast-tooltip="${escapeHtml(fullGpuName)}" aria-label="${escapeHtml(fullGpuName)}">${escapeHtml(compactGpuName(fullGpuName))}</span> · ${vram} · ${tflops} TFLOPS/s`;
+}
+
+/** Render the green/red schedulable-GPU bar with its ``idle/total`` fraction. */
+function availabilityBar(partition) {
+  const total = Number(partition.gpus?.total) || 0;
+  const idle = Number(partition.gpus?.schedulable_idle) || 0;
+  const availablePercent = total ? Math.max(0, Math.min(100, idle / total * 100)) : 0;
+  const unavailablePercent = total ? 100 - availablePercent : 100;
+  const availability = escapeHtml(availabilityTitle(partition));
+  return `<div class="availability-cell"><div class="availability" data-availability="${availability}" data-fast-tooltip="${availability}" aria-label="${availability}"><span class="available" style="width:${availablePercent}%"></span><span class="unavailable" style="width:${unavailablePercent}%"></span></div><span>${idle}/${total}</span></div>`;
+}
+
 /**
- * Render the stable availability snapshot in cluster-separated tables.
+ * Render one collapsible partition card. The collapsed summary shows the
+ * name, priority gauge, and best GPU's model, VRAM, and TFLOPS/s; expanding
+ * it adds availability, CPU threads, and the wait-time chart.
+ */
+function partitionCard(cluster, partition, partitions, disclosures, pending, asOf) {
+  const profile = bestGpu(partition);
+  const rawKey = `partition:${cluster.name}:${partition.name}`;
+  const name = `${partition.name}${partition.aggregate ? ' (aggregate)' : ''}`;
+  const priority = partitionPriorityGauge(partition, partitions, cluster.scheduling);
+  const facts = [
+    `<dt>Available GPUs</dt><dd>${availabilityBar(partition)}</dd>`,
+    profile?.name ? `<dt>GPU</dt><dd>${escapeHtml(profile.name)}</dd>` : '',
+    `<dt>CPU threads</dt><dd>${escapeHtml(partition.cpus?.total ?? 0)}</dd>`,
+  ].join('');
+  return `<details class="card partition-card${partition.aggregate ? ' aggregate' : ''}" data-disclosure-key="${escapeHtml(rawKey)}"${openAttribute(disclosures, rawKey, false)}><summary><span class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${priority}</span><span class="muted partition-specs">${partitionSpecs(partition, profile)}</span></summary><div class="card-body"><dl class="times">${facts}</dl>${waitChart(partition, pending, asOf)}</div></details>`;
+}
+
+/**
+ * Render the stable availability snapshot as one group per cluster holding
+ * collapsible partition cards.
  * `disclosures` maps disclosure keys to remembered open/closed choices.
  */
 function renderStatus(payload, disclosures = {}, freshness = {}) {
@@ -769,21 +752,8 @@ function renderStatus(payload, disclosures = {}, freshness = {}) {
     // No probe round has finished for this cluster yet (they start with the service).
     const pending = !cluster.wait_estimates_updated_at;
     const partitions = [...(cluster.partitions || [])].sort((left, right) => (Number(left.rank) || 9999) - (Number(right.rank) || 9999) || String(left.name).localeCompare(String(right.name)));
-    const statusColumnCount = 5 + WAIT_GPU_COUNTS.length;
-    const rows = partitions.map((partition) => {
-      const profile = bestGpu(partition);
-      const total = Number(partition.gpus?.total) || 0;
-      const idle = Number(partition.gpus?.schedulable_idle) || 0;
-      const availablePercent = total ? Math.max(0, Math.min(100, idle / total * 100)) : 0;
-      const unavailablePercent = total ? 100 - availablePercent : 100;
-      const availability = escapeHtml(availabilityTitle(partition));
-      const waits = WAIT_GPU_COUNTS.map((count) => `<td title="${escapeHtml(waitTitle(partition, count, pending))}"${waitData(partition, count, asOf)}>${escapeHtml(waitCell(partition, count, pending))}</td>`).join('');
-      const fullGpuName = profile?.name || '—';
-      const aggregate = partition.aggregate ? ' aggregate' : '';
-      const priority = partitionPriorityGauge(partition, partitions, cluster.scheduling);
-      return `<tbody class="partition-rows${aggregate}"><tr class="partition-name-row"><th colspan="${statusColumnCount}" scope="rowgroup"><span class="partition-name-content"><span>${escapeHtml(partition.name)}${partition.aggregate ? ' (aggregate)' : ''}</span>${priority}</span></th></tr><tr><td><div class="availability-cell"><div class="availability" data-availability="${availability}" data-fast-tooltip="${availability}" aria-label="${availability}"><span class="available" style="width:${availablePercent}%"></span><span class="unavailable" style="width:${unavailablePercent}%"></span></div><span>${idle}/${total}</span></div></td><td class="gpu-model" data-fast-tooltip="${escapeHtml(fullGpuName)}" aria-label="${escapeHtml(fullGpuName)}">${escapeHtml(compactGpuName(fullGpuName))}</td><td>${profile?.vram_gb == null ? '—' : `${escapeHtml(profile.vram_gb)}G`}</td><td>${profile?.fp16_bf16_tensor_tflops == null ? '—' : escapeHtml(profile.fp16_bf16_tensor_tflops)}</td>${waits}<td>${escapeHtml(partition.cpus?.total ?? 0)}</td></tr></tbody>`;
-    }).join('');
-    clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(cluster.resource_error)}</p>` : ''}<div class="table-wrap"><table><thead><tr><th>Available</th><th>GPU</th><th>VRAM</th><th>TFLOPS/s</th>${WAIT_GPU_COUNTS.map((count) => `<th>${count}</th>`).join('')}<th>CPU threads</th></tr></thead>${rows}</table></div></details>`);
+    const cards = partitions.map((partition) => partitionCard(cluster, partition, partitions, disclosures, pending, asOf)).join('');
+    clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(cluster.resource_error)}</p>` : ''}${cards}</details>`);
   }
   return document('Cluster Status', clusters.join('') || '<p>No clusters returned.</p>', freshness);
 }

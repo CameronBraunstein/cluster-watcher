@@ -1,24 +1,1142 @@
-# cluster-watcher
+# Cluster Watcher
 
-A dependency-free Python command-line prototype for checking several Slurm
-clusters through SSH.  It reads a personal `clusters.toml` file, so each
-machine can have its own login username.
+See your Slurm jobs and the GPU capacity of several clusters in one place: in
+the VS Code sidebar, a browser tab, or the terminal. Cluster Watcher reuses one
+authenticated SSH session per cluster, so you type your password and one-time
+code once instead of on every query.
 
-The code is split by responsibility: `clusterwatcher/config.py` validates
-configuration, `models.py` defines shared data, `ssh.py` owns the SSH
-transport, `credentials.py` owns ephemeral shared MFA handling, `slurm.py`
-queries/parses Slurm, `jobs.py` owns cached personal-job queries and safe log
-tails, `commands.py` owns remote-command policy and session inventory,
-`snapshot.py` builds the public API contract, `job_scripts.py` locates job
-batch scripts, `setup_wizard.py` owns the
-interactive `setup` and `config` commands,
-`dashboard.py` hosts the webpage and JSON service, and `cli.py` only handles
-command-line orchestration. `terminal_jobs.py` owns the terminal job-board
-layout and refresh loop. `cluster_watcher.py` remains a minimal executable
-entry point. The optional `vscode/` extension is a thin client for the
-loopback APIs and contains no SSH or Slurm implementation.
+<p align="center">
+  <img src="docs/images/vscode-my-jobs.png" alt="My Jobs view: running, pending, completed, and failed job cards with progress bars; one expanded card shows its job ID, resources, lifecycle times, and actions" width="300">
+  &nbsp;
+  <img src="docs/images/vscode-cluster-status.png" alt="Cluster Status view: partition cards with priority gauges and GPU specs; the expanded gpu-large card shows availability, CPU threads, and a log-log chart of wait time against requested GPUs" width="300">
+</p>
+<p align="center"><sub>The VS Code sidebar, shown with toy clusters and jobs.</sub></p>
 
-## Capability map
+- **All your jobs in one list.** Running, pending, and recently finished jobs
+  from every cluster, with live progress, wait estimates, dependency links,
+  logs, batch scripts, and a confirm-first **End** button.
+- **Where to run next.** For each partition: free GPUs, GPU model, VRAM,
+  TFLOPS/s, partition priority, and Slurm's estimated wait for 1 to 64 GPUs.
+- **Log in once.** Password and OTP are requested once per session. The
+  dashboard, terminal commands, VS Code, and your own scripts all share the
+  same OpenSSH connection.
+- **Scriptable.** Versioned JSON APIs on `127.0.0.1` for scripts and coding
+  agents.
+- **Safe by default.** No dependencies and read-only out of the box. It never
+  submits jobs; cancelling jobs and running remote commands are separate
+  opt-ins.
+
+## Quick start
+
+```bash
+# 1. Install (Linux/macOS; see Install for Windows and other options)
+curl -fsSL https://raw.githubusercontent.com/CameronBraunstein/cluster-watcher/master/install.sh | bash -s -- --add-to-path
+
+# 2. Describe your clusters once
+cluster-watcher setup
+
+# 3. Start the service: opens the web dashboard and feeds VS Code
+cluster-watcher serve --jobs-api
+```
+
+In VS Code, install the extension and run **Cluster Watcher: Start Service &
+SSH Sessions** instead of step 3; see [VS Code sidebar](#vs-code-sidebar).
+
+## Contents
+
+- [Install](#install)
+- [Configure](#configure)
+- [Use it](#use-it):
+  [VS Code sidebar](#vs-code-sidebar) ·
+  [Web dashboard](#web-dashboard) ·
+  [Terminal boards](#terminal-boards) ·
+  [Shared SSH sessions](#shared-ssh-sessions)
+- [Reading the numbers](#reading-the-numbers):
+  [availability](#gpu-availability) ·
+  [job progress](#job-progress-and-dependencies) ·
+  [priority](#priority-gauges) ·
+  [wait estimates](#estimated-queue-waits) ·
+  [GPU catalog](#gpu-catalog-and-compute-ranking)
+- [APIs for scripts and agents](#apis-for-scripts-and-agents)
+- [Under the hood](#under-the-hood)
+- [Development](#development)
+- [License](#license)
+
+---
+
+## Install
+
+### Prebuilt executable (recommended)
+
+**Linux and macOS** need only `bash`, `curl` (or `wget`), and OpenSSH; Python
+is not required. The installer downloads the executable for your OS and CPU
+from the latest
+[GitHub Release](https://github.com/CameronBraunstein/cluster-watcher/releases),
+verifies its SHA-256 checksum, and installs `cluster-watcher` in
+`~/.local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CameronBraunstein/cluster-watcher/master/install.sh | bash -s -- --add-to-path
+```
+
+Pin a release with `--version v0.1.0`. From a clone, `./install.sh` does the
+same, and `./install.sh --from-source` builds the executable locally with
+PyInstaller instead (Python 3.11+).
+
+**Windows** 10 build 1809 or newer (ARM64 requires Windows 11):
+
+```powershell
+$installer = Join-Path $env:TEMP "cluster-watcher-install.ps1"
+Invoke-WebRequest https://raw.githubusercontent.com/CameronBraunstein/cluster-watcher/master/install.ps1 -OutFile $installer
+& $installer -AddToPath
+cluster-watcher setup
+```
+
+> [!NOTE]
+> Native Windows supports clusters that use SSH keys or `ssh-agent`. Windows'
+> OpenSSH lacks the `ControlMaster` connection sharing needed to keep
+> password/OTP sessions open, so use Cluster Watcher (and the VS Code
+> extension) inside WSL for those clusters. The Windows OpenSSH Client
+> optional feature must be installed.
+
+**Supported platforms.** Release binaries cover Linux glibc 2.17+ and macOS
+12+ on x86-64 and ARM64, Windows 10 1809+ on x86-64, and Windows 11+ on ARM64.
+Alpine/musl Linux is not prebuilt; install from source there. Exact targets
+are listed in [`release-platforms.json`](release-platforms.json) and attached
+to each release as `PLATFORMS.json`.
+
+### Other ways to install
+
+| Method | Command |
+| --- | --- |
+| Python 3.11+ (no dependencies) | `pipx install git+https://github.com/CameronBraunstein/cluster-watcher` |
+| Editable checkout for development | `python3 -m pip install --editable .` |
+| VS Code extension | Install the release's `.vsix` with **Extensions: Install from VSIX…** (or from the Marketplace). It can download its own matching backend; see [VS Code sidebar](#vs-code-sidebar). |
+
+If the shell cannot find `cluster-watcher` after a user-level Python install,
+add the user scripts directory to `PATH` or activate the virtual environment.
+From a checkout, `python3 cluster_watcher.py …` and `python3 -m clusterwatcher …`
+also work. Python module names use underscores, while every command, package,
+and standalone artifact is named `cluster-watcher`.
+
+<details>
+<summary><b>What the installers do</b> (files, PATH, managed profiles, aliases)</summary>
+
+By default `install.sh` downloads `cluster-watcher-<os>-<architecture>` and
+`SHA256SUMS` from the GitHub Release (`--version TAG`, default latest) and
+refuses to install on a missing entry or checksum mismatch. It also works when
+piped into `bash`, since it then needs no checkout. `CLUSTER_WATCHER_REPO`
+selects another `owner/repo`, and `CLUSTER_WATCHER_RELEASE_URL` another
+download base URL (including `file://` for offline mirrors). With
+`--from-source` it checks for Python 3.11+ and the project files and builds in
+a disposable virtual environment, so it does not install packages into your
+normal Python environment.
+
+Either way it checks for OpenSSH and writable, safe destinations, refuses to
+run as root, and atomically installs a platform-qualified executable plus one
+stable command shim in `~/.local/bin`:
+
+```text
+cluster-watcher-linux-x86_64
+cluster-watcher
+```
+
+The `cluster-watcher` shim passes the native per-user `clusters.toml`
+automatically and selects the correct platform executable, so the command
+works from any directory. On first installation, a personal `clusters.toml`
+beside `install.sh` is copied there with user-only permissions; without one,
+the installer asks you to run `cluster-watcher setup`. Later runs preserve
+that copy. The installer refuses symbolic-link destinations and unrelated
+existing commands. `--force` moves conflicting command files to a timestamped
+backup before replacing them; it never overwrites the installed
+configuration. Reinstalling over the earlier underscore-named prototype
+migrates its managed files to a recovery backup rather than deleting them.
+
+`--add-to-path` authorizes the installer to add `~/.local/bin` to the
+appropriate Bash, Zsh, or POSIX shell profile. It verifies the persistent
+profile even if `PATH` already contains that directory, backs up an existing
+profile, and appends a marked entry so newly opened terminals inherit the
+command. Omit the option to edit your shell setup yourself. Custom
+destinations are available through `--bin-dir`, `--config-dir`, and
+`--state-dir`; run `./install.sh --help` for details.
+
+Some managed systems prohibit direct edits to `.bashrc` or `.zshrc` and source
+a user-owned private file instead. When the standard profile references
+`.bashrc_private`, `.zshrc_private`, or `.profile_private`, the installer
+writes there, using a recognizable managed block:
+
+```bash
+# >>> cluster-watcher initialize >>>
+# !! Contents within this block are managed by 'cluster-watcher install.sh' !!
+export PATH='/home/example/.local/bin':"$PATH"
+# <<< cluster-watcher initialize <<<
+```
+
+The uninstaller removes this exact block (and the older two-line
+`# Added by Cluster Watcher install.sh` format), but not a block whose
+contents were changed manually.
+
+`install.ps1` is the Windows equivalent. It verifies the same `SHA256SUMS`,
+installs the architecture-qualified executable and a stable
+`cluster-watcher.exe` under `%LOCALAPPDATA%\Programs\ClusterWatcher`,
+preserves configuration, and changes only the current user's PATH when
+`-AddToPath` is given. `-Version`, `-FromSource`, `-Force`, `-BinDir`,
+`-ConfigDir`, and `-StateDir` mirror the Unix options. A private sidecar
+beside the executable keeps a custom `-ConfigDir` effective from any working
+directory.
+
+Without installing, you can instead add an interactive-shell alias to a
+user-owned profile, using absolute paths to a checkout:
+
+```bash
+alias cluster-watcher='/absolute/path/to/cluster-watcher/dist/cluster-watcher-linux-x86_64 --config /absolute/path/to/cluster-watcher/clusters.toml'
+```
+
+Unlike the installer's command shim, an alias is generally unavailable to
+non-interactive scripts.
+
+</details>
+
+### Uninstall
+
+```bash
+./uninstall.sh                 # keeps your configuration
+./uninstall.sh --purge-config  # also backs up and removes clusters.toml and gpu_profiles.toml
+```
+
+On Windows, run `uninstall.ps1` (add `-PurgeConfig` or `-KeepPath` as
+needed). It is also attached to every release:
+
+```powershell
+$uninstaller = Join-Path $env:TEMP "cluster-watcher-uninstall.ps1"
+Invoke-WebRequest https://raw.githubusercontent.com/CameronBraunstein/cluster-watcher/master/uninstall.ps1 -OutFile $uninstaller
+& $uninstaller
+```
+
+<details>
+<summary><b>Uninstaller details</b></summary>
+
+The uninstaller reads the installer's private manifest and removes only the
+managed shim and platform executable. Removal is recoverable: files move to a
+timestamped directory under `~/.local/state/cluster-watcher/` (or the Windows
+state directory). If `--add-to-path` added a marked PATH block, it removes
+that exact block and backs up the profile; pass `--keep-path` to retain it.
+When custom directories were used, pass the same `--bin-dir`, `--config-dir`,
+and `--state-dir` values. It refuses unknown manifests, symbolic links, root
+execution, and paths outside the recorded installation, stopping instead of
+guessing what to delete.
+
+</details>
+
+---
+
+## Configure
+
+Run the guided setup once:
+
+```bash
+cluster-watcher setup     # alias: set-up
+```
+
+It asks for each machine's name, host, username, port, optional identity
+file, whether it prompts for a password/OTP (and its shared credential group),
+and log directories. It validates the result and writes the config file with
+mode `0600`; an existing file is replaced only after confirmation and kept as
+`clusters.toml.bak`.
+
+To change it later, run `cluster-watcher config`. It opens the file in
+`$VISUAL`, `$EDITOR`, or a native fallback (`nano`/`vim`/`vi`, or Notepad/VS
+Code on Windows), validates it when the editor exits, and offers to reopen an
+invalid file. You can also copy
+[`clusters.example.toml`](clusters.example.toml) and edit it by hand.
+
+**Where the file lives.** Commands read `clusters.toml` from the current
+directory unless `--config PATH` is given. Installed and bundled executables
+default to the per-user configuration directory: XDG on Linux,
+`~/Library/Application Support/Cluster Watcher` on macOS, and
+`%APPDATA%\ClusterWatcher` on Windows. `clusters.toml` and its `.bak` are
+git-ignored, so personal hosts and usernames are never committed.
+
+A minimal machine needs a unique `name`, its SSH `host`, and your `username`
+(`cluster-watcher list` shows what is configured):
+
+```toml
+[[machine]]
+name = "cluster-a"
+host = "login.cluster-a.example.org"
+username = "alice"
+```
+
+> [!IMPORTANT]
+> Never put passwords in this file. Use SSH keys, an SSH agent, your normal
+> `~/.ssh/config`, or the password/OTP prompts described below.
+
+### Optional settings
+
+| Setting | Purpose |
+| --- | --- |
+| `port`, `identity_file` | Standard SSH options. |
+| `hidden = true` | Keep the entry but ignore the machine everywhere: no login, polling, listing, dashboard, or API. At least one machine must stay visible. |
+| `default_partition_max_time_minutes`, `[machine.partition_max_time_minutes]` | Cap wait-probe runtimes (see [Estimated queue waits](#estimated-queue-waits)). |
+| `job_log_roots` | Absolute remote directories that explicit log `path` requests must stay inside. |
+| `interactive_auth`, `credential_group`, `control_persist` | Password + OTP logins and session lifetime (below). |
+| `[dashboard] wait_threshold_minutes` | Web dashboard pending-time buckets (see [Job progress](#job-progress-and-dependencies)). |
+
+Wait probes use the smaller of their requested runtime and the partition
+maximum. This example defaults to 24 hours and caps a `gpudev` development
+partition at 15 minutes:
+
+```toml
+[[machine]]
+name = "cluster-b"
+host = "login.cluster-b.example.org"
+username = "alice"
+default_partition_max_time_minutes = 1440
+
+[machine.partition_max_time_minutes]
+gpudev = 15
+```
+
+`job_log_roots` only limits caller-supplied `path` values for the personal log
+API; logs found through Slurm do not need it. Paths are canonicalized on the
+cluster before checking, so `..` and symlinks cannot escape a root:
+
+```toml
+job_log_roots = ["/home/alice/jobs", "/scratch/alice"]
+```
+
+### Password + OTP clusters
+
+For a host that requires a password plus a one-time code, enable interactive
+authentication on that machine:
+
+```toml
+[[machine]]
+name = "cluster-b"
+host = "login.cluster-b.example.org"
+username = "alice"
+interactive_auth = true
+control_persist = "8h"
+credential_group = "site-b"
+```
+
+Machines in the same `credential_group` share a password, so `serve` asks for
+it **once**, then asks for a fresh OTP for each machine right before opening
+its connection. Group members must use the same `username` and set
+`interactive_auth = true`. A machine without `credential_group` keeps the
+normal OpenSSH terminal prompts. Connect to each host once by hand first (or
+provision its host key), because host-key confirmation is intentionally not
+automated.
+
+`control_persist` (for example `30m`, `8h`, or `1h30m`) sets how long an idle
+shared connection stays open. Every machine, including key-based ones, uses
+OpenSSH multiplexing; key-based machines open their shared connection on the
+first query.
+
+<details>
+<summary><b>How credentials are handled</b></summary>
+
+The password lives only in process memory while its group starts. Each OTP is
+held only while its machine authenticates and is cleared before the next one
+is requested. Neither is written to configuration, temporary files,
+command-line arguments, or environment variables. A small askpass helper
+fetches the value through a user-private Unix socket, and unrecognized prompts
+receive nothing. The in-memory broker shuts down and drops its references
+after startup.
+
+If a host rejects authentication (for example, because the OTP expired before
+OpenSSH finished), Cluster Watcher asks for a fresh OTP and retries once.
+Already-open connections stay up. A second rejection is reported and startup
+continues with the next cluster.
+
+Control sockets live in a user-private runtime directory (`$XDG_RUNTIME_DIR`,
+or `/tmp`), not your home directory, which also works on home filesystems that
+do not support OpenSSH's atomic socket creation. For long-lived unattended
+use, prefer an institution-approved SSH key or certificate when available.
+
+</details>
+
+---
+
+## Use it
+
+Most views are fed by one background service:
+
+```bash
+cluster-watcher serve --jobs-api
+```
+
+| Flag | Effect |
+| --- | --- |
+| *(none)* | Capacity snapshot, web dashboard at `http://127.0.0.1:8080/`, and the snapshot API. |
+| `--jobs-api` | Adds your jobs (last 24 hours), log tails, batch scripts, cancellation, and the jobs API. Required by the VS Code **My Jobs** view. |
+| `--command-api` | Adds the SSH session and remote-command API. Allows arbitrary remote code execution; enable deliberately. |
+| `--port N`, `--no-browser` | Change the port or skip opening a browser (useful on a headless login node). |
+| `--refresh SECONDS` | Refresh interval for your jobs and the page (default 15 s). Avoid lowering it much: `sinfo` loads the Slurm controller. |
+| `--jobs` | Add a job-state summary to the dashboard without the jobs API. |
+
+### VS Code sidebar
+
+The extension adds a Cluster Watcher icon to the Activity Bar with two views.
+It is a thin client for the service above and has no SSH or Slurm code of its
+own.
+
+**Getting started.** If no service is running, both views offer **Start
+service & SSH sessions**, **Run setup wizard**, **Edit configuration**, and
+**Settings**. The service starts in an integrated terminal with
+`serve --jobs-api`, so password and OTP prompts work normally. If a service is
+already listening at `clusterWatcher.backendUrl` (default
+`http://127.0.0.1:8080/`), the extension attaches to it instead of starting
+another. On first use without a `cluster-watcher` command, it offers **Install
+and Add to PATH**, **Use Only in VS Code**, or **Choose Existing Executable**.
+
+#### My Jobs
+
+Jobs are grouped into **Running**, **Pending**, **Failed Dependency**,
+**Completed**, **Failed (Early)**, **Failed (Timeout)**, **Cancelled**, and a
+collapsed **Archive**. Each job is a card:
+
+- **Collapsed:** the job name and a progress bar with run/allotted time or
+  `<duration> estimated wait`. Long names end in an ellipsis; hover the
+  **title** for `<cluster> <job ID> <full name>`.
+
+  <img src="docs/images/vscode-title-hover.png" alt="Hovering a collapsed card's title shows the cluster, job ID, and full job name" width="300">
+
+- **Expanded:** the job-ID badge appears to the right of the progress bar
+  (click it to copy), followed by cluster, partition, and resources;
+  submit/launch/limit/end times; any dependencies; and actions: archive,
+  **.err**, **.out**, **script**, and **End** (with confirmation) for running
+  and pending jobs.
+
+Click a dependency's job ID to jump to that card. Logs open as read-only
+documents holding the newest 2,000 lines; **Load 2,000 Older Lines** in the
+editor title bar pages backward. **script** shows Slurm's exact copy while the
+job is queued or running; after it ends, it shows the current file named on
+the `sbatch` command line, with a warning that it may have changed. Archives
+are stored in VS Code's global state, and open/closed groups and cards survive
+refreshes.
+
+#### Cluster Status
+
+Each cluster is a collapsible group of partition cards, ordered by compute
+rank:
+
+- **Collapsed:** partition name, [priority gauge](#priority-gauges), and the
+  best GPU's model, VRAM, and TFLOPS/s. Hover the model for its full name.
+- **Expanded:** the [GPU availability](#gpu-availability) bar, full GPU name,
+  CPU threads, and a line chart of **estimated wait vs. GPUs requested** with
+  logarithmic axes on both sides. Hover a column for its exact estimate (it
+  keeps counting down between refreshes) or Slurm's message. Shapes without an
+  estimate show a [short label](#why-a-wait-has-no-estimate) instead of a
+  point.
+
+If a cluster's SSH session closes, its group shows **Log in again**, which
+runs `cluster-watcher login <cluster>` in a terminal.
+
+#### Refreshing, notifications, and settings
+
+Each view heading has its own **Refresh** button, and **Cluster Watcher:
+Refresh Sidebar** refreshes both. A `Last update` line under each heading
+shows when data last changed. Unchanged refreshes cost almost nothing (the
+service answers `304 Not Modified`), and progress bars and waits keep counting
+locally in the meantime.
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `clusterWatcher.backendUrl` | `http://127.0.0.1:8080/` | Service to attach to. Never point it at an untrusted or public service. |
+| `clusterWatcher.autoStart` | `false` | Start the service when VS Code opens (off so MFA prompts never appear unexpectedly). |
+| `clusterWatcher.configPath` | — | Use a configuration file other than the default. |
+| `clusterWatcher.notifications` | `all` | Notify when a job completes, fails, or is cancelled (`all`, `failures`, `off`). |
+| `clusterWatcher.statusBar` | `true` | Show `N running · M pending` (or **offline**) in the status bar. |
+| `clusterWatcher.dateFormat` | `DD.MM.YYYY` | Date tokens `YYYY`, `YY`, `MM`, `DD`; times are 24-hour local `HH:mm`. |
+| `clusterWatcher.executable` | — | Legacy fallback; choose executables with **Manage Backend Installation**. |
+
+See [`vscode/README.md`](vscode/README.md) for every view detail.
+
+<details>
+<summary><b>Backend installation, Remote SSH, and WSL</b></summary>
+
+Managed installation downloads the native backend for the extension host's
+OS and architecture. The download is pinned to the extension's exact version,
+size-bounded, and checked against a SHA-256 digest embedded in the VSIX
+before it is smoke-tested and atomically installed. Unsupported architectures,
+macOS/Windows versions, and Linux glibc versions are rejected before
+download. Every managed or selected executable is checked with `--help`
+before use; a broken choice shows a **Manage Backend** button.
+
+**Cluster Watcher: Manage Backend Installation** switches between the managed
+and an existing executable, adds or removes the managed directory from the
+user PATH, repairs/updates it, or uninstalls it. **Use Only in VS Code** adds
+the managed directory to new integrated terminals without changing PATH;
+**Install and Add to PATH** also makes `cluster-watcher` available to system
+terminals. Only the exact Unix profile block or Windows user-PATH entry
+recorded in the ownership manifest is removed later. Uninstalling keeps your
+configuration, and uninstalling the extension does not silently remove a
+backend you exposed to normal terminals.
+
+Managed backends live under `~/.local/share/cluster-watcher/vscode-backend`
+(Linux), `~/Library/Application Support/Cluster Watcher/vscode-backend`
+(macOS), or `%LOCALAPPDATA%\Programs\ClusterWatcher\vscode-backend`
+(Windows). This is per extension host: local, WSL, Remote SSH, and container
+hosts each choose separately. Workspace Trust is required because the
+extension downloads and runs a native program and opens SSH sessions.
+
+The extension is a workspace extension: under Remote SSH it runs on the remote
+development host, together with the executable and its shared SSH sessions.
+Sessions on your laptop are separate. The executable it launches uses the same
+user-private OpenSSH `ControlPath` (derived from local user, remote user,
+host, and port) as a separately started one, so each recognizes sessions the
+other created, as long as both run on the same machine, as the same user, with
+the same `clusters.toml`.
+
+The Activity Bar icon (three server boxes under a magnifying glass) was made
+for this project and is dedicated under CC0-1.0; see
+[`vscode/media/LICENSE.txt`](vscode/media/LICENSE.txt).
+
+</details>
+
+### Web dashboard
+
+`cluster-watcher serve` opens `http://127.0.0.1:8080/`. It shows:
+
+- **My jobs** (with `--jobs-api`): collapsible **Running**, **Pending**,
+  **Completed**, **Failed (Early)**, **Failed (Timeout)**, and **Cancelled**
+  groups covering the last 24 hours. Each card shows name, ID, progress, and a
+  completion/start estimate; hover the title for the full name. Expand a card
+  for location, state, resources, lifecycle times, and **Archive**, **Open
+  .err**, **Open .out** (a bounded 100-line tail). Sort controls order cards by
+  name, location, state, progress, resources, or time. Archives live in the
+  browser's local storage for this origin.
+- **Cluster capacity:** nodes grouped under their partitions. Each node card
+  shows GPUs as large cells above CPUs as small cells: green idle, red
+  allocated, yellow unavailable. Nodes used by your running jobs are
+  highlighted in blue. Every GPU partition also has an **Estimated queue wait**
+  chart (see [Estimated queue waits](#estimated-queue-waits)).
+- A small countdown clock beside the title shows the time until the next
+  refresh, or `Refreshing…` while one is in flight.
+
+Open/closed sections survive automatic refreshes while the page stays open.
+On startup the page retries every second until the first collection
+finishes.
+
+> [!WARNING]
+> The service binds to `127.0.0.1` and has no authentication or TLS. To view
+> it from another machine, use an SSH tunnel
+> (`ssh -L 8080:127.0.0.1:8080 user@login-node`). `--host 0.0.0.0` exposes
+> cluster names, hosts, nodes, and utilization and must be protected by a
+> firewall or an authenticated HTTPS proxy; `--jobs-api` and `--command-api`
+> refuse to start on a non-loopback host.
+
+### Terminal boards
+
+```bash
+cluster-watcher status            # capacity board, once
+cluster-watcher status 15         # refresh every 15 s
+cluster-watcher status cluster-a  # only some clusters
+cluster-watcher jobs              # your jobs board
+cluster-watcher jobs 15
+```
+
+`status` prints one table per cluster. With toy data it looks like this
+(colors omitted):
+
+```text
+## alpha ##
+PARTITION  GPU NAME          VRAM   TFLOPS/S  GPU AVAILABILITY  WAIT TIME · JOB UP TO 1 HOUR · GPU COUNT  CPU THREADS
+                                                                1    2    4    8    16   32    64
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+gpu-large  NVIDIA H100 80G…  80G    989       [░███████] 6/64   now  2m   25m  3h   14h  2.5d  n/a  1024
+gpu-small  NVIDIA A100-SXM…  40G    312       [░░░█████] 19/48  now  now  5m   40m  6h   n/a   —    768
+debug      NVIDIA GeForce …  24G    71        [░░░░░░░░] 8/8    now  now  now  1m   —    —     —    64
+WAIT N/A gpu-large [64 GPU]: Requested node configuration is not available
+WAIT N/A gpu-small [32 GPU]: Requested node configuration is not available
+```
+
+`jobs` lists running, pending, completed, failed, and cancelled jobs from the
+last 24 hours, grouped under `### RUNNING ###`-style headings, with ID, name,
+cluster, partition, resources, progress, and submit/launch/end times (local
+timezone). Running bars are blue (elapsed vs. limit); pending bars are red and
+advance toward Slurm's estimated start, or say why there is no estimate.
+
+With an interval, both boards run full-screen like `top`: arrow keys, Page
+Up/Down, Home, and End scroll; `q` or `Ctrl-C` exits and restores your
+terminal. Redirected output stays plain (no colors or cursor codes, also when
+`NO_COLOR` is set), and narrow terminals switch to a two-line layout. `status`
+also accepts `--jobs` (legacy `squeue` summary), `--json`, and `--dry-run`
+(one-shot only). Both commands reuse open shared sessions and only prompt for
+clusters whose session is missing.
+
+<details>
+<summary><b>Terminal board details</b></summary>
+
+Columns size themselves to their content instead of stretching across a wide
+terminal. Launch time is shown for running, completed, and failed jobs; end
+time for completed and failed jobs; other states show `—`. Job arrays appear
+one task per row with canonical `ARRAY_JOB_ID_TASK_ID` IDs, and pending rows
+keep the node, GPU, and CPU counts requested in `squeue`. Slurm times are
+collected in UTC and shown in the local timezone.
+
+Live mode uses an alternate screen, so old boards do not pile up in
+scrollback, and scroll keys are consumed without echo and kept across
+refreshes. This also works in integrated terminals that report `TERM=dumb`.
+
+In live `status`, partitions are probed concurrently, each with a ten-second
+budget and a ten-second per-probe limit; shapes the budget did not reach show
+`?`. Successful estimates are cached for ten minutes and failures retried
+after 30 seconds, while capacity refreshes at the requested interval. Failed
+clusters are reported independently, so other clusters still show results.
+Use `--help` on either command for interval and SSH-timeout options.
+
+</details>
+
+### Shared SSH sessions
+
+`serve` keeps one authenticated OpenSSH connection open per cluster. Another
+terminal on the same machine, as the same user, can use it without typing
+the password or OTP again:
+
+```bash
+cluster-watcher sessions                          # which sessions are open, and for how long
+cluster-watcher exec cluster-b -- nvidia-smi -L   # run one command
+cluster-watcher exec --timeout 600 cluster-b -- bash -lc 'cd ~/project && python3 train.py --help'
+cluster-watcher shell cluster-b                   # interactive shell
+```
+
+These commands do not need `--command-api`. `exec` relays stdout/stderr and
+exits with the remote status. It has no time limit unless you give
+`--timeout SECONDS` (status 124 on expiry) and keeps at most 1 MiB per output
+stream. Neither `exec` nor `shell` logs in or silently reconnects: an unknown
+machine or closed session fails with a clear message.
+
+`sessions` shows each machine's estimated remaining idle lifetime
+(`sessions --json` returns the same document as `/api/v1/sessions`). OpenSSH
+does not expose its exact expiry, and activity from unrelated SSH clients is
+invisible, so the value may be `unknown` or approximate. A session may outlive
+`serve` until its `control_persist` idle period expires.
+
+#### Log in again after a session closes
+
+A login node can close a session (restart, network interruption, session
+limit), after which refreshes fail with errors like `Permission denied
+(gssapi-with-mic,password)`. Reopen it without restarting `serve`:
+
+```bash
+cluster-watcher login cluster-b   # this machine and its credential group
+cluster-watcher login             # every interactive machine
+```
+
+Open sessions are skipped. A named machine brings the rest of its
+`credential_group`, so the shared password is asked once and each machine
+asks for its own OTP. The running service picks up the session on its next
+refresh. The service detects closed sessions itself (`ssh -O check`) and
+reports `login_required: true`, so the web dashboard and VS Code offer the
+login. Sessions send keepalives every 30 s (`ServerAliveInterval=30`,
+`ServerAliveCountMax=4`), so idle sessions survive firewalls and broken ones
+are noticed within about two minutes.
+
+---
+
+## Reading the numbers
+
+### GPU availability
+
+The availability bar shows **schedulable idle** GPUs in green, then everything
+else in red, followed by `schedulable idle / total`. An unallocated GPU on a
+drained, down, maintenance, rebooting, powered-off, reserved, failed, or
+unresponsive node is deliberately **not** counted as available. Hover the bar
+in a graphical view for a node-state breakdown (idle, mixed, full, reserved,
+drained, down, …); zero counts are omitted.
+
+GPU requests are recognized in both Slurm's `gpu:TYPE:COUNT` GRES form and the
+`gres/gpu:COUNT` form. When Slurm leaves `Gres`/`GresUsed` empty, collection
+falls back to `CfgTRES`/`AllocTRES`, and a generic GPU total is never added to
+its model-specific breakdown. AMD MI300A APUs count as GPUs, as Slurm schedules
+each as one `gres/gpu`.
+
+### Job progress and dependencies
+
+| Job | Progress shows |
+| --- | --- |
+| Running | Elapsed vs. full time limit (Slurm `%M` and `%l`, with `%L` as fallback), from the real start of the allocation. Advances locally between refreshes. Unlimited limits are shown as text. |
+| Pending, with an estimate | A red bar from submission toward Slurm's expected start, labelled `<duration> estimated wait`. |
+| Pending, no estimate | **no estimate available** (no empty bar), or the priority gauge when one exists. |
+| Pending on a dependency | `dependency:<type> <job ID>`; click the ID to jump to its card. |
+| Completed / failed | Recorded runtime vs. the time limit kept in accounting. A zero duration shows `<1m`. |
+
+Expected starts come from `squeue --me --start` (backfill's current
+projection). They are not reservations: priorities, new jobs, reservations,
+or jobs ending early can move them, and clusters without backfill may not
+provide one.
+
+In an expanded card, each dependency ID is followed by a clock (waiting), a
+green check (satisfied), or a red ✕ (failed); hover it for details. Slurm
+usually drops satisfied IDs from its dependency field, so checks appear only
+while the ID is still known. A job whose overall dependency can never be met
+moves to **Failed Dependency**. Slurm's `TIMEOUT` state goes to **Failed
+(Timeout)**; every other failure state goes to **Failed (Early)**.
+
+The web dashboard rounds pending estimates into buckets (`< 5 minutes`,
+`< 30 minutes`, `< 1 hour`, `< 2 hours`, then the nearest hour). Change the
+boundaries with positive, strictly increasing minute values:
+
+```toml
+[dashboard]
+wait_threshold_minutes = [5, 30, 60, 120]
+```
+
+Hovering a web-dashboard node card shows whether its GPUs are free now or the
+earliest visible running-job end time, as a hint, not a guaranteed start.
+
+### Priority gauges
+
+Priority gauges are unlabeled, number-free bars from low (red, left) to high
+(green, right); hover them for the exact values.
+
+- **Pending jobs** get a gauge when at least two of your visible pending jobs
+  on that cluster have numeric Slurm priorities. The tick is the job's rank
+  among them, not an absolute scale; the hover gives the raw priority, rank,
+  and scope. It normally sits in the expanded card. Without a wait estimate it
+  replaces that message in the summary, as thick as a progress bar.
+- **Partitions** get a gauge when Slurm reports `PriorityJobFactor`, as the
+  factor divided by the largest displayed factor. The hover gives the factor,
+  `PriorityTier`, and the cluster's `SchedulerType`, `PriorityType`,
+  `PriorityWeightPartition`, and `PriorityFlags`.
+
+The partition factor only affects priority under `priority/multifactor` with a
+nonzero partition weight; `PriorityTier` controls scheduling/preemption tiers
+instead, and `NO_NORMAL_PART` changes normalization. Both gauges describe
+policy, not queue position: reservations, tiers, resource fit, and backfill
+can still change the actual start order. Unavailable data is omitted, never
+shown as zero.
+
+### Estimated queue waits
+
+Cluster Watcher asks Slurm when a hypothetical job **would** start, using
+`sbatch --test-only`; nothing is submitted or run. For each GPU partition it
+probes 1, 2, 4, … up to 64 GPUs, and the views show the one-hour shape:
+
+- **VS Code:** a log-log line chart per partition card.
+- **Terminal:** the `WAIT TIME` columns.
+- **Web dashboard:** a bar chart per partition, colored by 1-hour, 12-hour,
+  and 24-hour walltime, on a 0–24 h axis. `+` marks longer waits, and a
+  striped bar marks a missing estimate.
+
+`now` means immediate placement, and `—` means the partition has fewer GPUs
+than requested. Estimates reflect **your** account, QOS, fair-share, and the
+current queue. They are Slurm's projection, not a reservation. Probes refresh
+every ten minutes, independently of the normal refresh, so check
+`wait_estimates_updated_at` in the API.
+
+#### Why a wait has no estimate
+
+| Label | `error_kind` | Meaning |
+|---|---|---|
+| `DENY` | `denied` | Your account may not use the partition. |
+| `min` | `minimum` | Below the partition's minimum GPU request (`QOSMinGRES`); larger requests may work. |
+| `limit` | `limit` | Over a QOS, association, per-node GPU, or time limit for your account. |
+| `n/a` | `unavailable` | No node can run it now, for example because all are drained or powered down. |
+| `ERR` | `timeout`, `error` | A real failure: Slurm did not answer within 60 seconds, or another error. |
+| `?` | `budget` | Not probed: the partition's time budget ran out first. |
+| `…` | — | The cluster's first round of probes has not finished yet. |
+
+Only `ERR` is worth investigating; the others describe your account's policy
+or the cluster's state. Hover a wait to see Slurm's message. The terminal
+lists them under the table as `WAIT DENIED`, `WAIT MIN`, `WAIT LIMIT`,
+`WAIT N/A`, or `WAIT ERROR` lines.
+
+<details>
+<summary><b>How probes are shaped and scheduled</b></summary>
+
+Batch-mode probing matters on sites that limit every `srun` allocation to
+short interactive walltimes, even in test-only mode. Shapes use 1-hour,
+12-hour, and 24-hour walltimes, because backfill's expected start depends on
+duration, each capped by the partition's configured maximum (duplicate capped
+durations are probed once). Requests larger than one node are probed only for
+the shortest walltime.
+
+Each probe requests the fewest highest-capacity nodes that can provide the GPU
+total (64 GPUs on eight-GPU nodes becomes an eight-node job), one task per
+node (`--ntasks-per-node=1`; with a single task Slurm would silently shrink a
+multi-node request), and 1024 MiB of host memory per GPU as an explicit
+per-node `--mem` (some site filters do not accept `--mem-per-gpu`). The
+memory is returned as `memory_mb`. GPUs are requested with `--gres=gpu:N`; if
+a submission filter says that requested no GPUs, the probe is retried with
+job-wide `--gpus=N` in the same SSH call. A "More than N gpus per node"
+refusal is a policy limit and is not retried. `QOSMinGRES` failures are not
+copied to larger GPU counts, since a larger request may satisfy them.
+
+All shapes of a partition run in order in one SSH call; partitions and
+clusters run concurrently. Each `sbatch --test-only` may take up to 60
+seconds, and a partition starts no further probes after 240 seconds. The
+first round starts with the service. Successful messages are parsed from both
+stdout and stderr, and every scheduled refresh retries every probe. Slurm
+start times without a UTC offset are interpreted in the service host's local
+timezone.
+
+</details>
+
+### GPU catalog and compute ranking
+
+GPU model, VRAM, and TFLOPS/s come from an optional personal catalog,
+`gpu_profiles.toml`, beside your `clusters.toml` (for an installed command,
+`~/.config/cluster-watcher/gpu_profiles.toml`). Start from
+[`gpu_profiles.example.toml`](gpu_profiles.example.toml). Without it, no GPU
+details are shown and partitions are ranked by GPU count. A malformed catalog
+is reported at startup. `install.sh` adopts a `gpu_profiles.toml` found beside
+it once, and the file is git-ignored.
+
+Every `[[profile]]` needs a `cluster` equal to a `[[machine]].name`, because
+partition and GRES labels are local to a cluster (an `a100` label never
+borrows another cluster's profile). Profiles store per-GPU VRAM and dense
+FP16/BF16 Tensor/Matrix throughput without sparsity. Aliases match GRES types,
+partition names, and node names, so generic partitions can be identified from
+node-name prefixes.
+
+Partitions are ranked by their best single GPU: VRAM, then throughput, then
+CPU threads. `*-all` partitions fully covered by specific partitions are
+listed last as aggregates; do not add their totals to the others. In the web
+dashboard, node cards inside a partition are ordered by idle GPUs, then idle
+CPUs.
+
+---
+
+## APIs for scripts and agents
+
+All endpoints are served by `cluster-watcher serve` on `127.0.0.1:8080` and
+return JSON.
+
+| Endpoint | Needs | Purpose |
+| --- | --- | --- |
+| `GET /api/v1/snapshot` | — | Capacity, hardware, and wait estimates for every cluster. |
+| `GET /api/v1/jobs` | `--jobs-api` | Your active and recent jobs. |
+| `GET /api/v1/jobs/{cluster}/{job_id}/log` | `--jobs-api` | Bounded, pageable log tail. |
+| `GET /api/v1/jobs/{cluster}/{job_id}/script` | `--jobs-api` | The job's batch script. |
+| `POST /api/v1/jobs/{cluster}/{job_id}/cancel` | `--jobs-api` | Cancel one of your jobs. |
+| `GET /api/v1/sessions` | `--command-api` | Open SSH sessions and their estimated lifetime. |
+| `POST /api/v1/commands` | `--command-api` | Run a command over an existing session. |
+
+[`AGENT_CAPABILITIES.md`](AGENT_CAPABILITIES.md) is a copy-ready guide for
+coding agents. It separates observation from cancellation and remote
+execution and covers discovery, log paging, session reuse, and scheduling
+uncertainty. Paste it into another project's `AGENTS.md` to use Cluster
+Watcher as that project's cluster source.
+
+`/api/status` is the web page's internal, unversioned payload; scripts should
+use the versioned endpoints. Incompatible changes get a new URL version.
+
+### Snapshot
+
+```bash
+curl --fail --silent http://127.0.0.1:8080/api/v1/snapshot | python3 -m json.tool
+```
+
+```python
+import json
+from urllib.request import urlopen
+
+with urlopen("http://127.0.0.1:8080/api/v1/snapshot") as response:
+    snapshot = json.load(response)
+
+for cluster in snapshot["clusters"]:
+    for partition in cluster["partitions"]:
+        print(cluster["name"], partition["name"], partition["gpus"]["schedulable_idle"])
+```
+
+It returns `200`, or `503` with `Retry-After: 1` before the first collection
+finishes. Responses are `Cache-Control: no-store`. Usernames and personal job
+details are excluded. Treat the snapshot as infrastructure data: it contains
+cluster names, hosts, node names, capacities, and utilization.
+
+<details>
+<summary><b>Snapshot schema</b></summary>
+
+| Top-level field | Meaning |
+| --- | --- |
+| `schema_version` | Contract version, currently `1.0`. |
+| `generated_at` | ISO 8601 time of the underlying status collection. |
+| `status_refresh_seconds` | Normal node/partition refresh interval. |
+| `wait_probe_refresh_seconds` | Slower `sbatch --test-only` refresh interval. |
+| `clusters` | All configured clusters, including unreachable ones. |
+
+Each cluster has its `name` and `host`, `reachable`,
+`resource_data_complete`, collection errors, unique cluster-wide resource
+totals, `wait_estimates_updated_at`, and every known partition. `scheduling`
+holds `scheduler_type`, `priority_type`, `priority_weight_partition`, and
+`priority_flags` when Slurm exposes them (otherwise it is empty). `error` means
+the cluster could not be queried; `resource_error` means partitions were read
+but node/GPU detail failed. `login_required` is `true` when an
+`interactive_auth` cluster's shared session has closed (fix it with
+`cluster-watcher login NAME`).
+
+| Partition field | Meaning |
+| --- | --- |
+| `name`, `rank`, `available` | Slurm name, compute rank, and whether the partition is administratively up (`null` if unreported). |
+| `priority_job_factor`, `priority_tier` | Partition contribution to multifactor priority and its scheduling/preemption tier; `null` when unavailable. |
+| `aggregate` | `true` when the partition reuses nodes of specific partitions; do not add its totals to theirs. |
+| `reported_nodes`, `node_states` | Slurm node count and state distribution. |
+| `cpus` | Total, allocated, and idle CPU threads. |
+| `gpus` | Total, allocated, idle, schedulable-idle, unavailable-idle, maximum per node, and model inventory. |
+| `wait_estimates` | Per shape: GPU and node counts, `memory_mb`, `walltime_seconds`, `expected_start_at`, `estimated_wait_seconds`, `error`, and `error_kind`. |
+| `nodes` | Per-node state, resources, GPU types/specifications, and earliest visible release time. |
+
+`gpus.idle` means physically unallocated; `gpus.schedulable_idle` excludes
+GPUs on unusable nodes and is the safer routing signal, and
+`gpus.unavailable_idle` is the difference. Model entries include Slurm type
+names, catalog status, VRAM, dense FP16/BF16 throughput, and availability; a
+`null` availability means a mixed-type node's allocations could not be
+attributed to types. If Slurm cannot evaluate a wait probe, its time fields
+are `null` and `error` explains why.
+
+```json
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-09-22T10:00:00+00:00",
+  "status_refresh_seconds": 15,
+  "wait_probe_refresh_seconds": 600,
+  "clusters": [
+    {
+      "name": "cluster-a",
+      "host": "slurm-submit.example",
+      "reachable": true,
+      "resource_data_complete": true,
+      "error": null,
+      "resource_error": null,
+      "wait_estimates_updated_at": "2026-09-22T09:59:00+00:00",
+      "resources": {
+        "nodes": 8,
+        "gpus": {"total": 64, "allocated": 56, "idle": 8, "schedulable_idle": 8, "unavailable_idle": 0}
+      },
+      "partitions": [
+        {
+          "name": "gpu-h100",
+          "rank": 1,
+          "aggregate": false,
+          "available": true,
+          "gpus": {
+            "total": 64,
+            "allocated": 56,
+            "idle": 8,
+            "schedulable_idle": 8,
+            "unavailable_idle": 0,
+            "max_per_node": 8,
+            "models": [{"name": "NVIDIA H100 80 GB", "vram_gb": 80, "fp16_bf16_tensor_tflops": 989.0}]
+          },
+          "wait_estimates": [
+            {"gpus": 1, "memory_mb": 1024, "walltime_seconds": 3600, "expected_start_at": "2026-09-22T10:30:00", "estimated_wait_seconds": 1800, "error": null, "error_kind": null}
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>
+
+### Personal jobs
+
+Requires `serve --jobs-api` (which also enables job collection; `--jobs` is
+not needed). It refuses to start with a non-loopback `--host`; accepted
+values include `127.0.0.1`, `::1`, and `localhost`.
+
+```bash
+curl --get --fail --silent \
+  --data-urlencode 'cluster=cluster-a' \
+  --data-urlencode 'job_id=1000101' \
+  --data-urlencode 'job_id=1000102_3' \
+  http://127.0.0.1:8080/api/v1/jobs | python3 -m json.tool
+```
+
+| Parameter | Meaning |
+| --- | --- |
+| `cluster` | Exact configured cluster name; repeat for several. |
+| `job_id` | Numeric or `JOB_ARRAY_TASK` ID; repeat for several. A parent array ID also matches its tasks. |
+| `state` | `active`, `terminal`, or `both` (default). |
+| `since` | ISO 8601 accounting lower bound; default 24 hours ago. A timestamp without an offset is UTC. |
+
+The response has `schema_version`, `generated_at`, the applied `since` and
+`state`, per-cluster `reachable`/`accounting_available`/`error`, and a flat
+`jobs` array. Each job has `cluster`, `job_id`, `array_task_id`, `name`,
+normalized `state`, `exit_code`, `submit_at`, `start_at`, `end_at`,
+`elapsed_seconds`, `partition`, `nodes`, `expected_start_at`, and `reason`.
+Active jobs also have Slurm's numeric `priority` (when available) and
+`dependency` (for example `afterok:1000100(unfulfilled)`, or `null`).
+
+<details>
+<summary><b>Job record details and example</b></summary>
+
+Array tasks are separate records with canonical `ARRAY_JOB_ID_TASK_ID` IDs in
+both live and accounting data. Slurm annotations such as `CANCELLED by 12345`
+are normalized to `CANCELLED`, while `exit_code` is preserved. Timestamps are
+UTC with an explicit `Z`; the terminal and browser convert them to local time.
+The `DependencyNeverSatisfied` reason is kept so clients can tell an
+impossible dependency from an ordinary wait.
+
+Results are cached for at least the normal refresh interval, and live
+`squeue` data is merged with `sacct` so jobs that have left the queue are
+retained. Several `job_id`s are one batched `sacct` query per cluster. If
+accounting is unavailable, active jobs are still returned,
+`accounting_available` is `false`, and requested unresolved IDs come back as
+`UNKNOWN`. One failed cluster does not hide results from the others.
+
+```json
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-09-23T12:00:00+00:00",
+  "since": "2026-09-22T12:00:00+00:00",
+  "state": "both",
+  "clusters": [
+    {"name": "cluster-a", "reachable": true, "accounting_available": true, "error": null}
+  ],
+  "jobs": [
+    {
+      "cluster": "cluster-a",
+      "job_id": "1000101",
+      "array_task_id": null,
+      "name": "train_model",
+      "state": "COMPLETED",
+      "exit_code": "0:0",
+      "submit_at": "2026-09-22T16:33:15Z",
+      "start_at": "2026-09-22T16:33:19Z",
+      "end_at": "2026-09-23T16:33:19Z",
+      "elapsed_seconds": 86400,
+      "partition": "gpu-l40",
+      "nodes": ["gpu-node14"],
+      "expected_start_at": null,
+      "reason": null
+    }
+  ]
+}
+```
+
+</details>
+
+#### Log tail
+
+```bash
+curl --get --fail --silent \
+  --data-urlencode 'stream=err' \
+  --data-urlencode 'tail=200' \
+  http://127.0.0.1:8080/api/v1/jobs/cluster-a/1000101/log | python3 -m json.tool
+```
+
+Parameters: `stream=out|err` (default `err`), `tail=N` (default 100, maximum
+2000), `before=N` (skip that many newest lines to page backward), and
+optional `path=/absolute/remote/path`, which must lie under the cluster's
+`job_log_roots`. The log is found through `scontrol show job` while the job is
+live and `sacct` afterwards. The response has `cluster`, `job_id`, `stream`,
+resolved `path`, line count, `before`, `more_before`, `truncated` (an alias),
+and `content`. A queued job or missing file returns `404`, unsafe parameters
+`400`, and remote failures `502`.
+
+#### Batch script
+
+`GET /api/v1/jobs/{cluster}/{job_id}/script` returns `cluster`, `job_id`,
+`source`, `path`, `content` (at most 1 MiB), and `truncated`. It tries, in
+order:
+
+1. `scontrol write batch_script`: the exact script while the job is queued or
+   running (`source: "slurm"`, `path: null`);
+2. `sacct --batch-script`: the exact script, on sites that store it
+   (`AccountingStoreFlags=job_script`; `source: "accounting"`);
+3. the file named on the job's recorded `sbatch` command line, resolved
+   against its working directory (`source: "file"`). This is the file as it is
+   **now**, which may differ from what was submitted.
+
+Jobs submitted with `--wrap` or from stdin, and deleted files, return `404`.
+
+#### Cancel
+
+`POST /api/v1/jobs/{cluster}/{job_id}/cancel` with `Content-Type:
+application/json` (any body, such as `{}`) runs
+`scancel --user=<configured username> -- <job_id>`, so only your own jobs can
+be signalled. The mandatory JSON content type forces a CORS preflight that the
+server never approves, so web pages cannot cancel jobs through it. It returns
+`cluster`, `job_id`, and `cancelled_at`; `400` for an invalid ID or cluster,
+`415` without the JSON content type, and `502` if `scancel` fails.
+
+### Sessions and remote commands
+
+> [!CAUTION]
+> `--command-api` allows **arbitrary code execution** as your remote user. It
+> is off by default, loopback-only, and has no token or TLS mode. Use it only
+> from the same machine or through an SSH tunnel.
+
+```bash
+cluster-watcher serve --command-api            # can be combined with --jobs-api
+curl --fail --silent http://127.0.0.1:8080/api/v1/sessions | python3 -m json.tool
+curl --fail-with-body --silent -H 'Content-Type: application/json' \
+  --data '{"machine":"cluster-a","command":"hostname; nvidia-smi -L","timeout_seconds":30}' \
+  http://127.0.0.1:8080/api/v1/commands | python3 -m json.tool
+```
+
+`/api/v1/sessions` lists every visible machine with `name`, `host`,
+`username`, `available` (a live connection verified with `ssh -O check`),
+`session_open`, `pid`, `control_persist_seconds`, `last_activity_at`,
+`estimated_remaining_seconds` (approximate, or `null`), and `error`. It never
+logs in.
+
+`/api/v1/commands` takes `machine`, `command` (non-interactive shell text up
+to 64 KiB; no TTY or stdin), and optional `timeout_seconds` (default 30,
+1–300). Commands to one machine run one at a time. It returns `exit_code`,
+`stdout`, `stderr` (each kept up to 1 MiB, with `*_truncated` flags),
+`timed_out`, `duration_seconds`, `started_at`, `finished_at`,
+`connection_dropped`, and the session state afterwards. It never logs in.
+
+| HTTP status | Meaning |
+| --- | --- |
+| `200` | The command completed; `exit_code` may still be nonzero. |
+| `400` | Invalid JSON, command, machine, timeout, or field. |
+| `404` | API disabled, unknown endpoint, or unknown machine. |
+| `409` | The machine has no open SSH session. |
+| `411` / `413` / `415` | Missing length, request too large, or not JSON. |
+| `502` | SSH failed or the connection dropped; partial output when available. |
+| `504` | Timed out; partial output when available. |
+
+---
+
+## Under the hood
+
+### How refreshes are kept cheap
+
+Slurm queries take milliseconds, but each SSH call costs one to two seconds,
+even over a shared connection, because the cluster starts your login shell
+every time. So the service:
+
+1. **Makes one SSH call per cluster per refresh.** All commands run as one
+   `sh` script (`clusterwatcher/remote_batch.py`) whose output is split back
+   per command with random-token markers, so one failure stays isolated.
+   Clusters run in parallel. On four clusters a refresh dropped from about 38 s
+   to 2.5–4.3 s. A batch may take up to twice `--timeout` plus 5 s before the
+   cluster is reported as not responding. Wait probes are batched the same way,
+   one call per partition every ten minutes.
+2. **Refreshes capacity every 60 s and your jobs every `--refresh`.**
+   Partition and node detail (`sinfo`, `scontrol show node -d`, which exceeds
+   1 MB on large clusters, scheduler/priority configuration, and running-job
+   end times) changes slowly; your `squeue --me` runs every refresh. Capacity
+   keeps its own `capacity_updated_at`.
+3. **Queries accounting only when your queue changes.** The same call
+   fingerprints your sorted `squeue --me` IDs and states with `cksum` (never
+   times). `sacct` runs only when the fingerprint changes, and at least every
+   5 minutes. The jobs API serves these records for its default 24-hour
+   window, so polling clients add no `sacct` queries; explicit `job_id`s or
+   another `since` query `sacct` directly.
+4. **Answers unchanged data with `304 Not Modified`.** `/api/status`,
+   `/api/v1/snapshot`, and `/api/v1/jobs` send an `ETag` that ignores moving
+   fields (`generated_at`, `updated_at`, the default `since`,
+   `capacity_updated_at`, elapsed/remaining times, `estimated_wait_seconds`).
+   Clients extrapolate those values from `generated_at`, so times stay
+   current in the browser and VS Code without new data.
+
+Browsers may drop in-flight requests on reload; the server treats the
+resulting broken pipe as a normal disconnect. Normal refreshes, wait probes,
+jobs, logs, and commands all share the same SSH transport and do not call one
+another over HTTP.
+
+### Capability map
+
+<details>
+<summary><b>Show diagram</b></summary>
 
 ```mermaid
 flowchart TB
@@ -55,7 +1173,7 @@ flowchart TB
     subgraph human["Human interfaces"]
         Terminal["Terminal<br/>status N · jobs N · sessions<br/>exec · shell"]
         Browser["Browser dashboard<br/>capacity, jobs, countdown,<br/>archive, logs, and cancellation"]
-        VSCode["VS Code sidebar<br/>collapsible jobs/clusters,<br/>archive, paged logs, and cancellation"]
+        VSCode["VS Code sidebar<br/>job and partition cards,<br/>archive, paged logs, and cancellation"]
         LocalState["UI-local state<br/>archives and open/closed sections"]
         LocalState --- Browser
         LocalState --- VSCode
@@ -112,1509 +1230,47 @@ flowchart TB
 Green boxes are observational data, blue boxes are human-facing views, amber
 boxes are security-gated capabilities, and red boxes can change remote state.
 The personal jobs and command HTTP interfaces are opt-in and loopback-only.
-Archives and disclosure choices belong to the browser or VS Code installation;
-they never modify Slurm jobs.
+Archives and open/closed choices belong to the browser or VS Code; they never
+modify Slurm jobs.
 
-## Install
+</details>
 
-**Prebuilt executable (recommended).** Linux and macOS need only `bash`,
-`curl` (or `wget`), and OpenSSH; no Python. The installer downloads the native
-executable for the operating system and CPU from the latest
-[GitHub Release](https://github.com/CameronBraunstein/cluster-watcher/releases),
-verifies its SHA-256 checksum, and installs `cluster-watcher` in `~/.local/bin`:
+---
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/CameronBraunstein/cluster-watcher/master/install.sh | bash -s -- --add-to-path
-cluster-watcher setup        # describe your clusters once
-cluster-watcher status       # or: cluster-watcher serve --jobs-api
-```
+## Development
 
-Pin a release with `--version v0.1.0`. From a clone, `./install.sh` does the
-same, and `./install.sh --from-source` builds the executable locally with
-PyInstaller instead (Python 3.11+). Remove it again with `./uninstall.sh`
-(also attached to every release).
+### Code layout
 
-Windows 10 build 1809 or newer uses the PowerShell installer (Windows ARM64
-requires Windows 11):
-
-```powershell
-$installer = Join-Path $env:TEMP "cluster-watcher-install.ps1"
-Invoke-WebRequest https://raw.githubusercontent.com/CameronBraunstein/cluster-watcher/master/install.ps1 -OutFile $installer
-& $installer -AddToPath
-cluster-watcher setup
-```
-
-Download and run the matching uninstaller when needed:
-
-```powershell
-$uninstaller = Join-Path $env:TEMP "cluster-watcher-uninstall.ps1"
-Invoke-WebRequest https://raw.githubusercontent.com/CameronBraunstein/cluster-watcher/master/uninstall.ps1 -OutFile $uninstaller
-& $uninstaller
-```
-
-Native Windows supports clusters authenticated with SSH keys or `ssh-agent`.
-Microsoft's native OpenSSH does not implement
-the `ControlMaster` connection sharing required to retain password/OTP
-sessions, so use Cluster Watcher inside WSL for those clusters. Install and run
-the VS Code extension on the WSL side as well. Windows OpenSSH Client must be
-installed as an optional Windows feature.
-
-Release binaries cover Linux glibc 2.17+ and macOS 12+ on x86-64 and ARM64,
-Windows 10 1809+ on x86-64, and Windows 11+ on ARM64. Alpine/musl Linux is not
-currently prebuilt; install from source there. Exact targets and minimums are
-published in [`release-platforms.json`](release-platforms.json) and attached to
-each release as `PLATFORMS.json`.
-
-**With Python 3.11+.** The package has no dependencies, so it can also be
-installed as an ordinary Python application:
-
-```bash
-pipx install git+https://github.com/CameronBraunstein/cluster-watcher
-```
-
-**VS Code extension.** Install the `.vsix` attached to the release with
-**Extensions: Install from VSIX…** (or from the Marketplace once published).
-It can use a command installed by one of the options above, or download its
-matching native backend on first use; see
-[VS Code extension](#vs-code-extension-use-test-and-publish).
-
-## Configure
-
-Run `cluster-watcher setup` (alias `set-up`) for a guided walkthrough: it asks
-for each machine's name, host, username, port, optional identity file, whether
-it prompts for a password/OTP (and its shared credential group), and log
-directories, then validates and writes the `--config` file with mode `0600`.
-An existing file is only replaced after confirmation and is kept as
-`clusters.toml.bak`.
-
-Run `cluster-watcher config` to open the same file in `$VISUAL`, `$EDITOR`, or
-a native fallback (`nano`/`vim`/`vi` on Unix, Notepad or VS Code on Windows).
-After the editor exits the file is
-validated, and an invalid file can be re-opened immediately. If no file exists
-yet, `config` offers to start `setup`. (`--config PATH` still only selects which
-file every command uses, so the two can be combined.)
-
-Or copy [`clusters.example.toml`](clusters.example.toml) to `clusters.toml`
-and replace the example machines by hand. `clusters.toml` (and its `.bak`) is
-git-ignored so personal hosts and usernames are never committed.  Each `[[machine]]`
-needs a unique `name`, its SSH `host`, and the `username` to use there.
-Optional `port`, `identity_file`, `interactive_auth`, `control_persist`,
-`credential_group`, `job_log_roots`, partition runtime limits, and `hidden`
-fields are supported. Set `hidden = true` to
-keep its configuration while excluding it from every command and service:
-Cluster Watcher will not authenticate to it, poll it, list it, or include it in
-the dashboard and snapshot API. At least one machine must remain visible.
-Remove the field or set it to `false` to enable the machine again.
-
-```toml
-[[machine]]
-name = "cluster-c"
-host = "login.cluster-c.example.org"
-username = "alice"
-hidden = true
-```
-
-Do not put passwords in this file; use SSH keys, an SSH agent, or your normal
-`~/.ssh/config` setup.
-
-Wait probes use the smaller of their requested runtime and the configured
-partition maximum. Set a default in minutes for the machine, then override
-partitions with shorter policies. This example defaults ordinary partitions to
-24 hours and caps a `gpudev` development partition at 15 minutes:
-
-```toml
-[[machine]]
-name = "cluster-b"
-host = "login.cluster-b.example.org"
-username = "alice"
-default_partition_max_time_minutes = 1440
-
-[machine.partition_max_time_minutes]
-gpudev = 15
-```
-
-`job_log_roots` is an optional list of absolute paths on the remote cluster.
-It limits caller-supplied `path` values for the personal log API; paths found
-directly through Slurm do not require this option. The service canonicalizes
-an explicit path remotely before checking it, so `..` and symlinks cannot
-escape an allowed root:
-
-```toml
-job_log_roots = ["/home/alice/jobs", "/scratch/alice"]
-```
-
-For a host which requires password plus OTP/MFA, enable interactive
-authentication on just that machine:
-
-```toml
-[[machine]]
-name = "cluster-b"
-host = "login.cluster-b.example.org"
-username = "alice"
-interactive_auth = true
-control_persist = "8h"
-credential_group = "site-b"
-```
-
-Machines in the same `credential_group` must use the same `username` and set
-`interactive_auth = true`. At `serve` startup, Cluster Watcher asks once for
-the group's shared password. It then names each machine and asks for a fresh,
-single-use OTP immediately before opening that machine's OpenSSH master
-connection. For example, several machines at one site that share a password
-but need separate OTPs belong in one group. A machine without `credential_group` preserves the normal OpenSSH
-terminal prompts.
-
-The password is held only in process memory while the group starts. Each OTP is
-held only while its corresponding machine authenticates and is cleared before
-the next OTP is requested. Neither kind of secret is written to configuration,
-temporary files, command-line arguments, or environment variables. A small
-askpass helper retrieves the appropriate value through a user-private Unix
-socket; unrecognized prompts receive no credential. Because host-key
-confirmation is intentionally not automated, connect to each host once
-manually before using a credential group, or provision its trusted host key
-through normal OpenSSH configuration.
-
-If a host rejects authentication—for example because its OTP expired before
-OpenSSH completed—Cluster Watcher asks for a fresh OTP for that host and retries
-it once. Already established masters remain active. A second rejection is
-reported and startup continues by requesting an independent OTP for the next
-configured cluster.
-
-OpenSSH keeps each encrypted authenticated connection available for the
-configured persistence period, and every dashboard refresh reuses it. Control
-sockets are held in a user-private local runtime directory
-(`$XDG_RUNTIME_DIR`, or `/tmp` if that is unavailable), rather than your home
-directory; this also works on home filesystems that do not support OpenSSH's
-atomic socket creation. The in-memory credential broker shuts down and drops
-its references to the secrets after startup. For long-lived unattended use,
-prefer an institution-approved SSH key or certificate when available.
-
-All configured machines now use OpenSSH multiplexing, including key-based
-machines that do not need interactive authentication. Their first ordinary
-status query opens a reusable master automatically; password/OTP machines are
-still authenticated explicitly before polling starts. `control_persist`
-therefore controls the idle lifetime for every machine and accepts standard
-OpenSSH values such as `30m`, `8h`, or `1h30m`.
-
-## Use
-
-Python 3.11+ is required (the standard-library TOML parser is used).
-Install the project in editable mode once to expose the `cluster-watcher`
-command in the active Python environment:
-
-```bash
-python3 -m pip install --editable .
-cluster-watcher list
-cluster-watcher serve
-```
-
-If the shell cannot find the command after a user-level install, add the user
-Python scripts directory to `PATH`, or activate the virtual environment where
-it was installed. `clusters.toml` is resolved from the current working
-directory unless `--config` supplies another path.
-
-For development, the original script and module entry points remain available:
-
-```bash
-python3 cluster_watcher.py list
-python3 -m clusterwatcher list
-python3 cluster_watcher.py status
-python3 cluster_watcher.py status 15
-python3 cluster_watcher.py status research-a --jobs
-python3 cluster_watcher.py status --json
-python3 cluster_watcher.py status --dry-run
-```
-
-Python module identifiers use underscores because hyphens cannot be imported.
-All user-facing commands, package names, and standalone artifacts use the
-kebab-case `cluster-watcher` convention.
-
-### Terminal jobs board
-
-Print the terminal equivalent of the dashboard's **My jobs** table:
-
-```bash
-cluster-watcher jobs
-```
-
-The command queries active jobs and the preceding 24 hours of Slurm accounting
-history across every configured cluster. Populated groups are separated from
-top to bottom by `### RUNNING ###`, `### PENDING ###`, `### COMPLETED ###`,
-`### FAILED ###`, and `### CANCELLED ###` rows; empty groups are omitted and
-less common states follow under `### OTHER ###`. Each entry includes its job
-ID, name, cluster, partition, recorded nodes/GPUs/CPUs, progress, submission
-date, launch time, and end time. Launch time is shown for running, completed,
-and failed jobs; end time is shown for completed and failed jobs. Other states
-display an em dash in those fields. Table columns size themselves to their
-content instead of stretching to fill a wide terminal. Running progress bars
-are blue and show elapsed versus requested runtime. Pending bars are red and
-advance toward Slurm's estimated start time; they explicitly report
-dependencies or a missing estimate when no usable start time exists. ANSI
-color is omitted when output is redirected or `NO_COLOR` is set, and narrow
-terminals automatically use a two-line layout.
-Slurm timestamps are collected in UTC and the displayed submission date is
-converted to the local timezone of the machine running Cluster Watcher.
-Job arrays are requested from Slurm one element per row. A task therefore
-appears once using its canonical `ARRAY_JOB_ID_TASK_ID` identifier, and pending
-rows retain the requested node, GPU, and CPU counts reported by `squeue` rather
-than the still-empty allocated-resource fields from accounting.
-
-Supply a positive interval to keep the board open and refresh it until
-`Ctrl-C`:
-
-```bash
-cluster-watcher jobs 15
-```
-
-This refreshes every 15 seconds. On an interactive terminal, live mode uses a
-temporary alternate screen like `top`: each complete board replaces the prior
-one, stale boards do not accumulate in normal scrollback, and the original
-terminal contents and cursor are restored on `Ctrl-C`, `q`, or an error. The
-view is limited to the terminal height so its top rows cannot be pushed away;
-use Up/Down, Page Up/Page Down, Home, and End to scroll through longer boards.
-Those keys are consumed without being echoed and the scroll position is kept
-across data refreshes. This also applies to integrated terminals that report
-`TERM=dumb`. When output is redirected to a file or pipe, snapshots remain
-sequential and no cursor-control codes are emitted. Before requesting MFA
-credentials, the command checks the same user-private OpenSSH control sockets
-used by `serve`, `status`, and the session commands. Any active session is
-reused without a password or OTP prompt; only an MFA-enabled cluster whose
-session is missing or expired is authenticated. The resulting session is
-reused on later refreshes. Use `cluster-watcher jobs --help` for the interval
-and SSH timeout options.
-
-### Build a standalone executable
-
-PyInstaller can produce a single native executable for machines where Python
-is not installed. Python is required only on the build machine. Install the
-optional build dependency and run the tracked specification from the repository
-root:
-
-```bash
-python3 -m pip install --editable '.[standalone]'
-python3 -m PyInstaller --noconfirm --clean cluster-watcher.spec
-./dist/cluster-watcher-linux-x86_64 --config ./clusters.toml serve --jobs-api
-```
-
-The example command above is for 64-bit Intel/AMD Linux. Every distributable is
-named `cluster-watcher-<os>-<architecture>` (with `.exe` on Windows). Published
-names include `cluster-watcher-linux-x86_64`,
-`cluster-watcher-macos-aarch64`, and
-`cluster-watcher-windows-x86_64.exe`. Copy the
-matching executable and your `clusters.toml` (or run `setup` there) to the
-target machine. A bundled application defaults to the native per-user
-configuration directory: XDG on Linux,
-`~/Library/Application Support/Cluster Watcher` on macOS, and
-`%APPDATA%\ClusterWatcher` on Windows. It reads an optional
-`gpu_profiles.toml` beside `clusters.toml`. Passwords
-and OTPs are never embedded. In a frozen build, the executable securely
-re-enters itself as the OpenSSH askpass client, so grouped MFA authentication
-does not depend on a separate Python interpreter or `askpass.py` file.
-
-PyInstaller output is specific to the operating system and CPU architecture on
-which it is built. Release CI builds each target natively because PyInstaller
-is not a cross-compiler. Linux additionally requires at least the glibc version
-of the Python it bundles, so Linux release builds use a python-build-standalone interpreter
-(installed with `uv`), whose shared `libpython` targets glibc 2.17, and CI
-proves each executable starts inside a `manylinux2014` (glibc 2.17) container.
-A local `--from-source` build instead inherits your Python's requirements. The target still needs the system `ssh` command and network access to
-the configured login hosts—PyInstaller replaces the Python requirement, not
-OpenSSH or the remote Slurm installation. Generated `build/` and `dist/`
-directories are ignored by Git.
-
-For a complete per-user Linux or macOS installation, use the checked installer
-instead of running the PyInstaller steps manually:
-
-```bash
-./install.sh --add-to-path                 # download the release executable
-./install.sh --from-source --add-to-path   # or build it from this checkout
-```
-
-By default the installer downloads `cluster-watcher-<os>-<architecture>` and
-`SHA256SUMS` from the GitHub Release (`--version TAG`, default latest) and
-refuses to install on a missing entry or checksum mismatch. It also works when
-piped into `bash`, since it then needs no checkout. `CLUSTER_WATCHER_REPO`
-selects another `owner/repo`, and `CLUSTER_WATCHER_RELEASE_URL` another download
-base URL (including `file://` for offline mirrors). With `--from-source` it
-checks for Python 3.11+ and the project files and builds in a disposable
-virtual environment, so it does not install packages into your normal Python
-environment. Either way it checks for OpenSSH and writable, safe destinations,
-refuses to run as root, and then atomically installs a platform-qualified
-executable plus one stable command shim in `~/.local/bin`, for example:
-
-```text
-cluster-watcher-linux-x86_64
-cluster-watcher
-```
-
-The `cluster-watcher` shim passes the native per-user `clusters.toml`
-automatically and selects the correct platform executable, which is why the
-stable command works from any directory.
-On the first installation, a personal `clusters.toml` beside `install.sh` is
-copied there with user-only permissions; without one, the installer asks you to
-run `cluster-watcher setup`. Later installer runs preserve that copy so local edits
-and usernames are not lost. The installer refuses symbolic-link destinations
-and unrelated existing commands. `--force` moves conflicting command files to
-a timestamped backup before replacing them; it still never overwrites the
-installed configuration. Reinstalling over the earlier underscore-named
-prototype migrates its managed files to a recovery backup rather than deleting
-them.
-
-`--add-to-path` explicitly authorizes the installer to add `~/.local/bin` to
-the appropriate Bash, Zsh, or POSIX shell profile. It verifies the persistent
-profile even if the installer process already has that directory in `PATH`,
-then backs up an existing profile before appending a marked PATH entry. This
-ensures that separately opened terminals also inherit the command. Omit the
-option if the profile is already configured or if you prefer to edit your shell
-setup yourself. Custom destinations are available through `--bin-dir`,
-`--config-dir`, and `--state-dir`; run `./install.sh --help` for details.
-
-`install.ps1` provides the equivalent Windows flow. It verifies the same
-`SHA256SUMS`, installs both the architecture-qualified executable and stable
-`cluster-watcher.exe` under `%LOCALAPPDATA%\Programs\ClusterWatcher`, preserves
-configuration, and changes only the current user's PATH when `-AddToPath` is
-specified. `-Version`, `-FromSource`, `-Force`, `-BinDir`, `-ConfigDir`, and
-`-StateDir` mirror the Unix installer options. A private sidecar beside the
-executable keeps a custom `-ConfigDir` effective when the command is launched
-from any working directory.
-
-Some managed systems prohibit direct edits to `.bashrc` or `.zshrc` and source
-a user-owned private file instead. When the standard profile actively
-references `.bashrc_private`, `.zshrc_private`, or `.profile_private`, the
-installer writes to that private file. It uses a recognizable managed block:
-
-```bash
-# >>> cluster-watcher initialize >>>
-# !! Contents within this block are managed by 'cluster-watcher install.sh' !!
-export PATH='/home/example/.local/bin':"$PATH"
-# <<< cluster-watcher initialize <<<
-```
-
-The uninstaller removes this exact block and remains compatible with the older
-two-line `# Added by Cluster Watcher install.sh` format. It will not remove a
-similar block whose contents were changed manually.
-
-After opening a new shell, launch from anywhere with:
-
-```bash
-cluster-watcher serve --jobs-api
-```
-
-If you prefer a literal interactive-shell alias without installing, add this
-to the appropriate user-owned shell profile, using absolute paths to this
-checkout. On the managed Bash setup described above, that is
-`~/.bashrc_private`:
-
-```bash
-alias cluster-watcher='/absolute/path/to/cluster-watcher/dist/cluster-watcher-linux-x86_64 --config /absolute/path/to/cluster-watcher/clusters.toml'
-```
-
-Reload the profile with `source ~/.bashrc_private` (or the profile appropriate
-to your shell). Unlike the installer-created command shim, a shell alias is
-generally unavailable to non-interactive scripts.
-
-### Uninstall the standalone application
-
-Run the tracked uninstaller from the repository checkout:
-
-```bash
-./uninstall.sh
-```
-
-It reads the installer's private manifest and removes only the managed
-`cluster-watcher` shim and platform executable. “Remove” is recoverable: files
-are moved to a timestamped directory under
-`~/.local/state/cluster-watcher/`. The default operation preserves your edited
-`~/.config/cluster-watcher/clusters.toml`. To back up and remove that file too,
-make the intent explicit:
-
-```bash
-./uninstall.sh --purge-config
-```
-
-If `install.sh --add-to-path` added a marked PATH block, the uninstaller removes
-that exact block and backs up the profile. Pass `--keep-path` to retain it.
-When custom installation directories were used, supply the same `--bin-dir`,
-`--config-dir`, and `--state-dir` values to `uninstall.sh`. The uninstaller
-refuses unknown manifests, symbolic links, root execution, and paths outside
-the recorded installation, so it stops instead of guessing what to delete.
-
-On Windows, run `uninstall.ps1`; add `-PurgeConfig` to recoverably remove the
-configuration too, or `-KeepPath` to retain the user PATH entry. Like the Unix
-uninstaller, it moves managed files to a timestamped state-directory backup.
-
-### Terminal capacity board
-
-`status` prints one table per cluster, separated by headings such as
-`## cluster-a ##`. Each partition row shows the strongest single GPU model in that
-partition, its per-GPU VRAM and dense FP16/BF16 Tensor throughput in TFLOPS/s,
-total CPU threads, current GPU availability, and expected waits for a one-hour
-job requesting 1, 2, 4, 8, 16, 32, or 64 GPUs.
-
-```bash
-cluster-watcher status
-cluster-watcher status 15
-cluster-watcher status 15 cluster-a
-cluster-watcher status cluster-a
-```
-
-The optional first integer enables a live refresh at that interval. Interactive
-live mode replaces the stale frame instead of appending output; use the arrow,
-Page Up/Page Down, Home, and End keys to scroll, `q` to exit, or `Ctrl-C` to
-stop. A non-numeric first argument retains the original machine-selection
-behavior, and further names select more clusters. With `--jobs`, each cluster
-also gets the legacy `squeue` state summary. `--json` and `--dry-run` remain
-one-shot modes and cannot be combined with a refresh interval.
-
-The GPU availability bar renders schedulable idle GPUs in green on the left,
-followed by GPUs that are allocated or currently unschedulable/reserved in red.
-In graphical views, hovering over the bar displays a node-only breakdown after
-about 100 ms and lists each nonzero state category, such as idle, mixed, full,
-reserved, drained, or down. The following
-fraction is `schedulable idle / total`; this intentionally does not count an
-unallocated GPU on a drained, down, maintained, rebooting, powered-off,
-reserved, failed, or unresponsive node as available.
-
-Wait cells are obtained from non-submitting `sbatch --test-only` requests with
-a runtime of up to one hour. The actual request is the smaller of one hour and
-the partition maximum configured in `clusters.toml`, so development partitions
-can be estimated using their permitted 15-minute runtime. `now` means Slurm
-predicts immediate placement, and `—` means that partition does not have
-enough GPUs for the request. Failed probes use the labels described in
-[Why a wait cell has no estimate](#why-a-wait-cell-has-no-estimate) (`DENY`,
-`min`, `limit`, `n/a`, `ERR`, `?`). Diagnostics appear beneath the table as
-`WAIT DENIED`, `WAIT MIN`, `WAIT LIMIT`, `WAIT N/A`, or `WAIT ERROR` lines with
-the affected GPU counts.
-
-Requests larger than one node use a job-wide GPU count and the minimum number
-of highest-capacity nodes whose combined inventory can satisfy it; for example,
-64 GPUs on eight-GPU nodes is probed as an eight-node job, not as 64 GPUs per
-node. The request form (GRES first, job-wide `--gpus=N` when a site asks for
-it) is described under [Hypothetical GPU-job wait estimates](#hypothetical-gpu-job-wait-estimates).
-
-To prevent a slow or unsupported `sbatch --test-only` implementation from
-blocking the board, partitions are probed concurrently, each in one SSH call.
-In live terminal mode each partition has a ten-second budget and each probe a
-ten-second limit; shapes the budget did not reach show `?`. Clusters that need
-refreshing are also processed concurrently.
-Successful estimates are cached for ten minutes in live mode; failures are
-retried after 30 seconds. Actual capacity continues to refresh at the interval
-requested on the command line. The initial capacity inventories for configured
-clusters are collected concurrently as well, so connection latency is not added
-serially across clusters.
-
-Minimum-resource policy failures such as `QOSMinGRES` are not propagated to
-larger GPU counts, because increasing the request may satisfy that policy.
-
-A failed or unreachable cluster is reported independently, so other configured
-clusters still return results.
-
-Use another config location when desired:
-
-```bash
-python3 cluster_watcher.py --config /path/to/clusters.toml status
-```
-
-## Live dashboard
-
-Launch a local webpage that updates its displayed cluster state every 15
-seconds (the server fetches each configured cluster in the background):
-
-```bash
-python3 cluster_watcher.py serve
-```
-
-It opens `http://127.0.0.1:8080/` automatically and runs until `Ctrl-C`.
-The default loopback binding keeps status data local to your machine. To use a
-different free port or run on a headless login node:
-
-```bash
-python3 cluster_watcher.py serve --port 9000 --no-browser
-```
-
-Add `--jobs` to show a job-state summary. The interval can be changed with
-`--refresh SECONDS`; avoid lowering it substantially because `sinfo` requests
-place load on the Slurm controller.
-
-### How refreshes are kept cheap
-
-Measured on real clusters, every Slurm query takes milliseconds, but each SSH
-call costs about one to two seconds, even over the shared control master,
-because the cluster starts your login shell and its startup files for every
-session. The service therefore:
-
-1. **Uses one SSH call per cluster per refresh.** All of a refresh's commands
-   run as one `sh` script (`clusterwatcher/remote_batch.py`); its output is
-   split back into per-command stdout, stderr, and exit status with
-   random-token marker lines, so one failing command still only affects its
-   own part of the status. Clusters are collected in parallel (each still gets
-   exactly one call against its own Slurm controller), so a refresh takes as
-   long as the slowest cluster. Measured on four clusters, a refresh dropped
-   from about 38 s to 2.5-4.3 s. A batch may take up to twice `--timeout` plus
-   5 s; a cluster that does not answer in time is reported as "no response
-   from the cluster within N s". Wait-time probes are batched the same way,
-   one call per partition every ten minutes (see
-   [Hypothetical GPU-job wait estimates](#hypothetical-gpu-job-wait-estimates)).
-2. **Refreshes capacity every 60 s and your jobs every refresh.** Partition
-   and node detail (`sinfo`, `scontrol show node -d`, which is over 1 MB on
-   large clusters, scheduler/priority configuration, and everyone's
-   running-job end times) changes slowly; your
-   own `squeue --me` queries run every `--refresh` interval. The snapshot and
-   `/api/status` keep the capacity data's own `capacity_updated_at`.
-3. **Queries accounting only when your queue changes.** With `--jobs-api`, the
-   same SSH call computes a fingerprint on the cluster: a `cksum` of your
-   sorted `squeue --me` job IDs and states (never elapsed or remaining time).
-   `sacct` runs only when the fingerprint differs from the previous refresh,
-   for example when a job starts, changes state, or leaves the queue (when its
-   final state must come from accounting), and at least every 5 minutes. The
-   personal jobs API serves these records for its default 24-hour window, so
-   polling clients cause no `sacct` queries of their own; requests for
-   specific `job_id`s or another `since` still query `sacct` directly.
-4. **Answers unchanged data with `304 Not Modified`.** `/api/status`,
-   `/api/v1/snapshot`, and `/api/v1/jobs` send an `ETag` computed without
-   fields that move on every refresh (`generated_at`, `updated_at`, the jobs
-   API's default `since`,
-   `capacity_updated_at`, elapsed/remaining times, and
-   `estimated_wait_seconds`). Clients that send it back in `If-None-Match`
-   receive an empty `304` until something real changes. Clients extrapolate
-   those moving values from `generated_at`: running jobs' elapsed time and
-   wait estimates keep counting on the client's clock, in both the web page
-   and the VS Code extension, so times stay current even when nothing new
-   has happened.
-
-Enable recent and completed jobs, the personal jobs API, and on-demand log
-tails explicitly:
-
-```bash
-python3 cluster_watcher.py serve --jobs-api
-```
-
-This replaces the active-only data in **My jobs** with collapsible **Running**,
-**Pending**, **Completed**, **Failed (Early)**, **Failed (Timeout)**, and
-**Cancelled** groups covering the last 24 hours; empty groups are omitted.
-Slurm's explicit `TIMEOUT` state goes into **Failed (Timeout)**; every other
-failure state goes into **Failed (Early)**. Each job is a collapsed card showing
-its name, ID, progress color bar, and current completion/start estimate. Expand
-it to see cluster and partition, state, requested resources, relevant lifecycle
-times, and its controls. Pending cards omit launch and end rows, while running
-cards omit the end row.
-The sort controls above each list order cards by the same fields; locations
-sort by cluster and then partition, while resources sort by GPU, CPU, and node
-counts. Group and card disclosure state is retained across automatic browser
-refreshes while that page remains open.
-
-An expanded non-pending card has **Archive**, **Open .err**, and **Open .out**
-buttons. Pending cards omit both log actions. Archived snapshots continue to
-receive refreshed job state, so the actions appear in place if an archived
-pending job later starts or finishes.
-The log controls retrieve a bounded 100-line tail only when clicked and show
-the remote path and whether the result was truncated. Archived cards move into
-the collapsed **Archive** group at the bottom and offer **Restore**. Both lists
-are independently sortable. The archive, including a last-seen copy of the job
-data, is stored in the browser's local storage for this dashboard origin. It
-therefore survives page and browser restarts without writing to
-`clusters.toml`; clearing site data or using a different browser/host/port
-starts with a separate archive.
-Restoring an older saved job also retains its last-seen row locally, so it does
-not vanish merely because it has aged out of Slurm's 24-hour query window.
-
-The separately gated SSH session and remote-command services are enabled with
-`--command-api`. Both sensitive flags can be enabled together:
-
-```bash
-python3 cluster_watcher.py serve --jobs-api --command-api
-```
-
-A small analogue countdown clock beside the page title shows the time until
-the next status refresh without occupying a full-width progress bar. It resets
-only after the new payload arrives, so a slow collection is shown as
-`Refreshing…` instead of presenting a misleading countdown.
-On startup, the dashboard keeps its loading placeholders visible and retries
-once per second until the first background collection completes; it does not
-wait for the normal refresh interval before showing the initial cluster data.
-Browsers can abandon an in-flight request when a tab reloads, closes, or starts
-a replacement refresh. The server treats the resulting broken pipe or reset as
-a normal client disconnect and continues serving subsequent requests without
-printing a traceback.
-
-The webpage groups nodes beneath their partition names. Each node card displays
-its individual GPUs as large cells above its CPUs as smaller cells; red cells
-are allocated and green cells are idle. Node state colors and definitions
-remain in the glossary. Open/closed partition details are remembered across
-automatic data refreshes for as long as the page remains open.
-
-## Reuse authenticated sessions from another terminal
-
-`serve` authenticates the configured interactive machines and creates
-user-private OpenSSH control masters. A second terminal on the same local host,
-under the same Unix user, can use those masters directly without HTTP and
-without entering the password or OTP again:
-
-```bash
-# Terminal 1: authenticate and keep the dashboard running.
-python3 cluster_watcher.py serve
-
-# Terminal 2: inspect and use those same sessions.
-python3 cluster_watcher.py sessions
-python3 cluster_watcher.py exec cluster-b -- nvidia-smi -L
-python3 cluster_watcher.py shell cluster-b
-```
-
-`--command-api` is not required for these CLI commands. They load the same
-`clusters.toml` and address the same local control sockets directly. The
-terminal must be on the same machine where `serve` was started; an identically
-named session on another login node is not transferable. A master may remain
-usable after `serve` exits until its configured `control_persist` idle period
-expires, but running `serve` is the normal way to keep sessions active.
-
-`sessions` prints each visible machine, whether its master is open, and its
-estimated remaining idle lifetime. Use `sessions --json` for the same versioned
-document returned by `/api/v1/sessions`. Activity observations are stored in
-the private SSH runtime directory so separate Cluster Watcher processes share
-the estimate. OpenSSH still does not expose its exact expiry deadline, and
-activity from unrelated SSH clients is not observable, so the value can be
-`unknown` or approximate.
-
-`exec` treats everything after `--` as a command and argument vector, relays
-stdout and stderr, and exits with the remote command's status. By default the
-remote command has no execution time limit, so long-running foreground commands
-continue until they finish, fail, lose their SSH session, or are interrupted.
-Set any positive timeout in seconds before the machine name when a deadline is
-desirable:
-
-```bash
-python3 cluster_watcher.py exec --timeout 120 cluster-b -- bash -lc \
-  'cd /path/to/project && python3 train.py --help'
-```
-
-For example, `--timeout 600` permits the remote command to run for ten minutes.
-
-`exec` retains at most 1 MiB from each output stream and returns status 124 when
-an explicitly configured timeout expires. Its SSH session health check remains
-bounded even when command execution is unlimited. The HTTP command endpoint,
-which has a different security profile from the local CLI, continues to default
-to a 30-second timeout and requires a value between 1 and 300 seconds. `shell`
-inherits the local terminal and opens an interactive
-remote shell without an execution timeout.
-
-Neither `exec` nor `shell` initiates authentication or silently reconnects.
-Both first verify the named master and disable OpenSSH's direct-connection
-fallback. If the machine is unknown, the session has expired, or the connection
-drops, the command exits nonzero with a clear diagnostic. Run `login` to
-authenticate again after an expired session.
-
-### Log in again after a session closes
-
-A login node can close a shared session (a server restart, a network
-interruption, or a session limit), after which every refresh of that machine
-fails with an error such as `Permission denied (gssapi-with-mic,password)`.
-Re-open it without restarting `serve`:
-
-```bash
-cluster-watcher login cluster-b   # one machine and its credential group
-cluster-watcher login             # every interactive machine
-```
-
-`login` asks only for what is needed:
-
-- Machines whose session is still open are skipped and ask for nothing.
-- A named machine brings the other machines of its `credential_group`, so the
-  shared password is asked for once for all closed sessions in the group; each
-  machine still asks for its own one-time code.
-- The running service uses the re-opened session on its next refresh.
-
-When a refresh of an `interactive_auth` machine fails, the service checks
-locally (`ssh -O check`) whether its shared session is still open and reports
-`login_required: true` in `/api/status` and `/api/v1/snapshot` when it is not;
-the web dashboard and the VS Code **Cluster Status** view then offer the login.
-Shared sessions also send SSH keepalives every 30 seconds
-(`ServerAliveInterval=30`, `ServerAliveCountMax=4`), so a firewall does not
-drop an idle session and a broken one is noticed within about two minutes.
-
-## GPU availability web service
-
-While `serve` is running, other programs can read a complete point-in-time
-snapshot from this versioned endpoint:
-
-```text
-GET http://127.0.0.1:8080/api/v1/snapshot
-```
-
-JSON is used because the response contains nested cluster, partition, node,
-hardware, and scheduling data while remaining directly usable from most
-languages. For example:
-
-```bash
-curl --fail --silent http://127.0.0.1:8080/api/v1/snapshot | python3 -m json.tool
-```
-
-```python
-import json
-from urllib.request import urlopen
-
-with urlopen("http://127.0.0.1:8080/api/v1/snapshot") as response:
-    snapshot = json.load(response)
-
-for cluster in snapshot["clusters"]:
-    for partition in cluster["partitions"]:
-        available = partition["gpus"]["schedulable_idle"]
-        print(cluster["name"], partition["name"], available)
-```
-
-The public contract is separate from the unversioned `/api/status` payload
-used internally by the webpage. Incompatible future contracts will receive a
-new URL version. A successful request returns HTTP `200` and
-`application/json`; before the first background collection completes it
-returns HTTP `503` with `Retry-After: 1`. Responses use `Cache-Control:
-no-store`, since callers should make routing decisions from current data.
-
-### Snapshot schema
-
-The top-level fields are:
-
-| Field | Meaning |
+| Path | Responsibility |
 | --- | --- |
-| `schema_version` | Contract version, currently `1.0`. |
-| `generated_at` | ISO 8601 time of the underlying status collection. |
-| `status_refresh_seconds` | Normal node/partition refresh interval. |
-| `wait_probe_refresh_seconds` | Slower `sbatch --test-only` refresh interval. |
-| `clusters` | All configured clusters, including unreachable ones. |
+| `clusterwatcher/config.py` | Validate configuration. |
+| `clusterwatcher/models.py` | Shared data types. |
+| `clusterwatcher/ssh.py`, `credentials.py`, `askpass.py` | SSH transport, control masters, and ephemeral MFA handling. |
+| `clusterwatcher/remote_batch.py` | One-call-per-cluster command batching. |
+| `clusterwatcher/slurm.py`, `wait_probes.py`, `compute.py` | Query and parse Slurm, wait probes, and GPU ranking. |
+| `clusterwatcher/jobs.py`, `job_scripts.py` | Cached personal jobs, safe log tails, and batch-script lookup. |
+| `clusterwatcher/commands.py` | Remote-command policy and session inventory. |
+| `clusterwatcher/snapshot.py` | Public snapshot API contract. |
+| `clusterwatcher/dashboard.py` | Web page and JSON service. |
+| `clusterwatcher/terminal_*.py` | Terminal boards and their refresh loops. |
+| `clusterwatcher/setup_wizard.py`, `cli.py` | `setup`/`config` and command-line orchestration. |
+| `cluster_watcher.py` | Minimal executable entry point. |
+| `vscode/` | VS Code extension (a thin client of the loopback APIs). `renderers.js` draws the views and `wait-chart.js` the wait chart. |
 
-Each cluster contains its configured `name` and `host`, `reachable`,
-`resource_data_complete`, collection errors, unique cluster-wide resource
-totals, the time its wait estimates were last probed, and every known
-partition. When Slurm exposes them, `scheduling` contains `scheduler_type`,
-`priority_type`, `priority_weight_partition`, and `priority_flags`. An empty
-object means those settings were unavailable. `error` means the cluster itself
-could not be queried; `resource_error` means the basic partition query worked
-but detailed node/GPU collection failed. `login_required` is `true` when an
-`interactive_auth` cluster failed because its shared SSH session has closed
-(fix it with `cluster-watcher login NAME`). Login usernames and individual
-personal job details are deliberately excluded from this public contract.
-
-Each partition contains:
-
-| Field | Meaning |
-| --- | --- |
-| `name`, `rank`, `available` | Slurm name, compute rank, and whether the partition is administratively up (`null` if Slurm did not report it). |
-| `priority_job_factor`, `priority_tier` | Slurm's partition contribution to multifactor job priority and its separate scheduling/preemption tier; `null` when unavailable. |
-| `aggregate` | `true` when the partition reuses nodes from specific partitions; do not add its totals to those partitions. |
-| `reported_nodes`, `node_states` | Slurm node count and current state distribution. |
-| `cpus` | Total, allocated, and idle CPU threads. |
-| `gpus` | Total, allocated, idle, schedulable-idle, unavailable-idle, maximum GPUs per node, and model inventory. |
-| `wait_estimates` | Hypothetical job-wide GPU and derived node counts, host-memory request, walltime, expected start, computed wait in seconds, any probe error, and its `error_kind` (see [Why a wait cell has no estimate](#why-a-wait-cell-has-no-estimate)). |
-| `nodes` | Per-node state, resources, GPU types/specifications, and earliest visible release time. |
-
-`gpus.idle` means physically unallocated. `gpus.schedulable_idle` is the safer
-routing signal: it excludes unallocated GPUs on nodes whose Slurm state is
-drained, down, failed, maintained, rebooting, powered off, reserved, or not
-responding. `gpus.unavailable_idle` is the difference between those values.
-GPU model entries include their Slurm type names, catalog status, VRAM, dense
-FP16/BF16 Tensor/Matrix throughput, and availability totals. A `null` model
-availability means Slurm reported a mixed-type node without enough information
-to attribute its current allocations to individual types.
-
-Wait estimates contain `nodes`, `memory_mb`, `walltime_seconds`,
-`expected_start_at`, and `estimated_wait_seconds`. They are user/account-specific
-scheduler projections, not reservations. Always inspect
-`wait_estimates_updated_at`: availability is
-refreshed at the normal dashboard interval, while these more expensive probes
-are cached for ten minutes. If Slurm cannot evaluate a request, its time fields
-are `null` and `error` explains why. Slurm start times without an explicit UTC
-offset are interpreted in the web-service host's local timezone when deriving
-`estimated_wait_seconds`.
-
-A shortened response looks like this:
-
-```json
-{
-  "schema_version": "1.0",
-  "generated_at": "2026-09-22T10:00:00+00:00",
-  "status_refresh_seconds": 15,
-  "wait_probe_refresh_seconds": 600,
-  "clusters": [
-    {
-      "name": "cluster-a",
-      "host": "slurm-submit.example",
-      "reachable": true,
-      "resource_data_complete": true,
-      "error": null,
-      "resource_error": null,
-      "wait_estimates_updated_at": "2026-09-22T09:59:00+00:00",
-      "resources": {
-        "nodes": 8,
-        "gpus": {"total": 64, "allocated": 56, "idle": 8, "schedulable_idle": 8, "unavailable_idle": 0}
-      },
-      "partitions": [
-        {
-          "name": "gpu-h100",
-          "rank": 1,
-          "aggregate": false,
-          "available": true,
-          "gpus": {
-            "total": 64,
-            "allocated": 56,
-            "idle": 8,
-            "schedulable_idle": 8,
-            "unavailable_idle": 0,
-            "max_per_node": 8,
-            "models": [{"name": "NVIDIA H100 80 GB", "vram_gb": 80, "fp16_bf16_tensor_tflops": 989.0}]
-          },
-          "wait_estimates": [
-            {"gpus": 1, "memory_mb": 1024, "walltime_seconds": 3600, "expected_start_at": "2026-09-22T10:30:00", "estimated_wait_seconds": 1800, "error": null, "error_kind": null}
-          ]
-        }
-      ]
-    }
-  ]
-}
-```
-
-The server binds only to `127.0.0.1` by default. A process on another machine
-cannot access it unless you deliberately bind to a reachable interface, for
-example `python3 cluster_watcher.py serve --host 0.0.0.0 --no-browser`.
-Cluster Watcher does not provide authentication or TLS, so an externally bound
-service must be protected with a firewall or an authenticated HTTPS reverse
-proxy. The snapshot exposes cluster names, hosts, node names, capacities, and
-utilization and should be treated as operational infrastructure data.
-
-## Personal jobs web service
-
-Personal job metadata and logs are deliberately separate from the public
-availability snapshot. This API is disabled by default and is enabled with:
+### Tests
 
 ```bash
-python3 cluster_watcher.py serve --jobs-api
+python3 -m unittest discover -s tests -v   # Python suite (no cluster needed)
+cd vscode && npm test                      # extension unit tests (Node.js 20+)
 ```
 
-`--jobs-api` also enables job collection; `--jobs` is not additionally
-required. For safety, Cluster Watcher refuses to start if `--jobs-api` is
-combined with a non-loopback `--host`. Accepted values include `127.0.0.1`,
-`::1`, and `localhost`. Use an SSH tunnel rather than exposing personal data directly:
-
-```bash
-ssh -L 8080:127.0.0.1:8080 user@login-node
-```
-
-### Query jobs
-
-```text
-GET http://127.0.0.1:8080/api/v1/jobs
-```
-
-The response is JSON with `schema_version: "1.0"`, `generated_at`, the applied
-`since` and `state` filters, per-cluster reachability/accounting results, and a
-flat `jobs` array. By default it returns active jobs plus jobs seen by `sacct`
-during the preceding 24 hours.
-
-Optional query parameters are:
-
-| Parameter | Meaning |
-| --- | --- |
-| `cluster` | Exact configured cluster name; repeat to select multiple clusters. |
-| `job_id` | Numeric job ID or `JOB_ARRAY_TASK` ID; repeat to select multiple IDs. A parent array ID also matches its tasks. |
-| `state` | `active`, `terminal`, or `both` (default). |
-| `since` | ISO 8601 accounting lower bound; defaults to 24 hours ago. A timestamp without an offset is interpreted as UTC. |
-
-For example, the following is one request and therefore one batched `sacct`
-query per selected cluster—not one remote request per ID:
-
-```bash
-curl --get --fail --silent \
-  --data-urlencode 'cluster=cluster-a' \
-  --data-urlencode 'job_id=1000101' \
-  --data-urlencode 'job_id=1000102_3' \
-  --data-urlencode 'state=both' \
-  http://127.0.0.1:8080/api/v1/jobs | python3 -m json.tool
-```
-
-Every job contains `cluster`, `job_id`, `array_task_id`, `name`, normalized
-`state`, `exit_code`, `submit_at`, `start_at`, `end_at`, `elapsed_seconds`,
-`partition`, `nodes`, `expected_start_at`, `reason`, and, for active jobs,
-Slurm's numeric `priority` when available. Array tasks remain
-separate records and use canonical `ARRAY_JOB_ID_TASK_ID` IDs consistently
-across live and accounting data. Slurm annotations such as
-`CANCELLED by 12345` are normalized to `CANCELLED`, while `exit_code` is
-preserved. Slurm absolute timestamps are collected as UTC and include an
-explicit `Z` suffix in the API. The terminal converts them to its local
-timezone, while the web dashboard converts them to the browser's local
-timezone. This avoids treating a timezone-less UTC accounting timestamp as a
-local time.
-
-Results are cached for at least the normal dashboard refresh interval. Active
-`squeue` data is merged with `sacct`, providing pending start estimates and
-dependency reasons while retaining jobs that have already disappeared from
-the queue. If accounting is unavailable, active jobs are still returned,
-`accounting_available` is false, and specifically requested unresolved IDs are
-returned as `UNKNOWN`. Each cluster has its own `reachable` and `error` fields,
-so one failed login does not erase successful results from other clusters.
-
-A shortened response is:
-
-```json
-{
-  "schema_version": "1.0",
-  "generated_at": "2026-09-23T12:00:00+00:00",
-  "since": "2026-09-22T12:00:00+00:00",
-  "state": "both",
-  "clusters": [
-    {"name": "cluster-a", "reachable": true, "accounting_available": true, "error": null}
-  ],
-  "jobs": [
-    {
-      "cluster": "cluster-a",
-      "job_id": "1000101",
-      "array_task_id": null,
-      "name": "train_model",
-      "state": "COMPLETED",
-      "exit_code": "0:0",
-      "submit_at": "2026-09-22T16:33:15Z",
-      "start_at": "2026-09-22T16:33:19Z",
-      "end_at": "2026-09-23T16:33:19Z",
-      "elapsed_seconds": 86400,
-      "partition": "gpu-l40",
-      "nodes": ["gpu-node14"],
-      "expected_start_at": null,
-      "reason": null
-    }
-  ]
-}
-```
-
-Active (queued or running) jobs also carry `dependency`: Slurm's raw
-dependency expression such as `afterok:1000100(unfulfilled)`, or `null`.
-The `DependencyNeverSatisfied` reason is retained so clients can distinguish
-an ordinary wait from an impossible dependency.
-
-### Cancel a job
-
-```text
-POST /api/v1/jobs/{cluster}/{job_id}/cancel
-Content-Type: application/json
-```
-
-Runs `scancel --user=<configured username> -- <job_id>` on that cluster, so only
-the configured account's jobs can be signalled, and clears the jobs cache. The
-`application/json` content type is mandatory (any body, e.g. `{}`); browsers
-cannot send it cross-origin without a CORS preflight that this server never
-approves, so web pages cannot cancel jobs through the loopback service. Success
-returns `cluster`, `job_id`, and `cancelled_at`; an invalid ID or cluster
-returns `400`, a missing JSON content type `415`, and a remote `scancel` failure
-`502`. Like the other personal-job routes it requires `--jobs-api`. The live
-queue snapshot catches up on the next status refresh.
-
-### Fetch a job's batch script
-
-```text
-GET /api/v1/jobs/{cluster}/{job_id}/script
-```
-
-Returns `cluster`, `job_id`, `source`, `path`, `content` (at most 1 MiB), and
-`truncated`. Cluster Watcher tries, in order:
-
-1. `scontrol write batch_script` - the exact submitted script, available while
-   the job is queued or running (`source: "slurm"`, `path: null`);
-2. `sacct --batch-script` - the exact script, only on sites that store it in
-   accounting (`AccountingStoreFlags=job_script`; `source: "accounting"`);
-3. the file named by the job's recorded `sbatch` command line (`SubmitLine`),
-   resolved against its working directory (`source: "file"`). This is the
-   file as it is *now*, which may differ from what was submitted.
-
-`clusterwatcher/job_scripts.py` implements the lookup, including parsing the
-`sbatch` options that take values. Jobs submitted with `--wrap` or from
-standard input, and script files that were deleted, return HTTP `404` with an
-explanation.
-
-### Fetch a log tail
-
-```text
-GET /api/v1/jobs/{cluster}/{job_id}/log
-```
-
-Query parameters are `stream=out|err` (default `err`), `tail=N` (default 100,
-hard-capped at 2000), `before=N` (default 0), and optional
-`path=/absolute/remote/path`. `before` skips that many lines from the current
-end of the file, allowing a client to page backward without transferring the
-newer lines again. Cluster Watcher uses `scontrol show job` for a live job and
-falls back to `sacct` after it has finished. An explicit ledger path is accepted
-only when its remotely
-canonicalized value lies under that cluster's configured `job_log_roots`.
-
-```bash
-curl --get --fail --silent \
-  --data-urlencode 'stream=err' \
-  --data-urlencode 'tail=200' \
-  --data-urlencode 'path=/home/alice/jobs/project/logs/job.err' \
-  http://127.0.0.1:8080/api/v1/jobs/cluster-a/1000101/log \
-  | python3 -m json.tool
-```
-
-The response contains `cluster`, `job_id`, `stream`, resolved `path`, returned
-line count, `before`, `more_before`, the backward-compatible `truncated` alias,
-and `content`. Each response transfers at most 2,000 log lines and is fetched
-only for an explicit request; backward pages are selected on the remote host
-rather than downloading the intervening file. A queued job or a missing file
-returns HTTP `404` with a clear JSON `error`; unsafe parameters return HTTP
-`400`, and remote query failures return HTTP `502`.
-
-## SSH session and remote-command services
-
-These services permit arbitrary code execution with the configured remote
-user's permissions. They are disabled by default and enabled only with:
-
-```bash
-python3 cluster_watcher.py serve --command-api
-```
-
-As with `--jobs-api`, Cluster Watcher refuses `--command-api` on a non-loopback
-`--host`. There is no bearer-token or TLS mode. Use the API from the same
-machine or through an SSH tunnel; do not expose it on a shared network.
-
-### Inspect sessions
-
-```text
-GET http://127.0.0.1:8080/api/v1/sessions
-```
-
-```bash
-curl --fail --silent http://127.0.0.1:8080/api/v1/sessions \
-  | python3 -m json.tool
-```
-
-The versioned JSON response lists every visible configured machine. Each entry
-contains `name`, `host`, `username`, `available`, `session_open`, the SSH master
-`pid` when available, `control_persist_seconds`, `last_activity_at`,
-`estimated_remaining_seconds`, and `error`. `available` means that a live
-control master was verified with `ssh -O check` and the command service can use
-it now; merely having a machine in `clusters.toml` is not reported as
-availability.
-
-OpenSSH does not expose a master's exact idle-expiry deadline. The remaining
-time is therefore an estimate based on commands Cluster Watcher processes have
-observed. Those observations are shared through the user-private SSH runtime
-directory. It is `null` when no observation exists or persistence is unlimited.
-Activity from an unrelated SSH client can extend the real lifetime without
-updating this estimate. The endpoint checks local control sockets and never
-logs in or reopens a connection.
-
-### Execute a command
-
-```text
-POST http://127.0.0.1:8080/api/v1/commands
-Content-Type: application/json
-```
-
-The JSON request has required `machine` and `command` strings plus optional
-`timeout_seconds`, which defaults to 30 and must be between 1 and 300. Commands
-are non-interactive remote shell text: multiline scripts work, but there is no
-TTY, stdin stream, or interactive prompt handling.
-
-```bash
-curl --fail-with-body --silent \
-  -H 'Content-Type: application/json' \
-  --data '{"machine":"cluster-a","command":"hostname; nvidia-smi -L","timeout_seconds":30}' \
-  http://127.0.0.1:8080/api/v1/commands \
-  | python3 -m json.tool
-```
-
-A successful launch returns `machine`, `exit_code`, `stdout`, `stderr`,
-`stdout_truncated`, `stderr_truncated`, `timed_out`, `duration_seconds`,
-`started_at`, `finished_at`, `connection_dropped`, and the post-command session
-state. A nonzero remote exit code is still HTTP `200`; inspect `exit_code`.
-Commands are limited to 64 KiB, stdout and stderr are each retained up to 1
-MiB, and commands to the same machine are serialized. Excess output is drained
-but discarded so it cannot deadlock SSH; the corresponding `*_truncated` flag
-is set.
-
-The endpoint first verifies an existing master and does not initiate login or
-MFA. Responses distinguish the important failure modes:
-
-| HTTP status | Meaning |
-| --- | --- |
-| `200` | The command completed; `exit_code` may still be nonzero. |
-| `400` | Invalid JSON, command, machine value, timeout, or request field. |
-| `404` | The API is disabled, the endpoint is absent, or the machine name is unknown. |
-| `409` | The configured machine has no open SSH master. |
-| `411` / `413` / `415` | Content length is missing, the request is too large, or it is not JSON. |
-| `502` | SSH execution failed or the connection dropped; partial output is returned when available. |
-| `504` | The command exceeded its timeout; partial output is returned when available. |
-
-Normal dashboard, wait-probe, job, log, and command operations all share the
-same SSH transport and control sockets. The services do not call one another
-over HTTP and do not duplicate authentication state.
-
-## Compute ranking
-
-The GPU hardware catalog is personal, optional configuration: a
-`gpu_profiles.toml` beside the `clusters.toml` in use (for an installed command,
-`~/.config/cluster-watcher/gpu_profiles.toml`). It is git-ignored like
-`clusters.toml`; start from [`gpu_profiles.example.toml`](gpu_profiles.example.toml).
-`install.sh` adopts a `gpu_profiles.toml` found beside it once, and
-`uninstall.sh --purge-config` backs it up and removes it with the configuration.
-Without a catalog, Cluster Watcher reports no GPU model, VRAM, or throughput
-and ranks partitions by GPU count; a malformed catalog is reported at startup.
-
-Every `[[profile]]` has a required `cluster` field that must exactly equal the
-corresponding `[[machine]].name` in `clusters.toml`. This is intentional:
-partition and GRES labels are local to a Slurm cluster, so a label such as
-`a100` cannot accidentally use another cluster's profile in the combined
-dashboard. If a machine is renamed, update its profile entries too. Each
-profile stores per-GPU/APU VRAM plus dense peak FP16/BF16 Tensor/Matrix
-throughput, without sparsity multipliers. Aliases are matched against GRES
-types, partition names, and node names, so a cluster whose GPU partitions are
-generic can be identified from node-name prefixes when Slurm does not emit a
-GPU type.
-
-AMD MI300A APUs count as GPU scheduling resources: Slurm schedules one APU as
-one `gres/gpu`. Some Slurm versions/sites
-leave the legacy `Gres`/`GresUsed` fields empty while reporting those resources
-in `CfgTRES`/`AllocTRES`. Collection therefore prefers populated GRES data but
-falls back to TRES, recognizes both generic and typed `gres/gpu` entries, and
-does not double-count an aggregate alongside its model-specific breakdown.
-This feeds the dashboard cells, compute ranking, wait probes, and snapshot API,
-so `gpus.total`, `allocated`, `idle`, and `schedulable_idle` all include
-APUs.
-
-The dashboard passes the source machine name through its status collection and
-orders specific partitions by their best single GPU: VRAM first, then Tensor
-throughput, then CPU-thread count. It displays that GPU's model and per-GPU
-values beside each partition. `*-all` partitions whose nodes are fully covered
-by specific partitions are collapsed at the bottom. Every partition has an
-expandable arrow for its node-level view. Within an expanded partition, node
-cards are ordered by idle GPU count, then idle CPU count. GPU/CPU cells are
-drawn idle (green), allocated (red), then unavailable (yellow). The summary
-blocks likewise place idle nodes first and full nodes second, followed by the
-remaining states. Hovering a partition's summary blocks shows a nonzero-only
-breakdown of its node availability states.
-
-## Job awareness and wait indicators
-
-The dashboard highlights nodes and resource cells used by your running jobs in
-blue. A **My jobs** section at the top combines running and pending work from
-all visible clusters. Every row gives the Slurm job name and ID, cluster,
-partition, requested node/GPU/CPU counts, state, progress, and submission time.
-Running, completed, and failed rows also show their launch time. Completed and
-failed rows show their end time. Both columns can be sorted and use the
-browser's local timezone.
-The same job name—not just its numeric ID—appears in the corresponding
-partition heading.
-GPU requests are recognized in both Slurm's traditional `gpu:TYPE:COUNT` GRES
-form and the `gres/gpu:COUNT` form emitted by some clusters. TRES output that
-contains both a generic GPU total and a model-specific breakdown uses the
-generic total, avoiding double-counting the same allocation.
-
-Pending jobs have an hourglass and use Slurm's expected start time (when
-backfill provides one). They are shown as `< 5 minutes`, `< 30 minutes`, `< 1
-hour`, `< 2 hours`, or a nearest-hour estimate thereafter. Internally, the
-dashboard runs `squeue --me --start` and reads its `%j` job-name and `%S`
-expected-start fields. This is the scheduler's current backfill projection,
-not a reservation or guarantee: a priority change, new job, reservation, or a
-running job ending early can move it. Clusters without the backfill scheduler
-may not provide an expected start time.
-
-An expanded Pending card also shows a compact left-to-right **Priority** gauge
-when at least two visible pending jobs on that cluster have numeric Slurm
-priorities. Its tick is a rank among those jobs, not a universal Slurm scale;
-the hover text gives only the raw priority, rank, and comparison scope. The
-gauge normally appears in expanded details. When no wait estimate exists, it
-replaces that message in the always-visible summary and uses the same thickness
-as a progress bar. The gauge is omitted when there is no meaningful comparison
-and adds no visible number or directional arrows to the card. Reservations,
-partition tiers, resource fit, and backfill can still change actual start
-order.
-
-Each Cluster Status partition heading shows a **Priority** gauge when Slurm
-reports `PriorityJobFactor`. Its marker is the factor divided by the largest
-factor among the displayed partitions. Hovering gives the exact job factor,
-the separate `PriorityTier`, and the cluster's `SchedulerType`, `PriorityType`,
-`PriorityWeightPartition`, and `PriorityFlags` when available. The job factor
-only contributes to job priority under `priority/multifactor` when the partition
-weight is nonzero; `PriorityTier` instead controls scheduling/preemption tiers,
-and `NO_NORMAL_PART` changes whether Slurm normalizes the factor. Consequently
-this gauge describes configured partition policy, not queue position or a
-predicted start time. Unsupported data is omitted rather than shown as zero.
-
-The query also reads Slurm's `%V` submission time and `%E` remaining-dependencies
-field. When Slurm supplies an expected start, a pending-job progress bar begins
-at its submission time and advances toward that estimate. Its label counts down
-using the compact `<duration> estimated wait` form. If Slurm cannot estimate a
-start, the card omits the empty progress bar and says **no estimate available**.
-A job with an unsatisfied dependency likewise omits the bar and uses
-`dependency:<type> <job ID>`; selecting the ID jumps to its card or reports
-that the card could not be found. In the expanded card, each ID is followed by
-a clock while waiting, a green check when its condition is satisfied, or a red
-x when it failed. Hovering the icon explains the condition, replacing the
-visible Slurm status parenthetical. This hover uses the same fast display as
-the availability breakdown. Slurm usually removes satisfied entries from `%E`,
-so a check is shown only while that ID is still available in the expression or
-another retained job snapshot. Jobs whose overall dependency is impossible
-move from **Pending** to **Failed Dependency**.
-
-Running jobs use Slurm's `%M` elapsed time and `%l` original full time limit to
-draw progress from the actual beginning of the allocation—not from when the
-dashboard was opened. The label gives elapsed, remaining, and full allotted
-runtime. It advances in the browser between status refreshes and re-synchronizes
-with Slurm after each refresh. `%L` remains available as a fallback when elapsed
-time is absent. Unlimited or unavailable time limits are shown as text instead
-of a misleading percentage.
-
-Change the bucket boundaries in your configuration if the defaults do
-not suit your workflow. They are positive, strictly increasing minute values;
-the final bucket always becomes a nearest-hour estimate:
-
-```toml
-[dashboard]
-wait_threshold_minutes = [5, 30, 60, 120]
-```
-
-Hover a node card to see whether its GPU resources are available now;
-otherwise, it shows the earliest visible running-job end time as a
-resource-release hint. That hint is not a guaranteed start time because
-priority, reservations, and the requested resource shape also affect
-scheduling.
-
-## Hypothetical GPU-job wait estimates
-
-The dashboard also shows an **Estimated queue wait** bar chart inside every GPU
-partition. It uses `sbatch --test-only`, so no job is submitted
-or run. Batch-mode probing is important on sites that limit every `srun`
-allocation to short interactive walltimes, even in test-only mode. For each
-partition, it derives the available node GPU capacities and probes 1, 2, 4,
-and subsequent powers of two. Shapes normally use 1-hour, 12-hour, and 24-hour
-walltimes because backfill's expected start depends on the requested duration;
-each runtime is capped by that partition's configured maximum, with duplicate
-capped durations probed only once. Requests larger than one node (up to 64
-GPUs, the tables' last column) are probed only for the shortest walltime, which
-is the one the tables show, to keep scheduler queries few. Each probe requests
-the fewest nodes that can provide the GPU total, one task per node
-(`--ntasks-per-node=1`; with a single task Slurm would silently shrink a
-multi-node request to one node), and 1024 MiB of host memory per GPU on each
-node. This is sent
-as an explicit per-node `--mem` limit because several site submission filters
-do not treat `--mem-per-gpu` as satisfying their shared-job memory requirement.
-The deliberately small allocation keeps this metric focused on GPU pressure.
-
-The requested GPUs normally use Slurm's `--gres=gpu:N` syntax. If a partition's
-submission filter says that this did not request GPUs, the probe is retried
-with job-wide `--gpus=N` on the cluster, in the same SSH call. A "More than N
-gpus per node" refusal is a per-node policy limit rather than a syntax problem,
-so it is not retried. The requested memory is displayed in the dashboard and
-returned as `memory_mb` by the API.
-
-All shapes of one partition run in order in a single SSH call (see
-[How refreshes are kept cheap](#how-refreshes-are-kept-cheap)); partitions and
-clusters are probed concurrently. Each `sbatch --test-only` may take up to 60
-seconds, because a busy controller can need tens of seconds to answer, and a
-partition starts no further probes after 240 seconds. The first round starts
-with the service, and tables show `…` until a cluster's round has finished.
-
-The chart groups bars by requested GPU count and colors them by requested
-walltime; its key identifies the 1-hour, 12-hour, and 24-hour series. The
-vertical axis is estimated queue wait from zero to 24 hours. A `+` marks waits
-beyond the displayed 24-hour range, while a striped marker means the estimate
-was unavailable. Hover any bar for its precise current estimate or error.
-
-These probes run in a separate cache no more often than every ten minutes;
-they are deliberately independent from the normal dashboard refresh interval.
-The result reflects your current account, QOS, fairshare, and queue state, but
-is only Slurm's current projection. Cluster Watcher parses successful Slurm
-messages from both stdout and stderr. Hover a cell or bar to see Slurm's
-recorded message. Subsequent scheduled refreshes try every probe again.
-
-### Why a wait cell has no estimate
-
-Each failed probe carries Slurm's message (`error`) and its classification
-(`error_kind` in the API), shown with these labels:
-
-| Label | `error_kind` | Meaning |
-|---|---|---|
-| `DENY` | `denied` | Your account may not use the partition. |
-| `min` | `minimum` | Below the partition's minimum GPU request (`QOSMinGRES`); larger requests may work. |
-| `limit` | `limit` | Over a QOS, association, per-node GPU, or time limit for your account. |
-| `n/a` | `unavailable` | No node can run it now, for example because all are drained or powered down. |
-| `ERR` | `timeout`, `error` | A real failure: Slurm did not answer within 60 seconds, or another error. |
-| `?` | `budget` | Not probed: the partition's time budget ran out first. |
-| `…` | — | The cluster's first round of probes has not finished yet. |
-
-Only `ERR` is worth investigating; the others describe your account's policy
-or the cluster's state.
-
-## VS Code extension: use, test, and publish
-
-The extension source lives entirely in [`vscode/`](vscode/). It contributes a
-Cluster Watcher Activity Bar container with two sidebar views:
-
-- **My Jobs** groups jobs as running, pending, failed dependency, completed,
-  failed early, failed by timeout, and cancelled. Slurm
-  `DependencyNeverSatisfied` jobs use **Failed Dependency**, `TIMEOUT` jobs use
-  **Failed (Timeout)**, and
-  all other failure states use **Failed (Early)**. State groups and individual job cards
-  are collapsible; a collapsed card retains a single-line, ellipsized job name
-  (hover it for a white-outlined `<cluster> <job ID> <full job name>` label) and
-  a progress bar with the run/allotted time
-  or start estimate to its right. Compact cards use tight internal padding and
-  reduced inter-card spacing; the copyable job-ID badge is rectangular.
-  Completed and failed cards retain that
-  runtime comparison using the time limit preserved in Slurm accounting after
-  the job leaves the live queue. Dependency-blocked jobs show
-  `dependency:<type> <job ID>` without an empty progress bar; the job ID links
-  to its card. In expanded details, a clock, green check, or red x follows each
-  dependency ID and marks that condition as waiting, satisfied, or failed;
-  hovering the icon shows the Slurm status and a fuller explanation. Open cards
-  use a horizontal divider between their summary and details instead of a
-  disclosure icon; opening or closing highlights the card border immediately,
-  then lets the highlight fade more slowly.
-  Pending cards with usable estimates use `<duration> estimated wait`; missing
-  estimates say **no estimate available** without an empty bar. Timed progress
-  labels remain on one line at the sidebar's narrowest expanded width. A zero
-  recorded job duration is shown as `<1m`, never `now`. Long progress labels
-  ellipsize as a final safeguard, while expanded resource metadata, dependency
-  expressions, and expanded job names wrap inside the card instead of
-  overflowing it. The
-  copyable job ID precedes the cluster, partition, and resources in the
-  expanded metadata. Calculated running-job limits and terminal-job end times
-  also appear in expanded details; elapsed time remains in the compact progress
-  fraction instead of being repeated below. Running cards omit **Ended**, and
-  pending cards omit both **Launched** and **Ended**.
-  State-group and cluster headings use the 11px
-  size of the native view headings, and job titles are slightly smaller. Dates use
-  `clusterWatcher.dateFormat` (default `DD.MM.YYYY`, tokens `YYYY`, `YY`, `MM`,
-  `DD`) followed by 24-hour `HH:mm` local time. Expanded cards show resource
-  requests, state-relevant lifecycle times, any dependency (each referenced
-  job ID jumps to its card), archive controls, stdout/stderr and batch-script
-  actions (stdout/stderr are hidden while pending), and, for running or pending
-  jobs, an **End** button that confirms
-  before cancelling the job. Detail timestamps stay on one line when space
-  permits; on narrow cards their time wraps below the date and remains
-  right-aligned. The compact action row remains on one line: archive uses an
-  icon and the open actions use **.err**, **.out**, and **script** labels. Those
-  document-opening actions retain the card list's scroll position. The
-  rectangular job-ID copy badge uses an inset focus-colored hover/focus border
-  so none of its edges are clipped.
-- **Cluster Status** follows `cluster-watcher status`: partitions are separated
-  by collapsible cluster headings. Each partition name occupies a full-width
-  row above its capacity data, so the data columns begin **Available**, **GPU**,
-  **VRAM**, and **TFLOPS/s**, followed by one-hour wait estimates for 1–64 GPUs
-  and CPU threads. GPU catalog names use compact model labels such as `H100`;
-  hover the label for the full name using the same fast hover as availability.
-  A wait cell without
-  an estimate is labelled as described in
-  [Why a wait cell has no estimate](#why-a-wait-cell-has-no-estimate); hover it
-  for Slurm's message. The availability bar and its `idle/total` fraction share
-  one line to reduce the table's width and height. Green availability is drawn
-  first, followed by red unavailable capacity; hovering the bar lists only the
-  nonzero node-state categories (for example idle, full, reserved, and down).
-  This node-only hover appears after approximately 100 ms.
-
-The redundant in-webview **My Jobs** and **Cluster Status** titles are omitted;
-the native collapsible VS Code view headings provide those labels. A compact
-`Last update: <date and time with seconds>` line appears directly below each
-heading. Each heading has its own **Refresh** action: **My Jobs** polls only job
-data, while
-**Cluster Status** polls only the capacity snapshot. **Cluster Watcher: Refresh
-Sidebar** in the Command Palette refreshes both views; all other Cluster
-Watcher actions also remain in the Command Palette. Pressing either heading's
-refresh button temporarily replaces it with a spinning sync icon, making even
-a fast or unchanged refresh visible. A notification then reports either
-`Refreshed at: <date and time>` or `Checked, but no updates at: <date and time>`.
-
-The bottom status-bar summary shows the running and pending counts. Its hover
-pluralizes `job` correctly for each count and includes the local date and time
-of the latest successful jobs refresh, including seconds.
-
-The Activity Bar SVG depicts three server boxes with a magnifying glass over
-their upper-right corner. It was created specifically for this project and is
-released under CC0-1.0. Its SPDX notice and dedicated terms travel with the
-asset in [`vscode/media/LICENSE.txt`](vscode/media/LICENSE.txt); it has no
-third-party icon-set dependency.
-
-Select the archive-box icon on an expanded card to move it to the collapsed
-**Archive** group at the bottom. **Restore** returns it to the active state
-group. This choice is stored in VS Code's extension `globalState`, so it
-persists across view reloads and editor restarts. Expanded/collapsed groups and
-cards also keep their current state across live data refreshes; the same
-applies to cluster sections. **.err** and **.out** retrieve the newest 2,000
-lines through the loopback jobs API and open them as read-only virtual editor
-documents. When older output exists, select the upward-arrow **Load 2,000 Older
-Lines** action in that editor's title bar. Every click prepends one bounded
-page until the complete file is loaded. The bounded paging API prevents a
-single request from reading an arbitrary or unbounded remote file.
-
-The extension first tries `clusterWatcher.backendUrl`, which defaults to
-`http://127.0.0.1:8080/`. It therefore attaches automatically when you already
-started:
-
-```bash
-cluster-watcher serve --jobs-api --no-browser
-```
-
-On first use, if no executable is available on the extension host, the
-extension offers **Install and Add to PATH**, **Use Only in VS Code**, and
-**Choose Existing Executable**. Managed installation downloads the native
-Linux, macOS, or Windows artifact for the extension host's architecture. The
-download is pinned to the extension's exact version, bounded in size, and
-checked against a SHA-256 digest embedded in the VSIX before it is smoke-tested
-and atomically installed. Unsupported architectures, macOS/Windows versions,
-and Linux glibc versions are rejected before download.
-
-Use **Cluster Watcher: Manage Backend Installation** at any time to switch
-between the managed and an existing executable, add or remove the managed bin
-directory from the user PATH, repair/update it, or uninstall it. Switching
-does not delete the other choice. **Use Only in VS Code** contributes the
-managed directory to new integrated terminals without persistently changing
-PATH; **Install and Add to PATH** also makes `cluster-watcher` available to new
-system terminals. Only the exact Unix profile block or Windows user-PATH entry
-recorded in the ownership manifest is removed later. Backend uninstall keeps
-all Cluster Watcher configuration, and uninstalling the VS Code extension
-does not silently remove a backend deliberately exposed to normal terminals.
-
-If no service exists, run **Cluster Watcher: Start Service & SSH Sessions**
-from the Command Palette or sidebar title. It launches the configured
-backend in an integrated terminal with `serve --jobs-api`, so password and OTP
-prompts work like they do in a normal terminal. Set optional
-`clusterWatcher.configPath` when the normal configuration should not be used.
-`clusterWatcher.executable` is retained as a fallback for existing settings;
-new executable choices are made through the backend management command.
-Automatic startup is deliberately disabled by default so opening VS Code does
-not unexpectedly request MFA; opt in with `clusterWatcher.autoStart`. Every
-managed or selected executable is checked with `--help` before use. A broken
-choice produces a visible error with a **Manage Backend** button.
-
-Managed backends live outside VS Code extension storage, under
-`~/.local/share/cluster-watcher/vscode-backend` on Linux,
-`~/Library/Application Support/Cluster Watcher/vscode-backend` on macOS, or
-`%LOCALAPPDATA%\Programs\ClusterWatcher\vscode-backend` on Windows. This is
-host-local state: local, WSL, Remote SSH, and container extension hosts can
-each make a different choice. The extension requires Workspace Trust because
-it downloads and runs a native program and opens SSH sessions.
-
-The extension does not implement a second SSH client. Its terminal launches
-the normal Cluster Watcher executable, which uses the same user-private
-OpenSSH `ControlPath` derived from local Unix user, remote user, host, and port.
-Consequently, a separately installed executable recognizes masters created by
-the extension and the extension-started service recognizes masters created in
-another terminal. They must run on the same machine as the same Unix user,
-resolve the same endpoint from the same `clusters.toml`, and share the same
-runtime environment. The manifest declares this as a workspace extension, so
-with VS Code Remote SSH the extension host and executable run on the remote
-development host; sessions on your laptop are separate and cannot be reused
-across that machine boundary. Never point `backendUrl` at an
-untrusted or publicly exposed service: the personal jobs API is intentionally
-loopback-only and has no authentication or TLS.
-
-### Test locally
-
-The unit tests require Node.js 20 or newer and do not contact a cluster:
-
-```bash
-cd vscode
-npm test
-```
-
-The integration test downloads a VS Code build into `vscode/.vscode-test/`
-(ignored by git), starts it with the extension under development, and checks
-that the extension activates, registers every command, and opens both views
-with no service running. Headless Linux machines need Xvfb:
+Each Python test has a five-second watchdog on POSIX, so a stuck test fails
+instead of hanging. (Windows lacks the needed timer signals, so its platform
+tests rely on the CI job deadline.)
+
+The extension integration test downloads VS Code into `vscode/.vscode-test/`
+and checks that the extension activates, registers every command, and opens
+both views without a service. Headless Linux needs Xvfb:
 
 ```bash
 cd vscode
@@ -1622,33 +1278,21 @@ npm install
 xvfb-run -a npm run test:integration   # or plain `npm run test:integration` on a desktop
 ```
 
-For an interactive development run, open the `vscode/` directory as the VS
-Code workspace and press `F5`. The included launch configuration opens an
-Extension Development Host. In that host:
+### Run the extension from source
 
-1. Set `clusterWatcher.executable` or ensure `cluster-watcher` is on `PATH`.
-2. Set `clusterWatcher.configPath` if needed.
-3. Open the Cluster Watcher Activity Bar view.
-4. Run **Cluster Watcher: Start Service & SSH Sessions**, complete any MFA in
-   the integrated terminal, and verify both sidebar views refresh.
-5. Expand/collapse a state group, job card, and cluster; archive and restore a
-   card; open both its `.err` and `.out` virtual documents; and use **Load 2,000
-   Older Lines** on a log large enough to paginate.
-6. Test attachment by starting `cluster-watcher serve --jobs-api --no-browser`
-   separately, reloading the Extension Development Host, and confirming that
-   no second service is launched.
+Open `vscode/` as the workspace and press `F5` to start an Extension
+Development Host. There:
 
-Run the Python suite from the repository root as well because the extension
-depends on its API contracts:
+1. Make sure `cluster-watcher` is on `PATH` (or select an executable), and set
+   `clusterWatcher.configPath` if needed.
+2. Open the Cluster Watcher view and run **Start Service & SSH Sessions**;
+   complete MFA in the terminal and check that both views refresh.
+3. Expand/collapse a group, job card, cluster, and partition card; archive and
+   restore a job; open `.err`/`.out` and use **Load 2,000 Older Lines**.
+4. Start `cluster-watcher serve --jobs-api --no-browser` separately, reload
+   the host, and confirm that no second service starts.
 
-```bash
-python3 -m unittest discover -s tests -v
-```
-
-### Package and install a VSIX
-
-Install the publishing tool, run the tests, and build from the extension
-directory:
+### Package and publish the extension
 
 ```bash
 cd vscode
@@ -1659,128 +1303,104 @@ npm run package
 code --install-extension cluster-watcher-0.1.0.vsix
 ```
 
-You can also choose **Extensions: Install from VSIX…** in VS Code. Packaging
-does not bundle all six native programs. A released VSIX instead contains the
-exact-version URLs, sizes, and SHA-256 digests and downloads only the artifact
-needed by the extension host. A development checkout without the generated
-`vscode/backend-manifest.json` can still select an existing executable, but
-`npm run package` and `npm run publish` refuse to create a release package.
+A VSIX does not bundle all six native programs. It contains exact-version
+URLs, sizes, and SHA-256 digests, and downloads only the one the host needs.
+Without `vscode/backend-manifest.json`, a development checkout can still use
+an existing executable, but `npm run package` and `npm run publish` refuse to
+build a release.
 
-### Publish to the VS Code Marketplace
+<details>
+<summary><b>Marketplace publishing</b></summary>
 
-The extension is published as `CameronBraunstein.cluster-watcher` (publisher
-`CameronBraunstein`). The publisher and the `name` field form the permanent
-extension ID; changing either creates a different extension, and local
-installs would start with an empty job archive.
+The extension is `CameronBraunstein.cluster-watcher`. The publisher and
+`name` form its permanent ID; changing either creates a different extension,
+and local installs would start with an empty archive.
 
-Marketplace publication is part of the tag-triggered release workflow. It
-waits for the GitHub Release, downloads the `vsix` artifact produced earlier
-in that same workflow run, and gives that exact file to `vsce`. There is no
-local download/re-upload step and no second package build. `--skip-duplicate`
-makes a rerun safe after a partially successful release.
-
-Configure its passwordless Microsoft Entra identity once:
+Publishing is part of the tag-triggered release workflow. It waits for the
+GitHub Release, takes the `vsix` built earlier in that run, and gives that
+exact file to `vsce` (`--skip-duplicate` makes reruns safe). One-time setup of
+the passwordless Microsoft Entra identity:
 
 1. Create a user-assigned managed identity in Azure, grant it the Reader role,
    and record its client ID, tenant ID, and subscription ID.
-2. Add a federated credential for this GitHub repository, scoped to the
-   protected `release` environment. Use the GitHub Actions scenario in the
-   Azure portal so Azure creates the correct issuer, subject, and
-   `api://AzureADTokenExchange` audience.
+2. Add a federated credential for this repository, scoped to the protected
+   `release` environment, using the Azure portal's GitHub Actions scenario
+   (issuer, subject, and `api://AzureADTokenExchange` audience).
 3. Add `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID` as
-   secrets on the repository's `release` environment. Protect that environment
-   with required reviewers; if deployment refs are restricted, allow `master`
-   for the setup workflow and version tags for real releases.
-4. Run **Marketplace identity setup** from the repository's Actions page. Copy
-   the `Marketplace publisher member ID` from its job summary, add that ID as a
-   member of publisher `CameronBraunstein` in the
-   [Marketplace management page](https://marketplace.visualstudio.com/manage/publishers/),
-   and give it the Contributor role.
+   `release` environment secrets. Protect the environment with required
+   reviewers; if deployment refs are restricted, allow `master` for the setup
+   workflow and version tags for releases.
+4. Run **Marketplace identity setup** from the Actions page, copy the
+   `Marketplace publisher member ID` from its summary, and add it as a
+   Contributor of publisher `CameronBraunstein` on the
+   [Marketplace management page](https://marketplace.visualstudio.com/manage/publishers/).
 
-After that one-time setup, each release only requires matching version updates
-in `pyproject.toml`, `vscode/package.json`, and `vscode/package-lock.json`, a
-dated `vscode/CHANGELOG.md` entry, and a pushed `vX.Y.Z` tag. The workflow runs
-the tests, builds all six native programs, generates and embeds
-`backend-manifest.json`, creates the GitHub Release, and publishes the same
-VSIX as `CameronBraunstein.cluster-watcher`. The three Azure values identify
-the workload but are kept as environment secrets; GitHub OIDC supplies a new
-short-lived token for each run, so no Marketplace PAT is stored.
+GitHub OIDC then issues a short-lived token per run, so no Marketplace PAT is
+stored. The emergency local `npm run publish` runs
+`scripts/check-publish.js`, which refuses stale, missing, or incomplete
+release metadata. See the
+[VS Code publishing guide](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)
+and [GitHub's Azure OIDC guide](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-azure).
 
-For source-checkout packaging only, place the generated manifest beside
-`vscode/package.json` first. `npm run package` and the emergency local
-`npm run publish` command run `scripts/check-publish.js` and deliberately
-refuse stale, missing, or incomplete release metadata. The normal automated
-release does not invoke the local publish script. The code is licensed
-GPL-3.0-or-later (`LICENSE`); the icons keep their CC0-1.0 dedication.
+</details>
 
-See the current [VS Code secure automated publishing guide](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)
-and [GitHub's Azure OIDC guide](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-azure)
-for the identity model and security details.
-
-## Tests
-
-Each unit test has a five-second signal watchdog on POSIX hosts. A stuck test
-is interrupted and reported as an error instead of allowing the suite to run
-indefinitely. Windows lacks the required interval-timer signals, so its
-targeted platform tests rely on the ten-minute GitHub Actions job deadline
-instead.
-Run the complete suite from the repository root with:
+### Build a standalone executable
 
 ```bash
-python3 -m unittest discover -s tests -v
+python3 -m pip install --editable '.[standalone]'
+python3 -m PyInstaller --noconfirm --clean cluster-watcher.spec
+./dist/cluster-watcher-linux-x86_64 --config ./clusters.toml serve --jobs-api
 ```
 
-## Continuous integration and releases
+Artifacts are named `cluster-watcher-<os>-<architecture>` (`.exe` on
+Windows), for example `cluster-watcher-macos-aarch64`. PyInstaller is not a
+cross-compiler, so CI builds each target natively. Linux release builds use a
+python-build-standalone interpreter (via `uv`) targeting glibc 2.17, and CI
+checks each one starts in a `manylinux2014` container; a local build inherits
+your Python's glibc requirement. The target still needs `ssh`. Passwords and
+OTPs are never embedded: a frozen build re-enters itself as the OpenSSH
+askpass client. Bundled builds read an optional `gpu_profiles.toml` beside
+`clusters.toml`.
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to
-`master` and on pull requests: the Python suite on 3.11–3.13 on Linux plus
-macOS and native-Windows policy coverage, the extension unit and integration
-tests, and six standalone builds covering Linux, macOS, and Windows on x86-64
-and ARM64. Linux artifacts are additionally smoke-tested in a glibc 2.17
-`manylinux2014` container. The build steps live in the shared
+### Continuous integration and releases
+
+[`ci.yml`](.github/workflows/ci.yml) runs on pushes to `master` and pull
+requests: the Python suite on 3.11–3.13 (Linux, plus macOS and native-Windows
+policy coverage), the extension unit and integration tests, and six
+standalone builds (Linux, macOS, Windows × x86-64, ARM64) using the shared
 [`build-standalone`](.github/actions/build-standalone/action.yml) action.
+Linux artifacts are smoke-tested in a glibc 2.17 container.
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) publishes a
-release when a version tag is pushed:
+To release, update the version in `pyproject.toml`, `vscode/package.json`,
+and `vscode/package-lock.json`, add a dated `vscode/CHANGELOG.md` entry, and
+push a tag:
 
 ```bash
-# after bumping the version in pyproject.toml and vscode/package.json
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-It first fails unless the tag matches both versions, then builds and smoke-tests
-all six native executables, runs the extension tests, packages the
-platform-neutral VSIX, attests executable provenance, and creates a GitHub
-Release. Alongside the binaries it includes `install.sh`, `uninstall.sh`,
-`install.ps1`, `uninstall.ps1`, `clusters.example.toml`, `PLATFORMS.json`, and
-the shared `SHA256SUMS`. After the GitHub Release succeeds, the Marketplace job
-uses Microsoft Entra workload identity federation to publish the exact VSIX
-artifact from the same run. Configure that identity with the one-time steps in
-[Publish to the VS Code Marketplace](#publish-to-the-vs-code-marketplace).
+[`release.yml`](.github/workflows/release.yml) checks the tag against both
+versions, builds and smoke-tests all six executables, runs the extension
+tests, packages the VSIX, attests provenance, and creates a GitHub Release
+with the binaries, `install.sh`, `uninstall.sh`, `install.ps1`,
+`uninstall.ps1`, `clusters.example.toml`, `PLATFORMS.json`, and `SHA256SUMS`.
+It then publishes the same VSIX to the Marketplace.
 
-Release-environment secrets optionally enable platform trust before checksums
-are generated: `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD`, and
-`MACOS_SIGNING_IDENTITY` sign macOS binaries; `APPLE_ID`, `APPLE_TEAM_ID`, and
-`APPLE_APP_PASSWORD` additionally notarize them. `WINDOWS_CERTIFICATE_PFX` and
-`WINDOWS_CERTIFICATE_PASSWORD` Authenticode-sign and timestamp Windows
-executables. Certificate values are base64-encoded PKCS#12/PFX files and must
-be protected GitHub secrets. Builds remain checksum-verified but unsigned when
-the corresponding signing secret is absent.
+Optional signing secrets: `MACOS_CERTIFICATE_P12`,
+`MACOS_CERTIFICATE_PASSWORD`, and `MACOS_SIGNING_IDENTITY` sign macOS
+binaries, and `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_APP_PASSWORD` also
+notarize them. `WINDOWS_CERTIFICATE_PFX` and `WINDOWS_CERTIFICATE_PASSWORD`
+sign and timestamp Windows executables. Certificates are base64-encoded
+PKCS#12/PFX. Without them, builds are checksum-verified but unsigned.
 
-## Agent integration
-
-[`AGENT_CAPABILITIES.md`](AGENT_CAPABILITIES.md) is a copy-ready operating
-guide for coding or automation agents. It separates observational APIs from
-job cancellation and arbitrary remote execution, documents service discovery,
-bounded log paging, session reuse, scheduling uncertainty, and the capabilities
-Cluster Watcher deliberately does not provide. Its content can be copied into
-another project's `AGENTS.md` when that project should use Cluster Watcher as
-its cluster-information source.
+---
 
 ## License
 
-Cluster Watcher is free software, licensed under the GNU General Public License
-version 3 or (at your option) any later version; see [`LICENSE`](LICENSE). The
-Activity Bar and Marketplace icons are separately dedicated to the public
-domain under CC0-1.0 (`vscode/media/LICENSE.txt`).
+Cluster Watcher is free software under the GNU General Public License version
+3 or (at your option) any later version; see [`LICENSE`](LICENSE). The
+Activity Bar and Marketplace icons are dedicated to the public domain under
+CC0-1.0 ([`vscode/media/LICENSE.txt`](vscode/media/LICENSE.txt)).
+
+<sub>Screenshots use invented cluster, partition, and job names.</sub>
