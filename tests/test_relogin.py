@@ -32,6 +32,9 @@ class LoginTargetTests(TimedTestCase):
     def test_named_machine_includes_its_credential_group_only(self):
         self.assertEqual(login_targets(MACHINES, ["cluster_0"]), [GROUP_A, GROUP_B])
 
+    def test_exact_named_machine_excludes_credential_group_peers(self):
+        self.assertEqual(login_targets(MACHINES, ["cluster_0"], False), [GROUP_A])
+
     def test_ungrouped_machine_is_logged_in_alone(self):
         self.assertEqual(login_targets(MACHINES, ["cluster_2"]), [LONE])
 
@@ -59,7 +62,14 @@ class LoginTargetTests(TimedTestCase):
     def test_cli_subcommand_passes_names_and_timeout(self, _load, run):
         with patch("clusterwatcher.cli.configure_gpu_profiles"), patch("clusterwatcher.cli.gpu_profiles"):
             self.assertEqual(main(["login", "cluster_0", "--timeout", "7"]), 0)
-        run.assert_called_once_with(MACHINES, ["cluster_0"], 7, None)
+        run.assert_called_once_with(MACHINES, ["cluster_0"], 7, None, True)
+
+    @patch("clusterwatcher.cli.run_login", return_value=0)
+    @patch("clusterwatcher.cli.load_config", return_value=MACHINES)
+    def test_cli_only_flag_excludes_credential_group_peers(self, _load, run):
+        with patch("clusterwatcher.cli.configure_gpu_profiles"), patch("clusterwatcher.cli.gpu_profiles"):
+            self.assertEqual(main(["login", "cluster_0", "--only"]), 0)
+        run.assert_called_once_with(MACHINES, ["cluster_0"], 15, None, False)
 
     def test_json_line_prompt_keeps_secret_out_of_request_output(self):
         response = StringIO(json.dumps({"request_id": 1, "value": "top-secret"}) + "\n")
@@ -88,7 +98,7 @@ class LoginTargetTests(TimedTestCase):
         prompt = prompt_type.return_value
         with patch("clusterwatcher.cli.configure_gpu_profiles"), patch("clusterwatcher.cli.gpu_profiles"):
             self.assertEqual(main(["login", "cluster_0", "--credential-stdin-json"]), 0)
-        run.assert_called_once_with(MACHINES, ["cluster_0"], 15, prompt)
+        run.assert_called_once_with(MACHINES, ["cluster_0"], 15, prompt, True)
 
 
 class LoginRequiredTests(TimedTestCase):

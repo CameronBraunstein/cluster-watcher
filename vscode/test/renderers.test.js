@@ -95,16 +95,30 @@ test('server status shows background ownership and per-machine login actions', (
     service: { state: 'running', owned: true, pid: 1234, url: 'http://127.0.0.1:8080/', recentLines: [] },
     sessions: { machines: [
       { name: 'open', username: 'alice', host: 'a.example', session_open: true, control_persist_seconds: 3600, estimated_remaining_seconds: 900 },
-      { name: 'closed', username: 'alice', host: 'b.example', session_open: false, interactive_auth: true, error: 'No master' },
+      { name: 'closed', username: 'alice', host: 'b.example', session_open: false, interactive_auth: true, credential_group: 'shared-site', error: 'No master' },
     ] },
   });
 
   assert.match(html, /Running in the background/);
   assert.match(html, /Process<\/dt><dd>1234/);
   assert.match(html, /open<\/span><span class="session-state open">Open · about 15m left/);
-  assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;closed&quot;\]"/);
-  assert.match(html, /data-command="clusterWatcher\.stopService"/);
+  assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;closed&quot;,false\]">Log in<\/button>/);
+  assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;closed&quot;,true\]">Log into all machines on shared-site<\/button>/);
+  assert.match(html, /class="service-toggle on"[^>]*data-command="clusterWatcher\.stopService"[^>]*aria-label="Stop service"/);
   assert.doesNotMatch(html, /terminal/);
+
+  const attached = renderServerStatus({
+    service: { state: 'attached', owned: false, url: 'http://127.0.0.1:8080/' },
+    sessions: { machines: [] },
+  });
+  assert.match(attached, /<div class="service-summary"><strong>Attached to an existing service:<\/strong><a class="service-url"[^>]*>http:\/\/127\.0\.0\.1:8080\/<\/a><button class="service-toggle on"/);
+  assert.match(attached, /data-command="clusterWatcher\.stopService"[^>]*data-fast-tooltip="Stop service"/);
+  assert.doesNotMatch(attached, /<dt>URL<\/dt>|Open dashboard/);
+
+  const stopped = renderServerStatus({ service: { state: 'offline', owned: false }, sessions: { machines: [] } });
+  assert.match(stopped, /class="service-toggle off"[^>]*data-command="clusterWatcher\.startService"[^>]*data-fast-tooltip="Start service"/);
+  assert.match(stopped, /\.service-summary\{[^}]*white-space:nowrap/);
+  assert.match(stopped, /\.session-actions\{display:flex;flex-wrap:wrap/);
 });
 
 test('availability tooltips group restrictive Slurm states and omit zero counts', () => {

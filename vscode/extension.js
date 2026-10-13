@@ -251,9 +251,28 @@ class ServiceController {
     void this.refresh();
   }
 
-  stop() {
+  async stop() {
     if (!this.process) {
-      vscode.window.showInformationMessage('The extension does not own the current service, so it was left running.');
+      if (this.lifecycle.state !== 'attached') {
+        vscode.window.showInformationMessage('The Cluster Watcher service is not running.');
+        return;
+      }
+      const choice = await vscode.window.showWarningMessage(
+        'Stop the existing Cluster Watcher service? Other dashboards and clients using it will be disconnected.',
+        { modal: true },
+        'Stop service',
+      );
+      if (choice !== 'Stop service') return;
+      this.publish({ state: 'stopping', activity: 'Stopping the existing service…', error: undefined });
+      try {
+        await this.client.post('/api/v1/shutdown', {}, 5000);
+      } catch (error) {
+        this.publish({ state: 'attached', activity: undefined, error: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
+      this.publish({ state: 'offline', owned: false, pid: undefined, activity: undefined, error: undefined });
+      vscode.window.showInformationMessage('Cluster Watcher service stopped.');
+      await this.refresh();
       return;
     }
     this.stopping = true;
@@ -265,12 +284,12 @@ class ServiceController {
   async stopForBackendChange() {
     if (!this.process) return;
     const completion = this.process.completion;
-    this.stop();
+    await this.stop();
     await Promise.race([completion, new Promise((resolve) => setTimeout(resolve, 2000))]);
   }
 
   /** Re-open one or all closed sessions through the same background secret protocol. */
-  async login(machine) {
+  async login(machine, includeCredentialGroup = false) {
     if (this.loginProcess) {
       vscode.window.showInformationMessage('A Cluster Watcher login is already in progress.');
       return;
@@ -284,10 +303,17 @@ class ServiceController {
     const settings = configuration();
     await validateExecutable(settings.executable);
     await validateBackgroundCredentialSupport(settings);
-    this.publish({ activity: machine ? `Logging in to ${machine}…` : 'Logging in to closed SSH sessions…', error: undefined });
+    this.publish({
+      activity: machine
+        ? `Logging in to ${machine}${includeCredentialGroup ? ' and its credential group' : ''}…`
+        : 'Logging in to closed SSH sessions…',
+      error: undefined,
+    });
     const login = new BackgroundCliProcess(
       settings.executable,
-      cliArguments(settings, backgroundLoginArguments(settings, typeof machine === 'string' ? machine : undefined)),
+      cliArguments(settings, backgroundLoginArguments(
+        settings, typeof machine === 'string' ? machine : undefined, Boolean(includeCredentialGroup),
+      )),
       {
         onCredential: (request) => this.requestCredential(request, false),
         onOutput: (line, recentLines) => this.processOutput(line, recentLines),
@@ -852,7 +878,7 @@ function activate(context) {
     vscode.commands.registerCommand('clusterWatcher.startService', async () => {
       try { await controller.start(); } catch (error) { await reportStartError(error); }
     }),
-    vscode.commands.registerCommand('clusterWatcher.stopService', () => controller.stop()),
+    vscode.commands.registerCommand('clusterWatcher.stopService', () => controller.stop().catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.refresh', () => coordinator.refresh()),
     vscode.commands.registerCommand('clusterWatcher.refreshJobs', refreshJobsWithFeedback),
     vscode.commands.registerCommand('clusterWatcher.refreshJobsBusy', refreshJobsWithFeedback),
@@ -869,7 +895,10 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('clusterWatcher.copyServiceCommand', () => copyServiceCommand()),
     vscode.commands.registerCommand('clusterWatcher.runSetup', () => runSetup().catch(reportError)),
-    vscode.commands.registerCommand('clusterWatcher.login', (machine) => controller.login(machine).catch(reportError)),
+    vscode.commands.registerCommand(
+      'clusterWatcher.login',
+      (machine, includeCredentialGroup) => controller.login(machine, includeCredentialGroup).catch(reportError),
+    ),
     vscode.commands.registerCommand('clusterWatcher.editConfig', () => editConfig().catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.manageBackend', () => backendManager.manage().catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.openSettings', () => vscode.commands.executeCommand('workbench.action.openSettings', CONFIGURATION_SECTION)),

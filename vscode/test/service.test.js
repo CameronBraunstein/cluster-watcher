@@ -48,6 +48,9 @@ test('background service and login opt into stdin credentials without a shell co
   };
   assert.equal(backgroundServiceArguments(settings).at(-1), '--credential-stdin-json');
   assert.deepEqual(backgroundLoginArguments(settings, 'viper'), [
+    'login', 'viper', '--only', '--timeout', '15', '--credential-stdin-json',
+  ]);
+  assert.deepEqual(backgroundLoginArguments(settings, 'viper', true), [
     'login', 'viper', '--timeout', '15', '--credential-stdin-json',
   ]);
   assert.deepEqual(cliArguments(settings, backgroundLoginArguments(settings, 'viper')).slice(0, 2), [
@@ -109,12 +112,15 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   assert.equal(commands.get('clusterWatcher.refreshServer').icon, '$(refresh)');
   assert.equal(commands.get('clusterWatcher.refreshServerBusy').icon, '$(sync~spin)');
   assert.equal(commands.get('clusterWatcher.startService').icon, '$(play)');
+  assert.equal(commands.get('clusterWatcher.stopService').title, 'Cluster Watcher: Stop Service');
   const extensionSource = readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   assert.match(extensionSource, /this\.view\.description = undefined/);
   assert.match(extensionSource, /renderStatus\(this\.payload, this\.disclosures, this\.freshness\(\)\)/);
   assert.match(extensionSource, /renderServerStatus/);
   assert.match(extensionSource, /coordinator\.refreshJobs\(\)/);
   assert.match(extensionSource, /coordinator\.refreshStatus\(\)/);
+  assert.match(extensionSource, /client\.post\('\/api\/v1\/shutdown', \{\}, 5000\)/);
+  assert.match(extensionSource, /Other dashboards and clients using it will be disconnected/);
   assert.equal(
     (extensionSource.match(/await validateBackgroundCredentialSupport\(settings\);/g) || []).length,
     2,
@@ -188,6 +194,6 @@ test('login is allowlisted and dispatched through the background controller', ()
   assert.ok(commands.includes('clusterWatcher.login'));
   const extensionSource = readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   assert.match(extensionSource, /'clusterWatcher\.refreshServer', 'clusterWatcher\.login'/);
-  assert.match(extensionSource, /controller\.login\(machine\)/);
+  assert.match(extensionSource, /controller\.login\(machine, includeCredentialGroup\)/);
   assert.doesNotMatch(extensionSource, /createTerminal\([^)]*Login/);
 });

@@ -294,6 +294,7 @@ def session_status(machine: Machine, timeout: int = 5) -> dict[str, object]:
         "host": machine.host,
         "username": machine.username,
         "interactive_auth": machine.interactive_auth,
+        "credential_group": machine.credential_group,
         "available": session_open,
         "session_open": session_open,
         "pid": int(pid_match.group(1)) if SSH_MULTIPLEXING_SUPPORTED and pid_match else None,

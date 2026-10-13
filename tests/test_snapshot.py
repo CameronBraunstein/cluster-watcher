@@ -71,6 +71,7 @@ def request_handler(
     method: str = "GET",
     body: bytes = b"",
     headers: dict[str, str] | None = None,
+    client_host: str = "127.0.0.1",
 ) -> tuple[dict[str, object], dict[str, object]]:
     """Exercise one HTTP request without opening a network socket."""
     handler = object.__new__(make_handler(store))
@@ -78,6 +79,8 @@ def request_handler(
     handler.wfile = BytesIO()
     handler.rfile = BytesIO(body)
     handler.headers = Message()
+    handler.client_address = (client_host, 12345)
+    handler.server = Mock()
     for name, value in (headers or {}).items():
         handler.headers[name] = value
     response: dict[str, object] = {"headers": {}}
@@ -88,6 +91,7 @@ def request_handler(
         handler.do_POST()
     else:
         handler.do_GET()
+    response["shutdown_calls"] = handler.server.shutdown.call_count
     return response, json.loads(handler.wfile.getvalue())
 
 
@@ -329,6 +333,35 @@ class SnapshotTests(TimedTestCase):
             response, document = request_handler(store, "/api/v1/sessions")
         self.assertEqual(response["status"], 200)
         self.assertEqual(document["schema_version"], "1.0")
+
+    def test_shutdown_endpoint_is_json_only_and_loopback_only(self):
+        """An attached local client can stop the service without exposing a CSRF route."""
+        store = StatusStore([Machine("a", "host", "user")], 5, False, 15)
+
+        response, document = request_handler(
+            store, "/api/v1/shutdown", "POST", b"{}",
+            {"Content-Type": "text/plain", "Content-Length": "2"},
+        )
+        self.assertEqual(response["status"], 415)
+        self.assertEqual(response["shutdown_calls"], 0)
+        self.assertIn("application/json", document["error"])
+
+        response, document = request_handler(
+            store, "/api/v1/shutdown", "POST", b"{}",
+            {"Content-Type": "application/json", "Content-Length": "2"},
+            client_host="192.0.2.1",
+        )
+        self.assertEqual(response["status"], 403)
+        self.assertEqual(response["shutdown_calls"], 0)
+        self.assertIn("local machine", document["error"])
+
+        response, document = request_handler(
+            store, "/api/v1/shutdown", "POST", b"{}",
+            {"Content-Type": "application/json", "Content-Length": "2"},
+        )
+        self.assertEqual(response["status"], 202)
+        self.assertEqual(response["shutdown_calls"], 1)
+        self.assertEqual(document, {"stopping": True})
 
     def test_command_endpoint_returns_output_and_session_failures(self):
         store = StatusStore([Machine("a", "host", "user")], 5, False, 15, command_api_enabled=True)

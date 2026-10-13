@@ -35,7 +35,10 @@ class RemoteCommandTests(TimedTestCase):
     @patch("clusterwatcher.ssh.subprocess.run")
     def test_session_status_verifies_master_and_reports_pid(self, run):
         run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="Master running (pid=4321)\n")
-        machine = Machine("alpha", "alpha.example", "alice", control_persist="2h")
+        machine = Machine(
+            "alpha", "alpha.example", "alice", control_persist="2h",
+            interactive_auth=True, credential_group="site",
+        )
 
         activity = {("alice", "alpha.example", 22): datetime.now(timezone.utc)}
         with tempfile.TemporaryDirectory() as directory, patch(
@@ -46,6 +49,7 @@ class RemoteCommandTests(TimedTestCase):
         self.assertTrue(status["available"])
         self.assertTrue(status["session_open"])
         self.assertEqual(status["interactive_auth"], machine.interactive_auth)
+        self.assertEqual(status["credential_group"], "site")
         self.assertEqual(status["pid"], 4321)
         self.assertEqual(status["control_persist_seconds"], 7200)
         self.assertGreaterEqual(status["estimated_remaining_seconds"], 7198)

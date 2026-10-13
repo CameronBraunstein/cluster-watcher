@@ -438,15 +438,22 @@ password/OTP requests as masked VS Code input boxes.
 
 The third view shows whether the service is starting, waiting for credentials,
 running in the background, attached to an independently started process, or
-stopped. It includes the owned process ID and URL, a bounded recent diagnostic
-tail, and every configured machine's reusable SSH-session state and approximate
-remaining idle lifetime. From this view you can start or stop an
-extension-owned service, open the browser dashboard, log in all closed
-interactive sessions, or log in one machine. An independently started service
-is never stopped by the extension. The managed process stops with the extension
-host; its OpenSSH masters can remain reusable for their configured
+stopped. Its compact first line shows the state and a start/stop toggle; when
+attached, it reads **Attached to an existing service: `<URL>`**, with the URL
+opening the dashboard. The green/on toggle says **Stop service** on hover, and
+the gray/off toggle says **Start service**. It also includes the owned process
+ID, a bounded recent diagnostic tail, and every configured machine's reusable
+SSH-session state and approximate remaining idle lifetime. A closed interactive
+machine has **Log in** on its card. If it belongs to a `credential_group`, the
+card also has **Log into all machines on `<group>`**; individual login uses the
+new `cluster-watcher login MACHINE --only` mode. The existing global action
+still logs in every closed interactive machine. Stopping an attached service
+requires confirmation and warns that other connected clients will be
+disconnected. The managed process stops with the extension host; its OpenSSH
+masters can remain reusable for their configured
 `ControlPersist` period. Start `cluster-watcher serve` separately when the HTTP
-service itself must outlive VS Code.
+service itself must outlive VS Code, and do not use **Stop service** from an
+attached sidebar when it should remain available.
 
 #### Refreshing, notifications, and settings
 
@@ -637,12 +644,14 @@ limit), after which refreshes fail with errors like `Permission denied
 
 ```bash
 cluster-watcher login cluster-b   # this machine and its credential group
+cluster-watcher login cluster-b --only  # only this machine
 cluster-watcher login             # every interactive machine
 ```
 
 Open sessions are skipped. A named machine brings the rest of its
 `credential_group`, so the shared password is asked once and each machine
-asks for its own OTP. The running service picks up the session on its next
+asks for its own OTP; `--only` suppresses that group expansion. The running
+service picks up the session on its next
 refresh. The service detects closed sessions itself (`ssh -O check`) and
 reports `login_required: true`, so the web dashboard and VS Code offer the
 login. Sessions send keepalives every 30 s (`ServerAliveInterval=30`,
@@ -852,6 +861,7 @@ return JSON.
 | `GET /api/v1/jobs/{cluster}/{job_id}/log` | `--jobs-api` | Bounded, pageable log tail. |
 | `GET /api/v1/jobs/{cluster}/{job_id}/script` | `--jobs-api` | The job's batch script. |
 | `POST /api/v1/jobs/{cluster}/{job_id}/cancel` | `--jobs-api` | Cancel one of your jobs. |
+| `POST /api/v1/shutdown` | — | Gracefully stop the local service. Loopback JSON requests only. |
 | `GET /api/v1/sessions` | `--command-api` | Open SSH sessions and their estimated lifetime. |
 | `POST /api/v1/commands` | `--command-api` | Run a command over an existing session. |
 
@@ -1115,7 +1125,7 @@ curl --fail-with-body --silent -H 'Content-Type: application/json' \
 ```
 
 `/api/v1/sessions` lists every visible machine with `name`, `host`,
-`username`, `interactive_auth`, `available` (a live connection verified with
+`username`, `interactive_auth`, `credential_group`, `available` (a live connection verified with
 `ssh -O check`),
 `session_open`, `pid`, `control_persist_seconds`, `last_activity_at`,
 `estimated_remaining_seconds` (approximate, or `null`), and `error`. It never

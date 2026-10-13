@@ -102,9 +102,10 @@ def _print_execution_result(result: dict[str, object]) -> int:
 def run_login(
     machines: list[Machine], requested: Sequence[str], timeout: int,
     credential_prompt: SecretPrompt | None = None,
+    include_credential_groups: bool = True,
 ) -> int:
-    """Re-open closed interactive sessions and report each target's result."""
-    targets = login_targets(machines, list(requested))
+    """Re-open closed interactive sessions and report each selected target."""
+    targets = login_targets(machines, list(requested), include_credential_groups)
     if not targets:
         print("No configured machine uses interactive login (interactive_auth = true).", file=sys.stderr)
         return 0
@@ -213,6 +214,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     login_parser.add_argument("machines", nargs="*", metavar="MACHINE", help="configured machine names (default: all)")
+    login_parser.add_argument(
+        "--only", action="store_true",
+        help="log in only to named machines, without their credential-group peers",
+    )
     login_parser.add_argument("--timeout", type=int, default=15, help="SSH connect timeout in seconds (default: 15)")
     login_parser.add_argument("--credential-stdin-json", action="store_true", help=argparse.SUPPRESS)
     sessions_parser = subparsers.add_parser("sessions", help="show reusable SSH session state")
@@ -291,6 +296,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_login(
                 machines, args.machines, args.timeout,
                 JsonLineCredentialPrompt() if args.credential_stdin_json else None,
+                not args.only,
             )
         if args.command == "sessions":
             if args.timeout < 1:

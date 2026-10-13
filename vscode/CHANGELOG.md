@@ -9,6 +9,11 @@ All notable changes to the Cluster Watcher VS Code extension.
   masked VS Code input boxes and a private stdin protocol, and re-login uses
   the same flow. A new **Server Status** view shows lifecycle, PID/URL, bounded
   diagnostics, reusable SSH-session health, and start/stop/login controls.
+  Attached local services now show a confirmation-protected **Stop service**
+  control that requests a graceful backend shutdown. Server Status places its
+  clickable attached-service URL and start/stop toggle on one compact line.
+  Closed machine cards offer an exact-machine login and, when configured, a
+  second credential-group login action.
   The extension now probes the backend's machine-readable capabilities first,
   so an older installed executable produces upgrade guidance instead of an
   `unrecognized arguments: --credential-stdin-json` failure.

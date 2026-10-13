@@ -214,12 +214,17 @@ omitted.
 
 **Server Status** sits below Cluster Status. It reports the managed process as
 starting, waiting for credentials, running, stopping, or stopped; a compatible
-service started elsewhere is labeled **Attached to an existing service**. The
-view shows the service URL, owned PID, bounded recent diagnostic output, and an
+service started elsewhere is shown on one line as **Attached to an existing
+service: `<URL>`**, with a clickable dashboard URL. A compact toggle is green
+when on and gray when off; its hover says **Stop service** or **Start service**.
+The view also shows the owned PID, bounded recent diagnostic output, and an
 Open/Closed card for every reusable SSH session with its approximate remaining
-idle lifetime. Its controls start or stop the owned process, open the browser
-dashboard, refresh the inventory, and re-authenticate all or one closed
-interactive session. The extension never stops a service it did not start.
+idle lifetime. Every closed interactive machine has **Log in**. A machine with
+`credential_group = "site"` also has **Log into all machines on site**; the
+first action targets only that machine, while the second reuses the shared
+password for all closed group members. Stopping an attached local service asks
+for confirmation, warns that other connected clients will be disconnected,
+and then requests a graceful shutdown from the backend.
 An extension-owned process stops when the extension host shuts down or reloads;
 the OpenSSH masters may remain available for their configured persistence
 period. Start the service separately when it must outlive VS Code.

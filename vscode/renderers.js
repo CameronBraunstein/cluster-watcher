@@ -295,7 +295,7 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 .launchability{display:flex;align-items:end;gap:2px;margin-left:auto;min-width:0}.launch-shape{display:grid;grid-template-rows:7px 9px;justify-items:center;gap:1px}.launch-count{color:var(--vscode-descriptionForeground);font-size:7px;line-height:7px}.launch-block{box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:9px;height:9px;border:1px solid color-mix(in srgb,var(--vscode-foreground) 24%,transparent);border-radius:2px;color:#fff;font-size:7px;font-weight:700;line-height:1;cursor:help}.launch-wait-0{background:#15803d}.launch-wait-1{background:#22c55e}.launch-wait-2{background:#eab308;color:#111}.launch-wait-3{background:#f97316}.launch-wait-4{background:#dc2626}.launch-blocked{background:#111}.launch-missing,.launch-pending{background:#777}.launch-unsupported{color:var(--vscode-descriptionForeground);background:repeating-linear-gradient(135deg,transparent 0 2px,color-mix(in srgb,var(--vscode-descriptionForeground) 25%,transparent) 2px 4px)}
 .job-id:hover,.job-id:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--vscode-focusBorder)}
 button.button{border:0;font:inherit;cursor:pointer}
-.service-summary{display:flex;align-items:center;gap:7px;margin:6px 0 10px}.service-dot{width:9px;height:9px;border-radius:50%;background:var(--vscode-descriptionForeground);flex:none}.service-dot.running,.service-dot.attached{background:var(--vscode-testing-iconPassed)}.service-dot.starting,.service-dot.authenticating,.service-dot.stopping{background:var(--vscode-charts-yellow,#cca700)}.service-dot.error{background:var(--vscode-errorForeground)}.session-list{display:grid;gap:4px;margin-top:9px}.session-row{border:1px solid var(--vscode-panel-border);border-radius:4px;padding:6px}.session-row-head{display:flex;align-items:center;justify-content:space-between;gap:6px}.session-name{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis}.session-state{font-size:.72em;white-space:nowrap}.session-state.open{color:var(--vscode-testing-iconPassed)}.session-state.closed{color:var(--vscode-errorForeground)}.session-actions{margin-top:5px}.service-output{max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.72em}.server-details{margin-top:10px}.server-details>summary{cursor:pointer}
+.service-summary{display:flex;align-items:center;gap:6px;margin:4px 0 7px;min-width:0;white-space:nowrap}.service-summary>strong{flex:0 0 auto}.service-url{min-width:0;overflow:hidden;text-overflow:ellipsis}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 30px;width:30px;height:16px;margin-left:auto;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:16px}.service-toggle:disabled{cursor:wait;opacity:.65}.session-list{display:grid;gap:4px;margin-top:7px}.session-row{border:1px solid var(--vscode-panel-border);border-radius:4px;padding:6px}.session-row-head{display:flex;align-items:center;justify-content:space-between;gap:6px}.session-name{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis}.session-state{font-size:.72em;white-space:nowrap}.session-state.open{color:var(--vscode-testing-iconPassed)}.session-state.closed{color:var(--vscode-errorForeground)}.session-actions{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}.service-output{max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.72em}.server-details{margin-top:10px}.server-details>summary{cursor:pointer}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
@@ -479,16 +479,16 @@ function renderServerStatus(payload = {}, freshness = {}) {
     running: 'Running in the background', attached: 'Attached to an existing service',
     stopping: 'Stopping', error: 'Error',
   };
+  const serviceOn = ['running', 'attached', 'starting', 'authenticating', 'stopping'].includes(state);
+  const serviceTransitioning = ['starting', 'authenticating', 'stopping'].includes(state);
+  const toggleText = serviceOn ? 'Stop service' : 'Start service';
+  const toggle = `<button class="service-toggle ${serviceOn ? 'on' : 'off'}" ${commandButtonAttributes(serviceOn ? 'clusterWatcher.stopService' : 'clusterWatcher.startService')} aria-pressed="${serviceOn}" aria-label="${toggleText}" data-fast-tooltip="${toggleText}"${serviceTransitioning ? ' disabled' : ''}></button>`;
+  const linkedUrl = service.url && ['running', 'attached'].includes(state)
+    ? `<a class="service-url" ${commandAttributes('clusterWatcher.openDashboard')}>${escapeHtml(service.url)}</a>`
+    : '';
+  const summaryLabel = state === 'attached' ? 'Attached to an existing service:' : labels[state] || state;
+  const serviceSummary = `<div class="service-summary"><strong>${escapeHtml(summaryLabel)}</strong>${linkedUrl}${toggle}</div>`;
   const actions = [];
-  if (!['running', 'attached', 'starting', 'authenticating', 'stopping'].includes(state)) {
-    actions.push(`<button class="button" ${commandButtonAttributes('clusterWatcher.startService')}>Start service</button>`);
-  }
-  if (service.owned && ['running', 'starting', 'authenticating'].includes(state)) {
-    actions.push(`<button class="button secondary" ${commandButtonAttributes('clusterWatcher.stopService')}>Stop</button>`);
-  }
-  if (['running', 'attached'].includes(state)) {
-    actions.push(`<button class="button secondary" ${commandButtonAttributes('clusterWatcher.openDashboard')}>Open dashboard</button>`);
-  }
   actions.push(`<button class="button secondary" ${commandButtonAttributes('clusterWatcher.login')}>Log in closed sessions</button>`);
 
   const machines = (payload.sessions?.machines || []).map((machine) => {
@@ -497,15 +497,21 @@ function renderServerStatus(payload = {}, freshness = {}) {
     if (open && machine.control_persist_seconds == null) remaining = ' · no idle limit';
     else if (open && machine.estimated_remaining_seconds != null) remaining = ` · about ${formatDuration(machine.estimated_remaining_seconds)} left`;
     else if (open) remaining = ' · remaining time unknown';
-    const login = !open && machine.interactive_auth
-      ? `<div class="session-actions"><button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.login', [String(machine.name)])}>Log in</button></div>`
-      : '';
+    let login = '';
+    if (!open && machine.interactive_auth) {
+      const buttons = [
+        `<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.login', [String(machine.name), false])}>Log in</button>`,
+      ];
+      if (machine.credential_group) {
+        buttons.push(`<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.login', [String(machine.name), true])}>Log into all machines on ${escapeHtml(machine.credential_group)}</button>`);
+      }
+      login = `<div class="session-actions">${buttons.join('')}</div>`;
+    }
     const error = !open && machine.error ? `<div class="muted">${escapeHtml(machine.error)}</div>` : '';
     return `<div class="session-row"><div class="session-row-head"><span class="session-name">${escapeHtml(machine.name)}</span><span class="session-state ${open ? 'open' : 'closed'}">${open ? 'Open' : 'Closed'}${escapeHtml(remaining)}</span></div><div class="muted">${escapeHtml(machine.username)}@${escapeHtml(machine.host)}</div>${error}${login}</div>`;
   }).join('');
   const sessionError = payload.sessionsError ? `<p class="error">Could not inspect SSH sessions: ${escapeHtml(payload.sessionsError)}</p>` : '';
   const processFacts = [
-    service.url ? `<dt>URL</dt><dd>${escapeHtml(service.url)}</dd>` : '',
     service.pid ? `<dt>Process</dt><dd>${escapeHtml(service.pid)}</dd>` : '',
     service.startedAt ? `<dt>Started</dt><dd>${escapeHtml(localTime(service.startedAt, true))}</dd>` : '',
   ].join('');
@@ -514,7 +520,7 @@ function renderServerStatus(payload = {}, freshness = {}) {
   const diagnostics = output
     ? `<details class="server-details"><summary class="muted">Recent backend output</summary><pre class="service-output">${escapeHtml(output)}</pre></details>`
     : '';
-  const body = `<div class="service-summary"><span class="service-dot ${escapeHtml(state)}"></span><strong>${escapeHtml(labels[state] || state)}</strong></div>`
+  const body = serviceSummary
     + (service.activity ? `<p class="muted">${escapeHtml(service.activity)}</p>` : '')
     + error + (processFacts ? `<dl class="times">${processFacts}</dl>` : '')
     + `<div class="actions">${actions.join('')}</div>${sessionError}`

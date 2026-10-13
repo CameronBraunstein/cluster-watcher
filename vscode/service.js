@@ -196,9 +196,9 @@ function backgroundServiceArguments(settings) {
 }
 
 /** Build a background login argument vector for all or one configured machine. */
-function backgroundLoginArguments(settings, machine) {
+function backgroundLoginArguments(settings, machine, includeCredentialGroup = false) {
   return [
-    'login', ...(machine ? [String(machine)] : []),
+    'login', ...(machine ? [String(machine), ...(includeCredentialGroup ? [] : ['--only'])] : []),
     '--timeout', String(settings.sshTimeoutSeconds), '--credential-stdin-json',
   ];
 }

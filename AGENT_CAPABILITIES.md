@@ -153,7 +153,8 @@ For a job investigation:
 `cluster-watcher sessions --json` checks local OpenSSH control masters without
 logging in. The corresponding HTTP route, `/api/v1/sessions`, is available only
 with `--command-api`. A session marked `available` has been verified with
-`ssh -O check`. Remaining lifetime is approximate because OpenSSH does not
+`ssh -O check`; `credential_group` identifies machines whose interactive login
+shares a password. Remaining lifetime is approximate because OpenSSH does not
 publish its exact idle-expiry deadline and unrelated SSH clients can extend it.
 
 CLI, web service, and VS Code use the same user-private control paths when they

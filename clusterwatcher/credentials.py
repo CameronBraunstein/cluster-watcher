@@ -263,14 +263,18 @@ def _start_credential_group(
     return errors
 
 
-def login_targets(machines: list[Machine], requested: list[str]) -> list[Machine]:
+def login_targets(
+    machines: list[Machine], requested: list[str], include_credential_groups: bool = True,
+) -> list[Machine]:
     """Return the interactive machines that ``cluster-watcher login`` should try.
 
     With no names, every interactive machine is a target. Named machines also
-    bring in the other machines of their credential groups: one shared
-    password then covers every group member whose session has closed too
-    (each still needs its own OTP). Machines with an open session are skipped
-    later by :func:`establish_interactive_sessions`, so they cost nothing.
+    bring in the other machines of their credential groups by default: one
+    shared password then covers every group member whose session has closed
+    too (each still needs its own OTP). ``include_credential_groups=False``
+    restricts named requests to exactly those machines. Machines with an open
+    session are skipped later by :func:`establish_interactive_sessions`, so
+    they cost nothing.
     """
     known = {machine.name: machine for machine in machines}
     unknown = [name for name in requested if name not in known]
@@ -278,6 +282,8 @@ def login_targets(machines: list[Machine], requested: list[str]) -> list[Machine
         raise ValueError(f"unknown machine(s): {', '.join(unknown)}")
     if not requested:
         return [machine for machine in machines if machine.interactive_auth]
+    if not include_credential_groups:
+        return [known[name] for name in requested if known[name].interactive_auth]
     groups = {known[name].credential_group for name in requested} - {None}
     return [
         machine for machine in machines

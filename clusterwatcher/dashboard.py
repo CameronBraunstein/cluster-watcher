@@ -1059,20 +1059,28 @@ def make_handler(store: StatusStore):
             self._write_response(body, content_type, code, extra_headers)
 
         def do_POST(self) -> None:  # noqa: N802
-            """Handle the explicitly enabled command and job-cancel endpoints."""
+            """Handle service control and the explicitly enabled write APIs."""
             path = urlsplit(self.path).path
             headers = {"Cache-Control": "no-store"}
+            shutdown_requested = False
             if match := re.fullmatch(r"/api/v1/jobs/([^/]+)/([^/]+)/cancel", path):
                 body, content_type, code, response_headers = self._cancel_response(
                     unquote(match.group(1)), unquote(match.group(2))
                 )
             elif path == "/api/v1/commands":
                 body, content_type, code, response_headers = self._command_response()
+            elif path == "/api/v1/shutdown":
+                body, content_type, code, response_headers = self._shutdown_response()
+                shutdown_requested = code == 202
             else:
                 self._write_response(b"Not found\n", "text/plain; charset=utf-8", 404, headers)
                 return
             headers.update(response_headers)
             self._write_response(body, content_type, code, headers)
+            if shutdown_requested:
+                # ``ThreadingHTTPServer`` handles this request outside the
+                # serve_forever thread, as required by BaseServer.shutdown().
+                self.server.shutdown()
 
         def _write_response(self, body: bytes, content_type: str, code: int, headers: dict[str, str]) -> None:
             """Write one response, tolerating clients that disconnect early.
@@ -1105,6 +1113,36 @@ def make_handler(store: StatusStore):
             except ValueError as exc:
                 return self._json_error(str(exc), 500, headers)
             return json.dumps(payload).encode(), "application/json; charset=utf-8", 200, headers
+
+        def _shutdown_response(self) -> tuple[bytes, str, int, dict[str, str]]:
+            """Validate a loopback-only request for graceful service shutdown.
+
+            Requiring JSON prevents ordinary cross-origin HTML forms from
+            stopping the local service: an application/json browser request
+            requires a CORS preflight, which this server does not approve.
+            """
+            headers = {"Cache-Control": "no-store"}
+            try:
+                client_host = str(self.client_address[0]).split("%", 1)[0]
+                if not ipaddress.ip_address(client_host).is_loopback:
+                    return self._json_error("Service shutdown is available only from the local machine", 403, headers)
+            except (AttributeError, ValueError):
+                return self._json_error("Could not verify the shutdown client's address", 403, headers)
+            if self.headers.get_content_type() != "application/json":
+                return self._json_error("Content-Type must be application/json", 415, headers)
+            try:
+                content_length = int(self.headers.get("Content-Length", ""))
+            except ValueError:
+                return self._json_error("Content-Length must be supplied", 411, headers)
+            if not 1 <= content_length <= 1024:
+                return self._json_error("request body must be between 1 and 1024 bytes", 413, headers)
+            try:
+                request = json.loads(self.rfile.read(content_length))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return self._json_error("request body must be valid JSON", 400, headers)
+            if request != {}:
+                return self._json_error("request body must be an empty JSON object", 400, headers)
+            return json.dumps({"stopping": True}).encode(), "application/json; charset=utf-8", 202, headers
 
         def _command_response(self) -> tuple[bytes, str, int, dict[str, str]]:
             """Validate and execute one bounded command request."""

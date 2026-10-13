@@ -45,7 +45,7 @@
       },
       {
         "command": "clusterWatcher.stopService",
-        "title": "Cluster Watcher: Stop Extension-started Service"
+        "title": "Cluster Watcher: Stop Service"
       },
       {
         "command": "clusterWatcher.refresh",
