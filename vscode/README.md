@@ -199,9 +199,10 @@ means the request was rejected by account/QOS policy, gray means unavailable
 or unprobed, and a striped block exceeds the partition's capacity. Hover a
 block for its exact one-hour-job estimate, expected start, or Slurm error, and
 hover the GPU model for its full name. VRAM and thread hover text explicitly
-labels those amounts.
+labels those amounts. When the partition name and complete launchability strip
+do not fit together, the strip wraps intact and flush left onto a second line.
 
-**Available GPUs** precedes a green/red bar with its `idle/total` fraction;
+**Free GPUs** precedes a green/red bar with its `idle/total` fraction;
 hover the bar for a node-only state breakdown (zero-count categories are
 omitted).
 
@@ -215,11 +216,20 @@ omitted.
 **Server Status** sits below Cluster Status. It reports the managed process as
 starting, waiting for credentials, running, stopping, or stopped; a compatible
 service started elsewhere is shown on one line as **Attached to an existing
-service: `<URL>`**, with a clickable dashboard URL. A compact toggle is green
-when on and gray when off; its hover says **Stop service** or **Start service**.
-The view also shows the owned PID, bounded recent diagnostic output, and an
+service: `<URL>`**, with a clickable dashboard URL. The URL is a button styled
+as a link, so its process/start tooltip is not accompanied by a dummy `#`
+target. A smaller toggle appears to the left of smaller text, preserving the
+standard local URL at minimum sidebar width; it is green when on and gray when
+off, and its hover says
+**Stop service** or **Start service**. A running extension-owned service shows
+the URL without the redundant “Running in the background” label. Hover the URL
+for the backend process ID and start time. The view also shows bounded recent
+diagnostic output and an
 Open/Closed card for every reusable SSH session with its approximate remaining
-idle lifetime. Every closed interactive machine has **Log in**. A machine with
+idle lifetime. These cards use tighter spacing and a smaller, truncatable SSH
+login address at minimum width. Open cards display only **Open**; hovering it
+shows the approximate remaining session lifetime. Every closed interactive
+machine has **Log in**. A machine with
 `credential_group = "site"` also has **Log into all machines on site**; the
 first action targets only that machine, while the second reuses the shared
 password for all closed group members. Stopping an attached local service asks

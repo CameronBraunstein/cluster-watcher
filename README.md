@@ -424,11 +424,13 @@ refreshes.
 Each cluster is a collapsible group of permanently expanded, compact partition
 cards ordered by compute rank. A card shows the partition name and
 [launchability strip](#estimated-queue-waits), followed by the best GPU's model,
-VRAM, TFLOPS/s, CPU-thread total, and an **Available GPUs** bar. Hover a launch
+VRAM, TFLOPS/s, CPU-thread total, and a **Free GPUs** bar. Hover a launch
 block for its exact estimate, the GPU model for its full name, the VRAM amount
 for its label, the thread count for its CPU-thread label, or the availability
 bar for its node-state breakdown. Partition cards do not collapse and do not
-repeat the launch estimates in a graph.
+repeat the launch estimates in a graph. A narrow card moves the complete
+launchability strip flush left below the partition name instead of compressing
+both onto one unreadable line.
 
 If a cluster's SSH session closes, its group shows **Log in again**, which
 runs `cluster-watcher login <cluster>` in the background and presents any
@@ -437,17 +439,26 @@ password/OTP requests as masked VS Code input boxes.
 #### Server Status
 
 The third view shows whether the service is starting, waiting for credentials,
-running in the background, attached to an independently started process, or
-stopped. Its compact first line shows the state and a start/stop toggle; when
-attached, it reads **Attached to an existing service: `<URL>`**, with the URL
-opening the dashboard. The green/on toggle says **Stop service** on hover, and
-the gray/off toggle says **Start service**. It also includes the owned process
-ID, a bounded recent diagnostic tail, and every configured machine's reusable
-SSH-session state and approximate remaining idle lifetime. A closed interactive
+attached to an independently started process, or stopped. Its compact first
+line puts a small start/stop toggle on the left. Both the control and text are
+sized to preserve the complete local dashboard URL at the sidebar's minimum
+width. A running extension-owned
+service shows its dashboard URL without a redundant status label; an attached
+service reads **Attached to an existing service: `<URL>`**. The URL opens the
+dashboard through a button styled as a link, avoiding a second `#` link-target
+tooltip; its single hover text gives the service process ID and start time. The
+green/on toggle says **Stop service** on hover, and the gray/off toggle says
+**Start service**. The view also includes a bounded recent diagnostic tail and
+every configured machine's reusable SSH-session state and approximate remaining
+idle lifetime. Machine cards use compact spacing and truncate the smaller SSH
+login address when necessary, so their status and login controls remain within
+the minimum-width sidebar. An open card shows only **Open**; hover that label for
+the approximate remaining reusable-session lifetime. A closed interactive
 machine has **Log in** on its card. If it belongs to a `credential_group`, the
 card also has **Log into all machines on `<group>`**; individual login uses the
-new `cluster-watcher login MACHINE --only` mode. The existing global action
-still logs in every closed interactive machine. Stopping an attached service
+new `cluster-watcher login MACHINE --only` mode. There is no separate global
+login control because the machine cards provide the relevant scoped actions.
+Stopping an attached service
 requires confirmation and warns that other connected clients will be
 disconnected. The managed process stops with the extension host; its OpenSSH
 masters can remain reusable for their configured
@@ -856,6 +867,7 @@ return JSON.
 
 | Endpoint | Needs | Purpose |
 | --- | --- | --- |
+| `GET /api/v1/service` | — | Local service process ID and start time. |
 | `GET /api/v1/snapshot` | — | Capacity, hardware, and wait estimates for every cluster. |
 | `GET /api/v1/jobs` | `--jobs-api` | Your active and recent jobs. |
 | `GET /api/v1/jobs/{cluster}/{job_id}/log` | `--jobs-api` | Bounded, pageable log tail. |

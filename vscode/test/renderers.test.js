@@ -70,9 +70,12 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(card, /class="launch-block launch-blocked"[^>]*>×<\/span>/);
   assert.equal((card.match(/class="launch-shape"/g) || []).length, 7);
   assert.match(card, /<span class="gpu-model" data-fast-tooltip="NVIDIA H100 NVL" aria-label="NVIDIA H100 NVL">H100<\/span> · <span class="vram-spec" data-fast-tooltip="VRAM: 80 GB" aria-label="VRAM: 80 GB">80 GB<\/span> · 989 TFLOPS\/s · <span class="thread-spec" data-fast-tooltip="CPU threads: 128 threads" aria-label="CPU threads: 128 threads">128 threads<\/span>/);
-  assert.match(card, /<div class="partition-availability"><span class="partition-availability-label">Available GPUs<\/span><div class="availability-cell"><div class="availability"[^>]*>.*?<\/div><span>2\/8<\/span><\/div><\/div>/);
+  assert.match(card, /<div class="partition-availability"><span class="partition-availability-label">Free GPUs<\/span><div class="availability-cell"><div class="availability"[^>]*>.*?<\/div><span>2\/8<\/span><\/div><\/div>/);
   assert.doesNotMatch(card, /<details|<summary|data-disclosure-key|wait-chart|wait-figure|<svg/);
   assert.match(html, /\.partition-specs\{[^}]*white-space:normal;overflow-wrap:anywhere/);
+  assert.match(html, /\.partition-title\{[^}]*flex-wrap:wrap/);
+  assert.match(html, /\.partition-title>\.name\{[^}]*margin-right:auto/);
+  assert.match(html, /\.partition-title>\.launchability\{[^}]*flex:0 0 auto;margin-left:0/);
   assert.match(html, /\.availability-cell\{display:flex;align-items:center;gap:3px;white-space:nowrap\}/);
   assert.ok(html.indexOf('class="available"') < html.indexOf('class="unavailable"'));
   assert.match(html, /data-availability="Nodes: 2 idle, 3 full, 1 reserved, 1 down"/);
@@ -92,32 +95,43 @@ test('status shows every partition detail compactly without a card disclosure', 
 
 test('server status shows background ownership and per-machine login actions', () => {
   const html = renderServerStatus({
-    service: { state: 'running', owned: true, pid: 1234, url: 'http://127.0.0.1:8080/', recentLines: [] },
+    service: { state: 'running', owned: true, pid: 1234, startedAt: '2026-10-13T10:00:00Z', url: 'http://127.0.0.1:8080/', recentLines: [] },
     sessions: { machines: [
-      { name: 'open', username: 'alice', host: 'a.example', session_open: true, control_persist_seconds: 3600, estimated_remaining_seconds: 900 },
+      { name: 'open', username: 'alice', host: 'a.example', session_open: true, control_persist_seconds: 3600, estimated_remaining_seconds: 28740 },
       { name: 'closed', username: 'alice', host: 'b.example', session_open: false, interactive_auth: true, credential_group: 'shared-site', error: 'No master' },
     ] },
   });
 
-  assert.match(html, /Running in the background/);
-  assert.match(html, /Process<\/dt><dd>1234/);
-  assert.match(html, /open<\/span><span class="session-state open">Open · about 15m left/);
+  assert.doesNotMatch(html, /Running in the background|<dt>Process<\/dt>|<dt>Started<\/dt>/);
+  assert.match(html, /data-fast-tooltip="Process: 1234&#10;Started: [^"]+"/);
+  assert.match(html, /open<\/span><span class="session-state open" aria-label="Open, about 7h 59m left" data-fast-tooltip="about 7h 59m left">Open<\/span>/);
+  assert.doesNotMatch(html, />Open · about 7h 59m left<\/span>/);
   assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;closed&quot;,false\]">Log in<\/button>/);
   assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;closed&quot;,true\]">Log into all machines on shared-site<\/button>/);
   assert.match(html, /class="service-toggle on"[^>]*data-command="clusterWatcher\.stopService"[^>]*aria-label="Stop service"/);
+  assert.match(html, /<div class="service-summary"><button class="service-toggle on"[^>]*><\/button><button class="service-url"[^>]*data-command="clusterWatcher\.openDashboard"/);
+  assert.doesNotMatch(html, /class="service-url"[^>]*href="#"/);
+  assert.match(html, /class="muted session-target">alice@a\.example/);
+  assert.doesNotMatch(html, />Log in closed sessions<\/button>/);
   assert.doesNotMatch(html, /terminal/);
 
   const attached = renderServerStatus({
-    service: { state: 'attached', owned: false, url: 'http://127.0.0.1:8080/' },
+    service: { state: 'attached', owned: false, pid: 4321, startedAt: '2026-10-13T09:00:00Z', url: 'http://127.0.0.1:8080/' },
     sessions: { machines: [] },
   });
-  assert.match(attached, /<div class="service-summary"><strong>Attached to an existing service:<\/strong><a class="service-url"[^>]*>http:\/\/127\.0\.0\.1:8080\/<\/a><button class="service-toggle on"/);
+  assert.match(attached, /<div class="service-summary"><button class="service-toggle on"[^>]*><\/button><strong>Attached to an existing service:<\/strong><button class="service-url"[^>]*>http:\/\/127\.0\.0\.1:8080\/<\/button>/);
+  assert.match(attached, /data-fast-tooltip="Process: 4321&#10;Started: [^"]+"/);
   assert.match(attached, /data-command="clusterWatcher\.stopService"[^>]*data-fast-tooltip="Stop service"/);
   assert.doesNotMatch(attached, /<dt>URL<\/dt>|Open dashboard/);
 
   const stopped = renderServerStatus({ service: { state: 'offline', owned: false }, sessions: { machines: [] } });
   assert.match(stopped, /class="service-toggle off"[^>]*data-command="clusterWatcher\.startService"[^>]*data-fast-tooltip="Start service"/);
   assert.match(stopped, /\.service-summary\{[^}]*white-space:nowrap/);
+  assert.match(stopped, /\.service-summary\{[^}]*font-size:\.78em/);
+  assert.match(stopped, /\.service-url\{[^}]*max-width:calc\(100% - 26px\)/);
+  assert.match(stopped, /\.service-toggle\{[^}]*width:22px;height:12px;margin:0/);
+  assert.match(stopped, /\.session-target\{[^}]*font-size:\.68em/);
+  assert.match(stopped, /\.session-row\{[^}]*padding:4px 5px/);
   assert.match(stopped, /\.session-actions\{display:flex;flex-wrap:wrap/);
 });
 

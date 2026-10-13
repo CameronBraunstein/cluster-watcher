@@ -119,6 +119,16 @@ class BackendClient {
       }
     }
   }
+
+  /** Return process identity, falling back gracefully for an older backend. */
+  async serviceInfo() {
+    try {
+      return await this.get('/api/v1/service', 2500);
+    } catch (error) {
+      if (await this.isClusterWatcherService()) return {};
+      throw error;
+    }
+  }
 }
 
 /** Own a background service while allowing attachment to a separately run service. */
@@ -187,7 +197,7 @@ class ServiceController {
       } else {
         vscode.window.showInformationMessage('Cluster Watcher attached to the existing local service.');
       }
-      this.publish({ state: 'attached', owned: false, pid: undefined, activity: undefined, error: undefined });
+      this.publish({ state: 'attached', owned: false, pid: undefined, startedAt: undefined, activity: undefined, error: undefined });
       await this.refresh();
       return;
     }
@@ -246,8 +256,8 @@ class ServiceController {
       || [...result.recentLines].reverse().find((line) => line.stream === 'stderr')?.text
       || (result.code != null ? `Process exited with status ${result.code}` : `Process ended with ${result.signal || 'an unknown signal'}`);
     this.publish(expected
-      ? { state: 'offline', owned: false, pid: undefined, activity: undefined, error: undefined }
-      : { state: 'error', owned: false, pid: undefined, activity: undefined, error: diagnostic });
+      ? { state: 'offline', owned: false, pid: undefined, startedAt: undefined, activity: undefined, error: undefined }
+      : { state: 'error', owned: false, pid: undefined, startedAt: undefined, activity: undefined, error: diagnostic });
     void this.refresh();
   }
 
@@ -270,7 +280,7 @@ class ServiceController {
         this.publish({ state: 'attached', activity: undefined, error: error instanceof Error ? error.message : String(error) });
         throw error;
       }
-      this.publish({ state: 'offline', owned: false, pid: undefined, activity: undefined, error: undefined });
+      this.publish({ state: 'offline', owned: false, pid: undefined, startedAt: undefined, activity: undefined, error: undefined });
       vscode.window.showInformationMessage('Cluster Watcher service stopped.');
       await this.refresh();
       return;
@@ -338,10 +348,12 @@ class ServiceController {
     const checkedAt = Date.now();
     const settings = configuration();
     const [serviceResult, inventoryResult] = await Promise.allSettled([
-      this.client.isClusterWatcherService(),
+      this.client.serviceInfo(),
       runCli(settings, ['sessions', '--json', '--timeout', '2'], 60000),
     ]);
-    const reachable = serviceResult.status === 'fulfilled' && serviceResult.value;
+    const reachable = serviceResult.status === 'fulfilled';
+    const serviceInfo = reachable && serviceResult.value && typeof serviceResult.value === 'object'
+      ? serviceResult.value : {};
     if (inventoryResult.status === 'rejected') {
       this.sessionsError = inventoryResult.reason?.message || String(inventoryResult.reason);
       this.provider.updateServer(this.lifecycle, this.sessions, this.sessionsError, checkedAt);
@@ -361,10 +373,12 @@ class ServiceController {
     if (reachable) {
       this.publish({
         state: this.process ? 'running' : 'attached', owned: Boolean(this.process),
+        pid: serviceInfo.pid ?? (this.process ? this.lifecycle.pid : undefined),
+        startedAt: serviceInfo.started_at ?? (this.process ? this.lifecycle.startedAt : undefined),
         activity: this.loginProcess ? this.lifecycle.activity : undefined, error: undefined,
       });
     } else if (!this.process && this.lifecycle.state !== 'error') {
-      this.publish({ state: 'offline', owned: false, pid: undefined, activity: undefined });
+      this.publish({ state: 'offline', owned: false, pid: undefined, startedAt: undefined, activity: undefined });
     } else {
       this.provider.updateServer(this.lifecycle, this.sessions, this.sessionsError, checkedAt);
     }

@@ -291,11 +291,11 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 .progress-message{display:block;max-width:100%;font-size:.72em;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
 .dependency-icon{display:inline-block;margin-left:2px;font-family:system-ui,sans-serif;font-weight:700;cursor:help}.dependency-icon.waiting{font-weight:400}.dependency-icon.satisfied{color:var(--vscode-testing-iconPassed)}.dependency-icon.failed{color:var(--vscode-errorForeground)}
 .priority-context{display:flex;align-items:center;gap:5px;margin-top:6px;min-width:0}.priority-gauge{display:flex;align-items:center;flex:1 1 auto;min-width:54px;max-width:150px;cursor:help}.priority-track{position:relative;display:block;flex:1 1 auto;height:4px;border-radius:3px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed))}.priority-marker{position:absolute;top:-3px;width:2px;height:10px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.priority-prominent{margin-top:5px}.priority-prominent .priority-track{height:6px}.priority-prominent .priority-marker{top:-3px;height:12px}.priority-help{color:var(--vscode-descriptionForeground);font-size:.8em;cursor:help}
-.partition-card{padding:5px}.partition-title{align-items:center;gap:7px}.partition-title>.name{flex:0 1 auto}.partition-specs{display:block;margin-top:3px;font-size:.72em;white-space:normal;overflow-wrap:anywhere}.gpu-model,.vram-spec,.thread-spec{cursor:help}.partition-availability{display:flex;align-items:center;gap:4px;margin-top:4px;font-size:.72em}.partition-availability-label{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd>.availability-cell{justify-content:flex-end}
+.partition-card{padding:5px}.partition-title{align-items:center;flex-wrap:wrap;gap:4px 7px}.partition-title>.name{flex:0 1 auto;margin-right:auto}.partition-title>.launchability{flex:0 0 auto;margin-left:0}.partition-specs{display:block;margin-top:3px;font-size:.72em;white-space:normal;overflow-wrap:anywhere}.gpu-model,.vram-spec,.thread-spec{cursor:help}.partition-availability{display:flex;align-items:center;gap:4px;margin-top:4px;font-size:.72em}.partition-availability-label{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd>.availability-cell{justify-content:flex-end}
 .launchability{display:flex;align-items:end;gap:2px;margin-left:auto;min-width:0}.launch-shape{display:grid;grid-template-rows:7px 9px;justify-items:center;gap:1px}.launch-count{color:var(--vscode-descriptionForeground);font-size:7px;line-height:7px}.launch-block{box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:9px;height:9px;border:1px solid color-mix(in srgb,var(--vscode-foreground) 24%,transparent);border-radius:2px;color:#fff;font-size:7px;font-weight:700;line-height:1;cursor:help}.launch-wait-0{background:#15803d}.launch-wait-1{background:#22c55e}.launch-wait-2{background:#eab308;color:#111}.launch-wait-3{background:#f97316}.launch-wait-4{background:#dc2626}.launch-blocked{background:#111}.launch-missing,.launch-pending{background:#777}.launch-unsupported{color:var(--vscode-descriptionForeground);background:repeating-linear-gradient(135deg,transparent 0 2px,color-mix(in srgb,var(--vscode-descriptionForeground) 25%,transparent) 2px 4px)}
 .job-id:hover,.job-id:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--vscode-focusBorder)}
 button.button{border:0;font:inherit;cursor:pointer}
-.service-summary{display:flex;align-items:center;gap:6px;margin:4px 0 7px;min-width:0;white-space:nowrap}.service-summary>strong{flex:0 0 auto}.service-url{min-width:0;overflow:hidden;text-overflow:ellipsis}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 30px;width:30px;height:16px;margin-left:auto;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:16px}.service-toggle:disabled{cursor:wait;opacity:.65}.session-list{display:grid;gap:4px;margin-top:7px}.session-row{border:1px solid var(--vscode-panel-border);border-radius:4px;padding:6px}.session-row-head{display:flex;align-items:center;justify-content:space-between;gap:6px}.session-name{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis}.session-state{font-size:.72em;white-space:nowrap}.session-state.open{color:var(--vscode-testing-iconPassed)}.session-state.closed{color:var(--vscode-errorForeground)}.session-actions{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}.service-output{max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.72em}.server-details{margin-top:10px}.server-details>summary{cursor:pointer}
+.service-summary{display:flex;align-items:center;gap:4px;margin:3px 0 5px;min-width:0;white-space:nowrap;font-size:.78em}.service-summary>strong{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}.service-url{box-sizing:border-box;display:block;flex:0 0 auto;max-width:calc(100% - 26px);min-width:0;margin:0;padding:0;overflow:hidden;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;text-decoration:underline;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 22px;width:22px;height:12px;margin:0;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:12px}.service-toggle:disabled{cursor:wait;opacity:.65}.session-list{display:grid;gap:3px;margin-top:5px}.session-row{min-width:0;border:1px solid var(--vscode-panel-border);border-radius:4px;padding:4px 5px}.session-row-head{display:flex;align-items:center;justify-content:space-between;gap:4px;min-width:0}.session-name{font-weight:600;font-size:.85em;min-width:0;overflow:hidden;text-overflow:ellipsis}.session-state{font-size:.68em;white-space:nowrap}.session-state.open{color:var(--vscode-testing-iconPassed)}.session-state.closed{color:var(--vscode-errorForeground)}.session-target{margin-top:1px;font-size:.68em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.session-actions{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}.session-actions>.compact-action{box-sizing:border-box;max-width:100%;padding:2px 4px;font-size:.68em;line-height:1.3;white-space:normal;overflow-wrap:anywhere;text-align:left}.service-output{max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.72em}.server-details{margin-top:10px}.server-details>summary{cursor:pointer}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
@@ -476,27 +476,34 @@ function renderServerStatus(payload = {}, freshness = {}) {
   const state = String(service.state || 'offline').toLowerCase();
   const labels = {
     offline: 'Stopped', starting: 'Starting', authenticating: 'Waiting for credentials',
-    running: 'Running in the background', attached: 'Attached to an existing service',
+    attached: 'Attached to an existing service',
     stopping: 'Stopping', error: 'Error',
   };
   const serviceOn = ['running', 'attached', 'starting', 'authenticating', 'stopping'].includes(state);
   const serviceTransitioning = ['starting', 'authenticating', 'stopping'].includes(state);
   const toggleText = serviceOn ? 'Stop service' : 'Start service';
   const toggle = `<button class="service-toggle ${serviceOn ? 'on' : 'off'}" ${commandButtonAttributes(serviceOn ? 'clusterWatcher.stopService' : 'clusterWatcher.startService')} aria-pressed="${serviceOn}" aria-label="${toggleText}" data-fast-tooltip="${toggleText}"${serviceTransitioning ? ' disabled' : ''}></button>`;
+  const serviceDetails = [
+    `Process: ${service.pid ?? 'unavailable'}`,
+    `Started: ${service.startedAt ? localTime(service.startedAt, true) : 'unavailable'}`,
+  ].join('\n');
+  const serviceDetailsAttribute = escapeHtml(serviceDetails).replace(/\n/g, '&#10;');
   const linkedUrl = service.url && ['running', 'attached'].includes(state)
-    ? `<a class="service-url" ${commandAttributes('clusterWatcher.openDashboard')}>${escapeHtml(service.url)}</a>`
+    ? `<button class="service-url" ${commandButtonAttributes('clusterWatcher.openDashboard')} aria-label="${escapeHtml(`${service.url}. `)}${serviceDetailsAttribute}" data-fast-tooltip="${serviceDetailsAttribute}">${escapeHtml(service.url)}</button>`
     : '';
-  const summaryLabel = state === 'attached' ? 'Attached to an existing service:' : labels[state] || state;
-  const serviceSummary = `<div class="service-summary"><strong>${escapeHtml(summaryLabel)}</strong>${linkedUrl}${toggle}</div>`;
-  const actions = [];
-  actions.push(`<button class="button secondary" ${commandButtonAttributes('clusterWatcher.login')}>Log in closed sessions</button>`);
+  const summaryLabel = state === 'attached' ? 'Attached to an existing service:' : labels[state] || '';
+  const summaryText = `${summaryLabel ? `<strong>${escapeHtml(summaryLabel)}</strong>` : ''}${linkedUrl}`;
+  const serviceSummary = `<div class="service-summary">${toggle}${summaryText}</div>`;
 
   const machines = (payload.sessions?.machines || []).map((machine) => {
     const open = Boolean(machine.session_open);
     let remaining = '';
-    if (open && machine.control_persist_seconds == null) remaining = ' · no idle limit';
-    else if (open && machine.estimated_remaining_seconds != null) remaining = ` · about ${formatDuration(machine.estimated_remaining_seconds)} left`;
-    else if (open) remaining = ' · remaining time unknown';
+    if (open && machine.control_persist_seconds == null) remaining = 'no idle limit';
+    else if (open && machine.estimated_remaining_seconds != null) remaining = `about ${formatDuration(machine.estimated_remaining_seconds)} left`;
+    else if (open) remaining = 'remaining time unknown';
+    const remainingAttributes = open
+      ? ` aria-label="Open, ${escapeHtml(remaining)}" data-fast-tooltip="${escapeHtml(remaining)}"`
+      : '';
     let login = '';
     if (!open && machine.interactive_auth) {
       const buttons = [
@@ -508,13 +515,9 @@ function renderServerStatus(payload = {}, freshness = {}) {
       login = `<div class="session-actions">${buttons.join('')}</div>`;
     }
     const error = !open && machine.error ? `<div class="muted">${escapeHtml(machine.error)}</div>` : '';
-    return `<div class="session-row"><div class="session-row-head"><span class="session-name">${escapeHtml(machine.name)}</span><span class="session-state ${open ? 'open' : 'closed'}">${open ? 'Open' : 'Closed'}${escapeHtml(remaining)}</span></div><div class="muted">${escapeHtml(machine.username)}@${escapeHtml(machine.host)}</div>${error}${login}</div>`;
+    return `<div class="session-row"><div class="session-row-head"><span class="session-name">${escapeHtml(machine.name)}</span><span class="session-state ${open ? 'open' : 'closed'}"${remainingAttributes}>${open ? 'Open' : 'Closed'}</span></div><div class="muted session-target">${escapeHtml(machine.username)}@${escapeHtml(machine.host)}</div>${error}${login}</div>`;
   }).join('');
   const sessionError = payload.sessionsError ? `<p class="error">Could not inspect SSH sessions: ${escapeHtml(payload.sessionsError)}</p>` : '';
-  const processFacts = [
-    service.pid ? `<dt>Process</dt><dd>${escapeHtml(service.pid)}</dd>` : '',
-    service.startedAt ? `<dt>Started</dt><dd>${escapeHtml(localTime(service.startedAt, true))}</dd>` : '',
-  ].join('');
   const error = service.error ? `<p class="error">${escapeHtml(service.error)}</p>` : '';
   const output = (service.recentLines || []).map((line) => `${line.stream === 'stderr' ? 'stderr: ' : ''}${line.text}`).join('\n');
   const diagnostics = output
@@ -522,8 +525,7 @@ function renderServerStatus(payload = {}, freshness = {}) {
     : '';
   const body = serviceSummary
     + (service.activity ? `<p class="muted">${escapeHtml(service.activity)}</p>` : '')
-    + error + (processFacts ? `<dl class="times">${processFacts}</dl>` : '')
-    + `<div class="actions">${actions.join('')}</div>${sessionError}`
+    + error + sessionError
     + `<div class="session-list">${machines || '<p class="muted">No session inventory is available yet.</p>'}</div>${diagnostics}`;
   return document('Server Status', body, freshness);
 }
@@ -794,7 +796,7 @@ function partitionCard(partition, pending, asOf, thresholds) {
   const profile = bestGpu(partition);
   const name = `${partition.name}${partition.aggregate ? ' (aggregate)' : ''}`;
   const launchability = launchabilityStrip(partition, pending, asOf, thresholds);
-  return `<article class="card partition-card${partition.aggregate ? ' aggregate' : ''}"><div class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${launchability}</div><div class="muted partition-specs">${partitionSpecs(partition, profile)}</div><div class="partition-availability"><span class="partition-availability-label">Available GPUs</span>${availabilityBar(partition)}</div></article>`;
+  return `<article class="card partition-card${partition.aggregate ? ' aggregate' : ''}"><div class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${launchability}</div><div class="muted partition-specs">${partitionSpecs(partition, profile)}</div><div class="partition-availability"><span class="partition-availability-label">Free GPUs</span>${availabilityBar(partition)}</div></article>`;
 }
 
 /**

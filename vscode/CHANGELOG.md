@@ -11,7 +11,14 @@ All notable changes to the Cluster Watcher VS Code extension.
   diagnostics, reusable SSH-session health, and start/stop/login controls.
   Attached local services now show a confirmation-protected **Stop service**
   control that requests a graceful backend shutdown. Server Status places its
-  clickable attached-service URL and start/stop toggle on one compact line.
+  smaller start/stop toggle to the left of its clickable service URL on one
+  compact line. The URL hover reports the actual backend PID and start time;
+  its dummy `#` target tooltip, the redundant running label, and the legacy
+  global login action were removed. Service and SSH-session rows now remain
+  compact at the sidebar's minimum width. Open session cards move their
+  remaining lifetime into a hover, partition cards say **Free GPUs**, and an
+  over-wide launchability strip wraps intact and flush left below its partition
+  name.
   Closed machine cards offer an exact-machine login and, when configured, a
   second credential-group login action.
   The extension now probes the backend's machine-readable capabilities first,

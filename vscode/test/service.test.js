@@ -120,6 +120,8 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   assert.match(extensionSource, /coordinator\.refreshJobs\(\)/);
   assert.match(extensionSource, /coordinator\.refreshStatus\(\)/);
   assert.match(extensionSource, /client\.post\('\/api\/v1\/shutdown', \{\}, 5000\)/);
+  assert.match(extensionSource, /this\.client\.serviceInfo\(\)/);
+  assert.match(extensionSource, /serviceInfo\.started_at/);
   assert.match(extensionSource, /Other dashboards and clients using it will be disconnected/);
   assert.equal(
     (extensionSource.match(/await validateBackgroundCredentialSupport\(settings\);/g) || []).length,

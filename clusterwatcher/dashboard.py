@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
+import os
 import sys
 import threading
 import time
@@ -861,6 +862,7 @@ class StatusStore:
         self._wait_estimates_updated_at: dict[str, str] = {}
         self._updated_at: str | None = None
         self._capacity_collected: dict[str, float] = {}
+        self._service_started_at = datetime.now(timezone.utc).isoformat()
         self.job_service = JobService(machines, timeout, refresh_seconds, self.statuses) if jobs_api_enabled else None
         self.command_service = RemoteCommandService(machines, timeout) if command_api_enabled else None
 
@@ -956,6 +958,14 @@ class StatusStore:
                 self.wait_threshold_minutes,
             )
 
+    def service_payload(self) -> dict[str, object]:
+        """Return identity metadata for clients attached to this process."""
+        return {
+            "schema_version": "1.0",
+            "pid": os.getpid(),
+            "started_at": self._service_started_at,
+        }
+
     def run_forever(self, stop: threading.Event) -> None:
         while not stop.is_set():
             self.refresh()
@@ -1030,6 +1040,10 @@ def make_handler(store: StatusStore):
                     snapshot["error"] = "The first cluster status collection has not completed"
                     extra_headers["Retry-After"] = "1"
                 body, content_type = json.dumps(snapshot).encode(), "application/json; charset=utf-8"
+                extra_headers["Cache-Control"] = "no-store"
+            elif path == "/api/v1/service":
+                body = json.dumps(store.service_payload()).encode()
+                content_type, code = "application/json; charset=utf-8", 200
                 extra_headers["Cache-Control"] = "no-store"
             elif path == "/api/v1/jobs":
                 body, content_type, code, headers = self._jobs_response(query)

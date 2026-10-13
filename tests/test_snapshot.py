@@ -334,6 +334,19 @@ class SnapshotTests(TimedTestCase):
         self.assertEqual(response["status"], 200)
         self.assertEqual(document["schema_version"], "1.0")
 
+    def test_service_endpoint_reports_process_identity_without_optional_apis(self):
+        """Attached clients can identify the service even before collection."""
+        store = StatusStore([Machine("a", "host", "user")], 5, False, 15)
+
+        with patch("clusterwatcher.dashboard.os.getpid", return_value=4321):
+            response, document = request_handler(store, "/api/v1/service")
+
+        self.assertEqual(response["status"], 200)
+        self.assertEqual(response["headers"]["Cache-Control"], "no-store")
+        self.assertEqual(document["schema_version"], "1.0")
+        self.assertEqual(document["pid"], 4321)
+        self.assertEqual(document["started_at"], store._service_started_at)
+
     def test_shutdown_endpoint_is_json_only_and_loopback_only(self):
         """An attached local client can stop the service without exposing a CSRF route."""
         store = StatusStore([Machine("a", "host", "user")], 5, False, 15)
