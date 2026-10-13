@@ -4,6 +4,8 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
+## 0.1.6 - 2026-10-13
+
 - Services started from the sidebar now run as extension-owned background
   processes instead of integrated terminals. Password and OTP requests use
   masked VS Code input boxes and a private stdin protocol, and re-login uses

@@ -520,8 +520,11 @@ class ClusterWatcherTests(TimedTestCase):
             main(["exec", "--help"])
 
         self.assertEqual(exit_context.exception.code, 0)
-        self.assertIn("default: unlimited", stdout.getvalue())
-        self.assertIn("positive when set", stdout.getvalue())
+        # argparse wraps according to the invoking terminal's ``COLUMNS``;
+        # compare prose after collapsing layout-only whitespace.
+        help_text = " ".join(stdout.getvalue().split())
+        self.assertIn("default: unlimited", help_text)
+        self.assertIn("positive when set", help_text)
 
     @patch("clusterwatcher.cli.load_config", return_value=[Machine("cluster_3", "cluster_3.example", "alice")])
     @patch("clusterwatcher.cli.RemoteCommandService")

@@ -2,7 +2,7 @@
   "name": "cluster-watcher",
   "displayName": "Cluster Watcher",
   "description": "Monitor Slurm jobs and capacity, manage the local service, and reopen SSH sessions from the VS Code sidebar.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "CameronBraunstein",
   "license": "GPL-3.0-or-later",
   "icon": "media/icon.png",
