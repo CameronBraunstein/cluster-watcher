@@ -2,10 +2,16 @@
 
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+import json
 from unittest.mock import patch
 
 from clusterwatcher.cli import main, run_login
-from clusterwatcher.credentials import login_targets
+from clusterwatcher.credentials import (
+    CREDENTIAL_PROMPT_PREFIX,
+    CredentialPromptCancelled,
+    JsonLineCredentialPrompt,
+    login_targets,
+)
 from clusterwatcher.dashboard import StatusStore
 from clusterwatcher.models import ClusterStatus, Machine
 from clusterwatcher.snapshot import build_snapshot
@@ -44,7 +50,7 @@ class LoginTargetTests(TimedTestCase):
             code = run_login(MACHINES, ["cluster_0"], 15)
 
         self.assertEqual(code, 1)
-        establish.assert_called_once_with([GROUP_A, GROUP_B], 15)
+        establish.assert_called_once_with([GROUP_A, GROUP_B], 15, None)
         self.assertIn("cluster_0: session open", out.getvalue())
         self.assertIn("cluster_1: login failed: Permission denied", err.getvalue())
 
@@ -53,7 +59,36 @@ class LoginTargetTests(TimedTestCase):
     def test_cli_subcommand_passes_names_and_timeout(self, _load, run):
         with patch("clusterwatcher.cli.configure_gpu_profiles"), patch("clusterwatcher.cli.gpu_profiles"):
             self.assertEqual(main(["login", "cluster_0", "--timeout", "7"]), 0)
-        run.assert_called_once_with(MACHINES, ["cluster_0"], 7)
+        run.assert_called_once_with(MACHINES, ["cluster_0"], 7, None)
+
+    def test_json_line_prompt_keeps_secret_out_of_request_output(self):
+        response = StringIO(json.dumps({"request_id": 1, "value": "top-secret"}) + "\n")
+        requests = StringIO()
+
+        value = JsonLineCredentialPrompt(response, requests)("password", "Password for alice")
+
+        self.assertEqual(value, "top-secret")
+        line = requests.getvalue().strip()
+        self.assertTrue(line.startswith(CREDENTIAL_PROMPT_PREFIX))
+        request = json.loads(line.removeprefix(CREDENTIAL_PROMPT_PREFIX))
+        self.assertEqual(request, {
+            "version": 1, "request_id": 1, "kind": "password", "prompt": "Password for alice",
+        })
+        self.assertNotIn("top-secret", line)
+
+    def test_json_line_prompt_accepts_cancellation_without_echoing_a_secret(self):
+        response = StringIO('{"request_id":1,"cancel":true}\n')
+        with self.assertRaisesRegex(CredentialPromptCancelled, "cancelled"):
+            JsonLineCredentialPrompt(response, StringIO())("otp", "One-time code")
+
+    @patch("clusterwatcher.cli.JsonLineCredentialPrompt")
+    @patch("clusterwatcher.cli.run_login", return_value=0)
+    @patch("clusterwatcher.cli.load_config", return_value=MACHINES)
+    def test_cli_machine_protocol_is_forwarded_to_login(self, _load, run, prompt_type):
+        prompt = prompt_type.return_value
+        with patch("clusterwatcher.cli.configure_gpu_profiles"), patch("clusterwatcher.cli.gpu_profiles"):
+            self.assertEqual(main(["login", "cluster_0", "--credential-stdin-json"]), 0)
+        run.assert_called_once_with(MACHINES, ["cluster_0"], 15, prompt)
 
 
 class LoginRequiredTests(TimedTestCase):

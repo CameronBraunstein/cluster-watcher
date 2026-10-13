@@ -1,9 +1,9 @@
 # Cluster Watcher for VS Code
 
-This extension adds **My Jobs** and **Cluster Status** views to the Activity
-Bar. It is a thin client for the loopback APIs provided by `cluster-watcher
-serve`; the Python application remains responsible for configuration, SSH,
-MFA, Slurm queries, and refresh scheduling.
+This extension adds **My Jobs**, **Cluster Status**, and **Server Status** views
+to the Activity Bar. It is a thin client for the loopback APIs provided by
+`cluster-watcher serve`; the Python application remains responsible for
+configuration, SSH, MFA, Slurm queries, and refresh scheduling.
 
 ## Requirements
 
@@ -73,11 +73,14 @@ stay on one line when space permits; on a narrow card, the date remains on the
 first line and the time wraps onto a right-aligned second line. The compact
 icon/short-label action row remains on one line. Long progress labels ellipsize,
 while dependency expressions and expanded job names wrap inside the card.
-When a cluster exposes numeric Slurm priorities for at least two of the user's
-visible pending jobs, expanded Pending cards add an unlabeled, number-free
-low-to-high priority gauge. Hover it for the raw priority, relative rank, comparison
-scope; scheduling caveats are documented in the main README rather than the
-hover. If no wait estimate exists, the gauge moves into the always-visible
+When a cluster exposes a global queue rank—or numeric Slurm priorities for at
+least two of the user's visible pending jobs—expanded Pending cards add a
+number-free low-to-high priority gauge. Hover it for `Global priority <rank> / <all pending>` and `Your
+priority <rank> / <your pending>` on separate lines, or hover the **Priority**
+label to the left of the bar for a reminder that lower rank numbers are better
+and a short scheduling caveat. The marker visualizes the global rank and falls
+back to the user rank only when global data is unavailable. If no wait estimate exists, the
+gauge moves into the always-visible
 summary and becomes as thick as a normal progress bar. It has no directional
 arrows and is omitted when no useful comparison is possible.
 Expand a card to see details and to:
@@ -107,7 +110,7 @@ Expand a card to see details and to:
   not in the list.
 
 The archive is stored in VS Code extension global state and survives editor
-restarts. Group, job-card, cluster, and partition-card disclosure choices survive live data
+restarts. Group, job-card, and cluster disclosure choices survive live data
 refreshes: the webview reports each expand/collapse to the extension, which
 renders the remembered state into every refreshed page (for the current VS Code
 session). Cluster names are collapsible headings in **Cluster Status**. The
@@ -116,7 +119,7 @@ inside each webview. A compact `Last update: <date and time with seconds>` line
 appears directly below each heading. Each heading has its own **Refresh**
 action, which polls only that view's endpoint.
 **Cluster Watcher: Refresh Sidebar** in the Command Palette
-refreshes both views; service, dashboard, configuration, settings, and
+refreshes all three views; service, dashboard, configuration, settings, and
 backend-management actions also remain available there. A pressed heading
 refresh button changes briefly to a spinning sync icon, including when the
 response is unchanged. A notification distinguishes new data (`Refreshed at:`)
@@ -127,7 +130,7 @@ Log documents initially contain the newest 2,000 lines. If more output exists,
 use the upward-arrow **Load 2,000 Older Lines** editor-title action; each click
 prepends one more bounded page until the complete remote file is loaded.
 
-When the service is not reachable, both views show a welcome screen with
+When the service is not reachable, the jobs and cluster views show a welcome screen with
 buttons to **Start service & SSH sessions**, **Run setup wizard** (runs
 `cluster-watcher setup` in a terminal), **Edit configuration** (opens the file
 reported by `cluster-watcher config --path` in an editor tab), and **Settings**.
@@ -172,31 +175,54 @@ hover are kept). Progress bars, elapsed times, and wait estimates still count
 on their own every few seconds. The compact freshness line below each heading
 shows only when data last changed, with exact second precision.
 
-**Cluster Status** shows each partition as a collapsible card, like a job
-card. Collapsed, it shows the partition name, a number-free priority gauge
-(when Slurm reports `PriorityJobFactor`, normalized against the largest
-displayed partition factor), and the best GPU's compact model label (such as
-`H100`), VRAM, and TFLOPS/s. Hover the model label for its full name, or the
-gauge for the exact factor and tier plus the cluster's scheduler, priority
-plugin, partition weight, and priority flags. Click the card to expand it:
+Pending-job priority bars show both a cluster-wide rank among all visible
+pending jobs and a user rank among your pending jobs on that cluster; 1 is the
+highest Slurm score and tied scores share a rank. The marker visualizes the
+user rank, while hover text reports both ranks. The ⓘ beside each bar begins
+**Higher scores …** and explains that neither value guarantees launch order or
+start time. A better rank usually means earlier consideration than lower-ranked
+jobs when their resource requirements and scheduling tier are comparable, but
+QOS, reservations, resource fit, and backfill still control actual launch
+order. If the cluster denies the queue-wide query, global priority is shown as
+unavailable while the user rank remains available.
+The former large value was Slurm's raw, cluster-specific weighted priority
+score. Its absolute magnitude is not a queue position and is not comparable
+between clusters, which is why the interface now presents relative global and
+user ranks.
 
-- **Available GPUs** is a green/red bar with its `idle/total` fraction; hover
-  the bar for a node-only state breakdown (zero-count categories are omitted).
-- **GPU** gives the full model name, and **CPU threads** the partition total.
-- A line chart plots the estimated wait for a one-hour job against the number
-  of GPUs requested (1–64). Both axes are logarithmic, so short and multi-day
-  waits stay readable together. Hover a column for the exact estimate, which
-  keeps counting down between refreshes, or Slurm's message. A shape without
-  an estimate shows a short label instead of a point: `DENY` (your account may
-  not use the partition), `min` (below its minimum GPU request), `limit` (over
-  a limit for your account), `n/a` (no node can run it now, e.g. all drained),
-  `ERR` (a real failure, such as Slurm not answering), `?` (not probed), `…`
-  (the first probes are still running), or `—` (more GPUs than the partition
-  has).
+**Cluster Status** shows each partition as a permanently expanded compact card.
+It shows the partition name, seven account-aware launchability blocks for 1,
+2, 4, 8, 16, 32, and 64 GPUs, and the best GPU's compact model label (such as
+`H100`), VRAM, TFLOPS/s, CPU-thread total, and GPU availability. Each block uses the configured
+wait thresholds from dark green through green, yellow, orange, and red. Black
+means the request was rejected by account/QOS policy, gray means unavailable
+or unprobed, and a striped block exceeds the partition's capacity. Hover a
+block for its exact one-hour-job estimate, expected start, or Slurm error, and
+hover the GPU model for its full name. VRAM and thread hover text explicitly
+labels those amounts.
 
-Partition cards start collapsed, and their open/closed state survives
-refreshes like job cards. The main README explains the scheduling semantics;
-unavailable data is simply omitted.
+**Available GPUs** precedes a green/red bar with its `idle/total` fraction;
+hover the bar for a node-only state breakdown (zero-count categories are
+omitted).
+
+The card does not repeat the same wait information as a graph. The colored
+blocks keep counting down locally between service updates. A
+development partition capped below one hour shows the actual shorter probe
+runtime in its hover text.
+The main README explains the scheduling semantics; unavailable data is simply
+omitted.
+
+**Server Status** sits below Cluster Status. It reports the managed process as
+starting, waiting for credentials, running, stopping, or stopped; a compatible
+service started elsewhere is labeled **Attached to an existing service**. The
+view shows the service URL, owned PID, bounded recent diagnostic output, and an
+Open/Closed card for every reusable SSH session with its approximate remaining
+idle lifetime. Its controls start or stop the owned process, open the browser
+dashboard, refresh the inventory, and re-authenticate all or one closed
+interactive session. The extension never stops a service it did not start.
+An extension-owned process stops when the extension host shuts down or reloads;
+the OpenSSH masters may remain available for their configured persistence
+period. Start the service separately when it must outlive VS Code.
 
 Two settings control background feedback:
 
@@ -218,20 +244,24 @@ sidebar immediately.
 
 Webview buttons do not use command links. Each one posts a message, and the
 extension only runs commands from a fixed allowlist (archive, restore, open
-log, end job, start service, setup, edit configuration, settings, log in).
+logs/scripts/dashboard, end job, start/stop/refresh the service, setup, edit
+configuration, settings, backend management, and login).
 
-Use **Cluster Watcher: Start Service & SSH Sessions** from the Command Palette.
-The service opens in an integrated terminal so password and OTP prompts remain
-visible. If a compatible service is already listening at
+Use **Cluster Watcher: Start Service & SSH Sessions** from the Command Palette
+or Server Status. The service runs directly as a managed background child
+process. Password and OTP requests use masked, focus-retaining VS Code input
+boxes; responses pass over the child's private stdin and never appear in its
+arguments, environment, configuration, or retained diagnostic output. If a
+compatible service is already listening at
 `clusterWatcher.backendUrl`, the extension attaches without starting another
 process.
 
 If a cluster's SSH session closes later, its **Cluster Status** card says so
-and shows **Log in again**. The button runs `cluster-watcher login <cluster>` in
-a terminal, without restarting the service. Other closed clusters that share
-the same password (`credential_group`) are logged in at the same time, so the
-password is asked for once, followed by one one-time code per cluster. The
-terminal closes after a successful login, and the card recovers on the next
+and shows **Log in again**. The button runs `cluster-watcher login <cluster>`
+as a background process, without restarting the service. Other closed clusters
+that share the same password (`credential_group`) are logged in at the same
+time, so the password is asked for once, followed by one one-time code per
+cluster. No terminal opens, and the card recovers on the next
 refresh. **Cluster Watcher: Log In Again to Closed SSH Sessions** in the
 Command Palette does the same for every closed cluster.
 
@@ -240,9 +270,12 @@ extension host. Set `clusterWatcher.configPath` when the normal configuration
 location should not be used.
 
 The extension validates every managed or selected executable with
-`<executable> --help` before opening the service terminal. If validation fails,
-use the notification's **Manage Backend** button to repair the managed copy or
-choose another executable.
+`<executable> --help` and `<executable> capabilities` before starting the
+background service. The capability check prevents an older executable from
+being started with unsupported terminal-free credential arguments. If it
+fails, use the notification's **Manage Backend** button to repair the managed
+copy, or run `./install.sh --from-source --add-to-path` from the matching source
+checkout and reload the extension host.
 
 The extension is declared as a workspace extension. Under VS Code Remote SSH,
 install it on the remote side so its process, the executable, and reusable SSH

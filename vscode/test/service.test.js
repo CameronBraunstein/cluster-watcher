@@ -5,7 +5,9 @@ const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const {
-  ServiceResponseError, cliCommand, cliTerminalOptions, jobsApiDisabled, loginCommand, responseError, serviceArguments, serviceCommand, shellQuote, validateExecutable,
+  ServiceResponseError, backgroundLoginArguments, backgroundServiceArguments, cliArguments, cliCommand,
+  cliTerminalOptions, jobsApiDisabled, responseError, serviceArguments, serviceCommand,
+  shellQuote, validateBackgroundCredentialSupport, validateExecutable,
 } = require('../service');
 const manifest = require('../package.json');
 
@@ -39,6 +41,38 @@ test('service command refuses a non-loopback or TLS endpoint', () => {
   assert.throws(() => serviceCommand({ ...settings, backendUrl: 'https://127.0.0.1:8080/' }), /loopback/);
 });
 
+test('background service and login opt into stdin credentials without a shell command', () => {
+  const settings = {
+    executable: 'cluster-watcher', configPath: '/home/alice/clusters.toml',
+    backendUrl: 'http://127.0.0.1:8080/', sshTimeoutSeconds: 15, refreshSeconds: 15,
+  };
+  assert.equal(backgroundServiceArguments(settings).at(-1), '--credential-stdin-json');
+  assert.deepEqual(backgroundLoginArguments(settings, 'viper'), [
+    'login', 'viper', '--timeout', '15', '--credential-stdin-json',
+  ]);
+  assert.deepEqual(cliArguments(settings, backgroundLoginArguments(settings, 'viper')).slice(0, 2), [
+    '--config', '/home/alice/clusters.toml',
+  ]);
+});
+
+test('background authentication rejects a legacy executable before login starts', async () => {
+  const settings = { executable: '/opt/cluster-watcher', configPath: '' };
+  await validateBackgroundCredentialSupport(settings, 5000, async () => ({
+    code: 0,
+    stdout: '{"schema_version":1,"capabilities":["credential-stdin-json"]}\n',
+    stderr: '',
+  }));
+  await assert.rejects(
+    validateBackgroundCredentialSupport(settings, 5000, async () => ({
+      code: 2, stdout: '', stderr: 'error: invalid choice: capabilities',
+    })),
+    (error) => error.name === 'ExecutableValidationError'
+      && error.message.includes('too old')
+      && error.message.includes('./install.sh --from-source --add-to-path')
+      && error.message.includes('Manage Backend Installation'),
+  );
+});
+
 test('shell quoting cannot split a configured executable argument', () => {
   assert.equal(shellQuote("it's safe"), "'it'\\''s safe'");
   assert.equal(shellQuote("it's safe", 'win32'), "'it''s safe'");
@@ -57,10 +91,13 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
     { command: 'clusterWatcher.refreshJobsBusy', when: 'view == clusterWatcher.jobs && clusterWatcher.refreshingJobs', group: 'navigation@1' },
     { command: 'clusterWatcher.refreshStatus', when: 'view == clusterWatcher.status && !clusterWatcher.refreshingStatus', group: 'navigation@1' },
     { command: 'clusterWatcher.refreshStatusBusy', when: 'view == clusterWatcher.status && clusterWatcher.refreshingStatus', group: 'navigation@1' },
+    { command: 'clusterWatcher.refreshServer', when: 'view == clusterWatcher.server && !clusterWatcher.refreshingServer', group: 'navigation@1' },
+    { command: 'clusterWatcher.refreshServerBusy', when: 'view == clusterWatcher.server && clusterWatcher.refreshingServer', group: 'navigation@1' },
   ]);
   assert.deepEqual(manifest.contributes.menus.commandPalette, [
     { command: 'clusterWatcher.refreshJobsBusy', when: 'false' },
     { command: 'clusterWatcher.refreshStatusBusy', when: 'false' },
+    { command: 'clusterWatcher.refreshServerBusy', when: 'false' },
   ]);
   assert.match(manifest.contributes.menus['editor/title'][0].when, /cluster-watcher-log/);
   const commands = new Map(manifest.contributes.commands.map((command) => [command.command, command]));
@@ -69,12 +106,20 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   assert.equal(commands.get('clusterWatcher.refreshJobsBusy').icon, '$(sync~spin)');
   assert.equal(commands.get('clusterWatcher.refreshStatus').icon, '$(refresh)');
   assert.equal(commands.get('clusterWatcher.refreshStatusBusy').icon, '$(sync~spin)');
+  assert.equal(commands.get('clusterWatcher.refreshServer').icon, '$(refresh)');
+  assert.equal(commands.get('clusterWatcher.refreshServerBusy').icon, '$(sync~spin)');
   assert.equal(commands.get('clusterWatcher.startService').icon, '$(play)');
   const extensionSource = readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   assert.match(extensionSource, /this\.view\.description = undefined/);
   assert.match(extensionSource, /renderStatus\(this\.payload, this\.disclosures, this\.freshness\(\)\)/);
+  assert.match(extensionSource, /renderServerStatus/);
   assert.match(extensionSource, /coordinator\.refreshJobs\(\)/);
   assert.match(extensionSource, /coordinator\.refreshStatus\(\)/);
+  assert.equal(
+    (extensionSource.match(/await validateBackgroundCredentialSupport\(settings\);/g) || []).length,
+    2,
+    'both service startup and explicit login must reject a legacy backend',
+  );
 });
 
 test('executable validation accepts a program and explains a missing setting', async () => {
@@ -116,6 +161,8 @@ test('manifest declares license, icon, new settings, and no redundant activation
     assert.ok(commands.includes(command), command);
   }
   assert.ok(commands.includes('clusterWatcher.manageBackend'));
+  assert.ok(commands.includes('clusterWatcher.refreshServer'));
+  assert.equal(manifest.contributes.views.clusterWatcher.at(-1).id, 'clusterWatcher.server');
   assert.equal(manifest.capabilities.untrustedWorkspaces.supported, false);
   assert.match(manifest.scripts.package, /vsce package --no-dependencies/);
   assert.match(manifest.scripts.publish, /vsce publish --no-dependencies/);
@@ -136,13 +183,11 @@ test('a plain-text 404 suggests upgrading an older service', () => {
   assert.equal(responseError(400, { error: 'bad id' }).message, 'bad id');
 });
 
-test('login runs the CLI for one machine, or all, and closes the terminal on success', () => {
-  const settings = { executable: 'cluster-watcher', configPath: '' };
-  assert.equal(loginCommand(settings, 'cluster_0'), "'cluster-watcher' 'login' 'cluster_0' && exit");
-  assert.equal(loginCommand(settings), "'cluster-watcher' 'login' && exit");
-  assert.match(loginCommand(settings, "x'; rm -rf ~"), /'x'\\''; rm -rf ~' && exit$/);
-  assert.equal(loginCommand(settings, 'cluster_0', 'win32'), "'cluster-watcher' 'login' 'cluster_0'; if ($?) { exit }");
+test('login is allowlisted and dispatched through the background controller', () => {
   const commands = manifest.contributes.commands.map((command) => command.command);
   assert.ok(commands.includes('clusterWatcher.login'));
-  assert.match(readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8'), /'clusterWatcher\.refresh', 'clusterWatcher\.login',/);
+  const extensionSource = readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  assert.match(extensionSource, /'clusterWatcher\.refreshServer', 'clusterWatcher\.login'/);
+  assert.match(extensionSource, /controller\.login\(machine\)/);
+  assert.doesNotMatch(extensionSource, /createTerminal\([^)]*Login/);
 });

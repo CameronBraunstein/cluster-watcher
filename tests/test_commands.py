@@ -45,6 +45,7 @@ class RemoteCommandTests(TimedTestCase):
 
         self.assertTrue(status["available"])
         self.assertTrue(status["session_open"])
+        self.assertEqual(status["interactive_auth"], machine.interactive_auth)
         self.assertEqual(status["pid"], 4321)
         self.assertEqual(status["control_persist_seconds"], 7200)
         self.assertGreaterEqual(status["estimated_remaining_seconds"], 7198)

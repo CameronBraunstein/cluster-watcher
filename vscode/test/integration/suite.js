@@ -13,8 +13,9 @@ const EXPECTED_COMMANDS = [
   'clusterWatcher.startService', 'clusterWatcher.stopService', 'clusterWatcher.refresh',
   'clusterWatcher.refreshJobs', 'clusterWatcher.refreshJobsBusy',
   'clusterWatcher.refreshStatus', 'clusterWatcher.refreshStatusBusy',
-  'clusterWatcher.openDashboard', 'clusterWatcher.showServiceTerminal', 'clusterWatcher.loadMoreLog',
-  'clusterWatcher.runSetup', 'clusterWatcher.editConfig', 'clusterWatcher.openSettings',
+  'clusterWatcher.refreshServer', 'clusterWatcher.refreshServerBusy',
+  'clusterWatcher.openDashboard', 'clusterWatcher.loadMoreLog',
+  'clusterWatcher.runSetup', 'clusterWatcher.login', 'clusterWatcher.editConfig', 'clusterWatcher.openSettings',
   'clusterWatcher.manageBackend',
   'clusterWatcher.copyServiceCommand', 'clusterWatcher.archiveJob', 'clusterWatcher.restoreJob', 'clusterWatcher.openLog', 'clusterWatcher.openScript', 'clusterWatcher.cancelJob',
 ];
@@ -33,10 +34,11 @@ async function run() {
   const commands = new Set(await vscode.commands.getCommands(true));
   for (const command of EXPECTED_COMMANDS) assert.ok(commands.has(command), `${command} is registered`);
 
-  // Opening the views resolves both webview providers; this must not throw offline.
+  // Opening the container resolves all three webview providers; this must not throw offline.
   await vscode.commands.executeCommand('workbench.view.extension.clusterWatcher');
   await vscode.commands.executeCommand('clusterWatcher.refreshJobs');
   await vscode.commands.executeCommand('clusterWatcher.refreshStatus');
+  await vscode.commands.executeCommand('clusterWatcher.refreshServer');
   await vscode.commands.executeCommand('clusterWatcher.refresh');
   console.log(`Cluster Watcher integration suite passed (${EXPECTED_COMMANDS.length} commands).`);
 }

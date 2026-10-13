@@ -91,6 +91,31 @@ function validateExecutable(executable, timeoutMilliseconds = 5000) {
   });
 }
 
+/**
+ * Require the private stdin credential protocol before starting a process that
+ * has no terminal. A legacy executable can pass ``--help`` validation but
+ * cannot safely answer password or OTP prompts in the extension host.
+ */
+async function validateBackgroundCredentialSupport(settings, timeoutMilliseconds = 5000, runner = runCli) {
+  let result;
+  try {
+    result = await runner(settings, ['capabilities'], timeoutMilliseconds);
+  } catch (error) {
+    if (error instanceof ExecutableValidationError) throw error;
+    result = { code: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) };
+  }
+  let payload;
+  try { payload = JSON.parse(result.stdout); } catch (_error) { payload = undefined; }
+  if (result.code === 0 && payload?.schema_version === 1
+      && Array.isArray(payload.capabilities)
+      && payload.capabilities.includes('credential-stdin-json')) return;
+  throw new ExecutableValidationError(
+    `The configured Cluster Watcher executable "${settings.executable}" is too old for secure background SSH login. `
+    + 'Update or reinstall the backend that matches this extension, then retry. In a source checkout, run '
+    + '`./install.sh --from-source --add-to-path`; otherwise use “Cluster Watcher: Manage Backend Installation”.',
+  );
+}
+
 /** Quote one argument for a POSIX shell or PowerShell command line. */
 function shellQuote(value, platform = process.platform) {
   if (platform === 'win32') return `'${String(value).replaceAll("'", "''")}'`;
@@ -100,6 +125,11 @@ function shellQuote(value, platform = process.platform) {
 /** Return executable arguments that select the configured clusters.toml, if any. */
 function configArguments(settings) {
   return settings.configPath ? ['--config', settings.configPath] : [];
+}
+
+/** Build a direct child-process argument vector without involving a shell. */
+function cliArguments(settings, args) {
+  return [...configArguments(settings), ...args];
 }
 
 /** Build a shell-quoted ``cluster-watcher`` command line for an integrated terminal. */
@@ -115,17 +145,6 @@ function cliTerminalOptions(name, settings, args) {
     shellPath: settings.executable,
     shellArgs: [...configArguments(settings), ...args],
   };
-}
-
-/**
- * Return the terminal command that re-opens closed SSH sessions. The CLI adds
- * the machine's credential-group members, so one password covers them all;
- * the terminal closes itself after a successful login and stays open to show
- * an error otherwise.
- */
-function loginCommand(settings, machine, platform = process.platform) {
-  const command = cliCommand(settings, ['login', ...(machine ? [String(machine)] : [])], platform);
-  return platform === 'win32' ? `${command}; if ($?) { exit }` : `${command} && exit`;
 }
 
 /** Run the executable directly (no shell) and resolve with stdout/stderr and exit code. */
@@ -171,11 +190,27 @@ function serviceArguments(settings) {
   ];
 }
 
+/** Add the private stdin credential protocol used by the background extension host. */
+function backgroundServiceArguments(settings) {
+  return [...serviceArguments(settings), '--credential-stdin-json'];
+}
+
+/** Build a background login argument vector for all or one configured machine. */
+function backgroundLoginArguments(settings, machine) {
+  return [
+    'login', ...(machine ? [String(machine)] : []),
+    '--timeout', String(settings.sshTimeoutSeconds), '--credential-stdin-json',
+  ];
+}
+
 /** Build the safe loopback service command launched by the extension. */
 function serviceCommand(settings) {
   return cliCommand(settings, serviceArguments(settings));
 }
 
 module.exports = {
-  ExecutableValidationError, ServiceResponseError, jobsApiDisabled, responseError, cliCommand, cliTerminalOptions, configurationError, loginCommand, resolveConfigPath, runCli, serviceArguments, serviceCommand, shellQuote, validateExecutable,
+  ExecutableValidationError, ServiceResponseError, backgroundLoginArguments, backgroundServiceArguments,
+  cliArguments, jobsApiDisabled, responseError, cliCommand, cliTerminalOptions, configurationError,
+  resolveConfigPath, runCli, serviceArguments, serviceCommand, shellQuote,
+  validateBackgroundCredentialSupport, validateExecutable,
 };

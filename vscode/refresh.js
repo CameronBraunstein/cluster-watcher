@@ -16,6 +16,7 @@ class RefreshCoordinator {
    * @param {object} options Environment-specific callbacks.
    * @param {(error: unknown) => boolean} options.jobsApiDisabled Detect an intentionally disabled jobs API.
    * @param {() => number} options.refreshSeconds Return the current polling interval in seconds.
+   * @param {() => Promise<object>} [options.refreshServer] Refresh local service/session state.
    */
   constructor(client, jobsProvider, statusProvider, monitor, options) {
     this.client = client;
@@ -24,16 +25,31 @@ class RefreshCoordinator {
     this.monitor = monitor;
     this.isJobsApiDisabled = options.jobsApiDisabled;
     this.refreshSeconds = options.refreshSeconds;
+    this.serverRefresh = options.refreshServer;
     /** ETags of the last data rendered per endpoint, for conditional polling. */
     this.etags = {};
     this.jobsInFlight = undefined;
     this.statusInFlight = undefined;
+    this.serverInFlight = undefined;
     this.timer = undefined;
   }
 
   /** Refresh both views, reusing any endpoint refresh already in progress. */
   async refresh() {
-    return Promise.all([this.refreshJobs(), this.refreshStatus()]);
+    const operations = [this.refreshJobs(), this.refreshStatus()];
+    if (this.serverRefresh) operations.push(this.refreshServer());
+    return Promise.all(operations);
+  }
+
+  /** Refresh the extension-managed process and reusable SSH-session inventory. */
+  async refreshServer() {
+    if (!this.serverRefresh) return { outcome: 'unchanged', checkedAt: Date.now() };
+    if (this.serverInFlight) return this.serverInFlight;
+    const operation = this.serverRefresh().finally(() => {
+      if (this.serverInFlight === operation) this.serverInFlight = undefined;
+    });
+    this.serverInFlight = operation;
+    return operation;
   }
 
   /** Refresh only My Jobs, coalescing overlapping requests. */

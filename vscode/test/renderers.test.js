@@ -2,8 +2,8 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, partitionPriorityGauge, relativeJobPriority, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
-const { waitAxis, waitChart, waitSeconds } = require('../wait-chart');
+const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderServerStatus, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
+const { launchabilityStrip, waitColorIndex, waitEstimate } = require('../launchability');
 
 test('jobs retain terminal state grouping and lifecycle visibility', () => {
   const jobs = [
@@ -43,7 +43,7 @@ test('jobs retain terminal state grouping and lifecycle visibility', () => {
   assert.match(jobKey(jobs[0]), /cluster_1/);
 });
 
-test('status shows each partition as a card: specs collapsed, availability and wait chart expanded', () => {
+test('status shows every partition detail compactly without a card disclosure', () => {
   const partition = {
     name: 'gpu-h100', rank: 1, aggregate: false,
     cpus: { total: 128 },
@@ -60,19 +60,19 @@ test('status shows each partition as a card: specs collapsed, availability and w
 
   const html = renderStatus({
     generated_at: '2026-09-30T15:02:00Z',
+    wait_threshold_minutes: [5, 30, 60, 120],
     clusters: [{ name: 'cluster_0', reachable: true, partitions: [partition] }],
   });
 
-  const card = html.match(/<details class="card partition-card" data-disclosure-key="partition:cluster_0:gpu-h100">.*?<\/details>/s)[0];
-  const summary = card.match(/<summary>.*?<\/summary>/s)[0];
-  assert.match(summary, /<span class="card-summary-title partition-title"><span class="name">gpu-h100<\/span><\/span>/);
-  assert.match(summary, /<span class="muted partition-specs"><span class="gpu-model" data-fast-tooltip="NVIDIA H100 NVL" aria-label="NVIDIA H100 NVL">H100<\/span> · 80G · 989 TFLOPS\/s<\/span>/);
-  assert.doesNotMatch(summary, /availability|wait-chart|CPU threads/);
-  const body = card.slice(summary.length);
-  assert.match(body, /<dt>Available GPUs<\/dt><dd><div class="availability-cell"><div class="availability"[^>]*>.*?<\/div><span>2\/8<\/span><\/div><\/dd>/);
-  assert.match(body, /<dt>GPU<\/dt><dd>NVIDIA H100 NVL<\/dd>/);
-  assert.match(body, /<dt>CPU threads<\/dt><dd>128<\/dd>/);
-  assert.match(body, /<svg class="wait-chart"/);
+  const card = html.match(/<article class="card partition-card">.*?<\/article>/s)[0];
+  assert.match(card, /<div class="card-summary-title partition-title"><span class="name">gpu-h100<\/span><span class="launchability"/);
+  assert.match(card, /class="launch-block launch-wait-1"/);
+  assert.match(card, /class="launch-block launch-blocked"[^>]*>×<\/span>/);
+  assert.equal((card.match(/class="launch-shape"/g) || []).length, 7);
+  assert.match(card, /<span class="gpu-model" data-fast-tooltip="NVIDIA H100 NVL" aria-label="NVIDIA H100 NVL">H100<\/span> · <span class="vram-spec" data-fast-tooltip="VRAM: 80 GB" aria-label="VRAM: 80 GB">80 GB<\/span> · 989 TFLOPS\/s · <span class="thread-spec" data-fast-tooltip="CPU threads: 128 threads" aria-label="CPU threads: 128 threads">128 threads<\/span>/);
+  assert.match(card, /<div class="partition-availability"><span class="partition-availability-label">Available GPUs<\/span><div class="availability-cell"><div class="availability"[^>]*>.*?<\/div><span>2\/8<\/span><\/div><\/div>/);
+  assert.doesNotMatch(card, /<details|<summary|data-disclosure-key|wait-chart|wait-figure|<svg/);
+  assert.match(html, /\.partition-specs\{[^}]*white-space:normal;overflow-wrap:anywhere/);
   assert.match(html, /\.availability-cell\{display:flex;align-items:center;gap:3px;white-space:nowrap\}/);
   assert.ok(html.indexOf('class="available"') < html.indexOf('class="unavailable"'));
   assert.match(html, /data-availability="Nodes: 2 idle, 3 full, 1 reserved, 1 down"/);
@@ -88,6 +88,23 @@ test('status shows each partition as a card: specs collapsed, availability and w
   assert.equal(waitCell(partition, 1), '5m');
   assert.equal(waitCell(partition, 2), 'DENY');
   assert.equal(waitCell(partition, 16), '—');
+});
+
+test('server status shows background ownership and per-machine login actions', () => {
+  const html = renderServerStatus({
+    service: { state: 'running', owned: true, pid: 1234, url: 'http://127.0.0.1:8080/', recentLines: [] },
+    sessions: { machines: [
+      { name: 'open', username: 'alice', host: 'a.example', session_open: true, control_persist_seconds: 3600, estimated_remaining_seconds: 900 },
+      { name: 'closed', username: 'alice', host: 'b.example', session_open: false, interactive_auth: true, error: 'No master' },
+    ] },
+  });
+
+  assert.match(html, /Running in the background/);
+  assert.match(html, /Process<\/dt><dd>1234/);
+  assert.match(html, /open<\/span><span class="session-state open">Open · about 15m left/);
+  assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;closed&quot;\]"/);
+  assert.match(html, /data-command="clusterWatcher\.stopService"/);
+  assert.doesNotMatch(html, /terminal/);
 });
 
 test('availability tooltips group restrictive Slurm states and omit zero counts', () => {
@@ -241,23 +258,37 @@ test('dependency icons reflect referenced outcomes and impossible jobs get their
   assert.match(html, /\.dependency-icon\.failed\{color:var\(--vscode-errorForeground\)\}/);
 });
 
-test('pending cards show a number-free relative-priority gauge only in expanded content', () => {
-  const low = { job_id: '1', cluster: 'c', state: 'PENDING', priority: 100, submit_at: '2026-01-01T00:00:00Z', expected_start_at: '2026-01-01T01:00:00Z' };
-  const high = { job_id: '2', cluster: 'c', state: 'PENDING', priority: 900, submit_at: '2026-01-01T00:00:00Z', expected_start_at: '2026-01-01T01:00:00Z' };
-  assert.equal(relativeJobPriority(low, [low, high]).percent, 0);
-  assert.equal(relativeJobPriority(high, [low, high]).percent, 100);
+test('pending cards show a labeled relative-priority gauge only in expanded content', () => {
+  const low = { job_id: '1', cluster: 'c', state: 'PENDING', priority: 100, global_priority_rank: 50, global_priority_total: 100, submit_at: '2026-01-01T00:00:00Z', expected_start_at: '2026-01-01T01:00:00Z' };
+  const high = { job_id: '2', cluster: 'c', state: 'PENDING', priority: 900, global_priority_rank: 10, global_priority_total: 100, submit_at: '2026-01-01T00:00:00Z', expected_start_at: '2026-01-01T01:00:00Z' };
+  assert.ok(Math.abs(relativeJobPriority(low, [low, high]).percent - (50 / 99 * 100)) < 1e-9);
+  assert.ok(Math.abs(relativeJobPriority(high, [low, high]).percent - (90 / 99 * 100)) < 1e-9);
+  assert.ok(Math.abs(relativeJobPriority(low, [low]).percent - (50 / 99 * 100)) < 1e-9);
   assert.equal(relativeJobPriority({ ...low, priority: null }, [low, high]), null);
+  const localOnlyLow = { ...low, global_priority_rank: null, global_priority_total: null };
+  const localOnlyHigh = { ...high, global_priority_rank: null, global_priority_total: null };
+  assert.equal(
+    relativeJobPriority(localOnlyLow, [localOnlyLow, localOnlyHigh]).title,
+    'Global priority unavailable\nYour priority 2 / 2',
+  );
+  assert.equal(relativeJobPriority(localOnlyLow, [localOnlyLow, localOnlyHigh]).percent, 0);
+  assert.equal(relativeJobPriority(localOnlyLow, [localOnlyLow]), null);
 
   const html = renderJobs({ jobs: [low, high] });
   const lowCard = html.match(/<details class="card"[^>]*data-job-ref="c\/1".*?<\/details>/s)[0];
   const lowSummary = lowCard.match(/<summary.*?<\/summary>/s)[0];
   assert.doesNotMatch(lowSummary, /priority-gauge/);
-  assert.doesNotMatch(lowCard, /priority-label|>Priority</);
-  assert.match(lowCard, /class="priority-marker" style="left:0%"/);
-  assert.match(lowCard, /data-fast-tooltip="Priority 100: position 2 of 2/);
-  assert.doesNotMatch(lowCard, /Higher is considered earlier/);
+  assert.match(lowCard, /class="priority-marker" style="left:50\.5050/);
+  assert.match(lowCard, /data-fast-tooltip="Global priority 50 \/ 100\nYour priority 2 \/ 2"/);
+  assert.doesNotMatch(lowCard, /Priority 100|position 2 of 2/);
   assert.doesNotMatch(lowCard, /←|→/);
   assert.equal((html.match(/class="priority-gauge"/g) || []).length, 2);
+  assert.doesNotMatch(html, /Pending \(2\)<span class="priority-help"/);
+  assert.equal((html.match(/class="priority-help"/g) || []).length, 2);
+  assert.match(lowCard, /<span class="priority-help"[^>]*>Priority<\/span><span class="priority-gauge".*?<\/span><\/span><\/span>/s);
+  assert.match(html, /data-fast-tooltip="Lower rank numbers are considered sooner,[^"]*resource fit, and backfill can change the start order/);
+  assert.doesNotMatch(html, /Global priority ranks|user priority ranks|>ⓘ</);
+  assert.match(html, /\.fast-tooltip\{[^}]*white-space:pre-line/);
 
   const noEstimateHtml = renderJobs({ jobs: [
     { ...low, expected_start_at: null },
@@ -271,30 +302,27 @@ test('pending cards show a number-free relative-priority gauge only in expanded 
   assert.match(noEstimateHtml, /\.priority-prominent \.priority-track\{height:6px\}/);
 });
 
-test('partition priority gauges show scheduler details only on hover', () => {
-  const partitions = [
-    { name: 'gpu-low', priority_job_factor: 100, priority_tier: 1, cpus: {}, gpus: {} },
-    { name: 'gpu-high', priority_job_factor: 400, priority_tier: 2, cpus: {}, gpus: {} },
-  ];
-  const scheduling = {
-    scheduler_type: 'sched/backfill', priority_type: 'priority/multifactor',
-    priority_weight_partition: 5000, priority_flags: 'NO_NORMAL_PART',
+test('partition launchability uses absolute configurable wait buckets, not priority factors', () => {
+  const partition = {
+    name: 'gpu', priority_job_factor: 9999, gpus: { total: 64 },
+    wait_estimates: [
+      { gpus: 1, walltime_seconds: 3600, estimated_wait_seconds: 60 },
+      { gpus: 2, walltime_seconds: 3600, estimated_wait_seconds: 600 },
+      { gpus: 4, walltime_seconds: 3600, estimated_wait_seconds: 2700 },
+      { gpus: 8, walltime_seconds: 3600, estimated_wait_seconds: 5400 },
+      { gpus: 16, walltime_seconds: 3600, estimated_wait_seconds: 10800 },
+    ],
   };
-  const cluster = {
-    name: 'c', reachable: true, partitions, scheduling,
-  };
-  const gauge = partitionPriorityGauge(partitions[0], partitions, scheduling);
-  assert.match(gauge, /^<span class="priority-context"><span class="priority-gauge" role="img"/);
-  assert.doesNotMatch(gauge, /priority-label|>Priority</);
-  assert.match(gauge, /class="priority-marker" style="left:25%"/);
-  assert.match(gauge, /data-fast-tooltip="Scheduler: sched\/backfill; priority plugin: priority\/multifactor; partition job factor: 100; priority tier: 1; partition weight: 5,000; priority flags: NO_NORMAL_PART"/);
-  assert.doesNotMatch(gauge, /←|→|This is one priority component/);
-  assert.equal(partitionPriorityGauge({}, partitions, scheduling), '');
+  const strip = launchabilityStrip(partition, false, 0, [5, 30, 60, 120]);
+  for (const index of [0, 1, 2, 3, 4]) assert.match(strip, new RegExp(`launch-wait-${index}`));
+  assert.doesNotMatch(strip, /priority|9999/i);
+  assert.equal(waitColorIndex(299, [5, 30, 60, 120]), 0);
+  assert.equal(waitColorIndex(300, [5, 30, 60, 120]), 1);
+  assert.equal(waitColorIndex(7200, [5, 30, 60, 120]), 4);
 
-  const html = renderStatus({ clusters: [cluster] });
-  assert.equal((html.match(/class="priority-gauge"/g) || []).length, 2);
-  assert.match(html, /<span class="card-summary-title partition-title"><span class="name">gpu-low<\/span><span class="priority-context">.*?priority-marker" style="left:25%"/s);
-  assert.match(html, /gpu-high.*?priority-marker" style="left:100%"/s);
+  const html = renderStatus({ wait_threshold_minutes: [5, 30, 60, 120], clusters: [{ name: 'c', reachable: true, partitions: [partition] }] });
+  assert.match(html, /class="launchability"/);
+  assert.doesNotMatch(html, /class="priority-context"|partition job factor/);
 });
 
 test('webview buttons post allow-listed commands instead of using command URIs', () => {
@@ -415,52 +443,33 @@ test('pending jobs without an estimate explain why and omit the empty bar', () =
   assert.match(unavailableHtml, /\.progress-message\{[^}]*overflow-wrap:anywhere/);
 });
 
-test('wait chart hover targets carry their estimate and as-of time for counting down', () => {
+test('launchability blocks carry exact hover estimates and count down locally', () => {
   const partition = {
     name: 'gpu', gpus: { total: 8, schedulable_idle: 0, models: [] },
-    wait_estimates: [{ gpus: 1, estimated_wait_seconds: 900, error: null }, { gpus: 2, estimated_wait_seconds: null, error: 'denied' }],
-  };
-  const html = renderStatus({ generated_at: '2026-10-06T10:00:00Z', clusters: [{ name: 'c', reachable: true, partitions: [partition] }] });
-  assert.match(html, /<rect class="wait-hit"[^>]*data-fast-tooltip="Wait for 1 GPU: 15m" data-wait="\[900,1791280800000,&quot;Wait for 1 GPU&quot;\]"\/>/);
-  assert.match(html, /<rect class="wait-hit"[^>]*data-fast-tooltip="Wait for 2 GPUs: denied"\/>/);
-  assert.match(html, /<text class="wait-status"[^>]*>ERR<\/text>/);
-  assert.match(html, /target\.dataset\.fastTooltip = label \+ ': ' \+ formatDuration/);
-});
-
-test('wait chart plots log wait over log GPU count and breaks the line at gaps', () => {
-  const partition = {
-    name: 'gpu', gpus: { total: 16 },
     wait_estimates: [
-      { gpus: 1, estimated_wait_seconds: 0 },
-      { gpus: 2, estimated_wait_seconds: 3600 },
-      { gpus: 4, error: 'Slurm probe timed out', error_kind: 'timeout' },
-      { gpus: 8, estimated_wait_seconds: 86400 },
-      { gpus: 16, estimated_wait_seconds: 172800 },
+      { gpus: 1, walltime_seconds: 3600, estimated_wait_seconds: 900, expected_start_at: '2026-10-06T10:15:00Z', error: null },
+      { gpus: 2, walltime_seconds: 3600, estimated_wait_seconds: null, error: 'Access denied', error_kind: 'denied' },
     ],
   };
-  assert.equal(waitSeconds(partition, 1), 0);
-  assert.equal(waitSeconds(partition, 4), null);
-  assert.equal(waitSeconds(partition, 32), null);
-  const chart = waitChart(partition, false, 0);
-  const points = [...chart.matchAll(/<circle class="wait-point" cx="([\d.]+)" cy="([\d.]+)"/g)].map((match) => [Number(match[1]), Number(match[2])]);
-  assert.equal(points.length, 4);
-  // GPU counts are powers of two, so log2 spacing is even: 1, 2, 8, 16 sit at columns 0, 1, 3, 4.
-  const step = points[1][0] - points[0][0];
-  assert.ok(Math.abs(points[2][0] - points[0][0] - 3 * step) < 0.2);
-  assert.ok(Math.abs(points[3][0] - points[0][0] - 4 * step) < 0.2);
-  // Log wait axis: 1m floor, 1h, 1d, 1w ceiling; 1h→1d spans as much height as 1d→~24d would.
-  assert.deepEqual(waitAxis(172800).ticks.map(([, label]) => label), ['1m', '1h', '1d', '1w']);
-  const [, now, hour, day, twoDays] = [null, ...points.map(([, y]) => y)];
-  assert.ok(now > hour && hour > day && day > twoDays);
-  assert.ok(Math.abs((hour - day) / (now - hour) - Math.log(24) / Math.log(60)) < 0.01);
-  // The line breaks across the failed 4-GPU probe instead of interpolating.
-  assert.match(chart, /<path class="wait-line" d="M[\d.]+ [\d.]+L[\d.]+ [\d.]+M[\d.]+ [\d.]+L[\d.]+ [\d.]+"\/>/);
-  assert.match(chart, /<text class="wait-status"[^>]*>ERR<\/text>/);
-  assert.equal((chart.match(/<text class="wait-status"[^>]*>—<\/text>/g) || []).length, 2);
-  assert.match(chart, /aria-label="Estimated wait by GPUs requested \(1: now, 2: 1h, 4: ERR, 8: 1d, 16: 2d, 32: —, 64: —\)"/);
-  assert.match(chart, /log scales/);
-  assert.equal(waitChart({ name: 'cpu', gpus: { total: 0 } }), '');
-  assert.equal(waitAxis(0).ceiling, 3600);
+  const html = renderStatus({ generated_at: '2026-10-06T10:00:00Z', wait_threshold_minutes: [5, 30, 60, 120], clusters: [{ name: 'c', reachable: true, partitions: [partition] }] });
+  assert.match(html, /data-fast-tooltip="1 GPU · 1h job: 15m estimated wait; expected start 2026-10-06T10:15:00Z" data-launch-wait="\[900,1791280800000,&quot;1 GPU · 1h job&quot;,\[5,30,60,120\],&quot;2026-10-06T10:15:00Z&quot;\]"/);
+  assert.match(html, /class="launch-block launch-blocked"[^>]*data-fast-tooltip="2 GPUs · 1h job: Access denied"[^>]*>×<\/span>/);
+  assert.match(html, /querySelectorAll\('\[data-launch-wait\]'\)/);
+  assert.match(html, /waitColorIndex\(remaining, thresholds\)/);
+  assert.match(html, /expected start ' \+ expectedStart/);
+});
+
+test('launchability selects the one-hour probe and preserves capped runtimes', () => {
+  const normal = { gpus: { total: 2 }, wait_estimates: [
+    { gpus: 1, walltime_seconds: 43200, estimated_wait_seconds: 100 },
+    { gpus: 1, walltime_seconds: 3600, estimated_wait_seconds: 200 },
+  ] };
+  assert.equal(waitEstimate(normal, 1).estimated_wait_seconds, 200);
+  const development = { gpus: { total: 1 }, wait_estimates: [
+    { gpus: 1, walltime_seconds: 900, estimated_wait_seconds: 60 },
+  ] };
+  assert.match(launchabilityStrip(development), /1 GPU · 15m job/);
+  assert.equal(launchabilityStrip({ gpus: { total: 0 } }), '');
 });
 
 test('heading sizes: groups and cluster names match the 11px view headings, job titles are smaller', () => {
@@ -601,8 +610,8 @@ test('wait cells label policy refusals separately from real errors', () => {
   const partition = { name: 'gpu', gpus: { total: 64 }, wait_estimates: rows };
   assert.deepEqual([1, 2, 4, 8, 16, 32, 64].map((count) => waitCell(partition, count)), ['min', 'limit', 'n/a', 'ERR', '?', 'DENY', '?']);
   const html = renderStatus({ clusters: [{ name: 'cluster_0', reachable: true, wait_estimates_updated_at: '2026-10-06T16:00:00Z', partitions: [partition] }] });
-  assert.match(html, /data-fast-tooltip="Wait for 2 GPUs: More than 4 gpus per node were requested"/);
-  assert.match(html, /<text class="wait-status"[^>]*>limit<\/text>/);
+  assert.match(html, /data-fast-tooltip="2 GPUs · 1h job: More than 4 gpus per node were requested"/);
+  assert.match(html, /class="launch-block launch-blocked"[^>]*>×<\/span>/);
 });
 
 test('wait cells show … until the first probe round finishes', () => {
@@ -610,9 +619,9 @@ test('wait cells show … until the first probe round finishes', () => {
   assert.equal(waitCell(partition, 4, true), '…');
   assert.equal(waitCell(partition, 16, true), '—');
   const html = renderStatus({ clusters: [{ name: 'cluster_0', reachable: true, partitions: [partition] }] });
-  assert.match(html, /data-fast-tooltip="Wait for 1 GPU: still checking"/);
-  assert.match(html, /<text class="wait-status"[^>]*>…<\/text>/);
+  assert.match(html, /data-fast-tooltip="1 GPU · 1h job: still checking"/);
+  assert.match(html, /class="launch-block launch-pending"[^>]*>…<\/span>/);
   const done = renderStatus({ clusters: [{ name: 'cluster_0', reachable: true, wait_estimates_updated_at: '2026-10-06T16:00:00Z', partitions: [partition] }] });
-  assert.match(done, /data-fast-tooltip="Wait for 1 GPU: not probed"/);
-  assert.match(done, /data-fast-tooltip="Wait for 16 GPUs: exceeds the partition&#39;s 8 GPUs"/);
+  assert.match(done, /data-fast-tooltip="1 GPU · 1h job: not probed"/);
+  assert.match(done, /data-fast-tooltip="16 GPUs · 1h job: exceeds the partition&#39;s 8 GPUs"/);
 });

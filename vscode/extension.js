@@ -3,14 +3,17 @@
 const vscode = require('vscode');
 const extensionManifest = require('./package.json');
 const { JobArchive } = require('./archive');
+const { BackgroundCliProcess } = require('./background');
 const { BackendManager } = require('./backend');
 const { LOG_TAIL_LINES, logDocumentContent, logRequestPath, prependLogPage, virtualLogPath } = require('./logs');
 const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = require('./events');
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
 const { RefreshCoordinator, RefreshFeedback, refreshResultMessage } = require('./refresh');
-const { isFailureGroup, jobRef, localTime, setDateFormat, renderJobs, renderJobsApiDisabled, renderMessage, renderStatus, renderWelcome, stateGroup } = require('./renderers');
+const { isFailureGroup, jobRef, localTime, setDateFormat, renderJobs, renderJobsApiDisabled, renderMessage, renderServerStatus, renderStatus, renderWelcome, stateGroup } = require('./renderers');
 const {
-  ExecutableValidationError, jobsApiDisabled, responseError, cliTerminalOptions, configurationError, resolveConfigPath, serviceArguments, serviceCommand, validateExecutable,
+  ExecutableValidationError, backgroundLoginArguments, backgroundServiceArguments, cliArguments,
+  jobsApiDisabled, responseError, cliTerminalOptions, configurationError, resolveConfigPath,
+  runCli, serviceCommand, validateBackgroundCredentialSupport, validateExecutable,
 } = require('./service');
 
 const CONFIGURATION_SECTION = 'clusterWatcher';
@@ -21,7 +24,8 @@ const WEBVIEW_COMMANDS = new Set([
   'clusterWatcher.archiveJob', 'clusterWatcher.restoreJob', 'clusterWatcher.openLog', 'clusterWatcher.openScript',
   'clusterWatcher.cancelJob',
   'clusterWatcher.startService', 'clusterWatcher.runSetup', 'clusterWatcher.editConfig', 'clusterWatcher.openSettings',
-  'clusterWatcher.copyServiceCommand', 'clusterWatcher.refresh', 'clusterWatcher.login', 'clusterWatcher.manageBackend',
+  'clusterWatcher.stopService', 'clusterWatcher.openDashboard', 'clusterWatcher.copyServiceCommand',
+  'clusterWatcher.refresh', 'clusterWatcher.refreshServer', 'clusterWatcher.login', 'clusterWatcher.manageBackend',
 ]);
 
 /** Return the current extension configuration. */
@@ -117,19 +121,56 @@ class BackendClient {
   }
 }
 
-/** Own a service terminal while allowing attachment to a separately run service. */
+/** Own a background service while allowing attachment to a separately run service. */
 class ServiceController {
-  constructor(client, refresh, manager) {
+  constructor(client, refresh, manager, provider) {
     this.client = client;
     this.refresh = refresh;
     this.manager = manager;
-    this.terminal = undefined;
-    this.closeSubscription = vscode.window.onDidCloseTerminal((terminal) => {
-      if (terminal === this.terminal) {
-        this.terminal = undefined;
-        void this.refresh();
-      }
+    this.provider = provider;
+    this.process = undefined;
+    this.loginProcess = undefined;
+    this.stopping = false;
+    this.authenticationCancelled = false;
+    this.lifecycle = {
+      state: 'offline', owned: false, url: configuration().backendUrl,
+      pid: undefined, startedAt: undefined, activity: undefined, error: undefined, recentLines: [],
+    };
+    this.sessions = undefined;
+    this.sessionsError = undefined;
+  }
+
+  /** Publish lifecycle changes immediately to the Server Status view. */
+  publish(changes = {}) {
+    this.lifecycle = { ...this.lifecycle, ...changes, url: configuration().backendUrl };
+    this.provider.updateServer(this.lifecycle, this.sessions, this.sessionsError);
+  }
+
+  /** Ask VS Code for one secret; cancellation is returned to the child explicitly. */
+  async requestCredential(request, serviceStartup = false) {
+    this.publish({
+      ...(serviceStartup ? { state: 'authenticating' } : {}),
+      activity: request.prompt,
     });
+    const value = await vscode.window.showInputBox({
+      title: request.kind === 'otp' ? 'Cluster Watcher one-time code' : 'Cluster Watcher password',
+      prompt: request.prompt,
+      password: true,
+      ignoreFocusOut: true,
+      placeHolder: request.kind === 'otp' ? 'Enter the current one-time code' : 'Enter the SSH password',
+      validateInput: (candidate) => candidate ? undefined : 'A value is required',
+    });
+    if (serviceStartup && value === undefined) this.authenticationCancelled = true;
+    this.publish({
+      ...(serviceStartup && value !== undefined ? { state: 'starting' } : {}),
+      activity: value === undefined ? 'Authentication cancelled' : 'Continuing authentication…',
+    });
+    return value;
+  }
+
+  /** Update the bounded diagnostic tail shown in Server Status. */
+  processOutput(_line, recentLines) {
+    this.publish({ recentLines });
   }
 
   async start() {
@@ -146,49 +187,167 @@ class ServiceController {
       } else {
         vscode.window.showInformationMessage('Cluster Watcher attached to the existing local service.');
       }
+      this.publish({ state: 'attached', owned: false, pid: undefined, activity: undefined, error: undefined });
       await this.refresh();
       return;
     }
-    if (this.terminal) {
-      this.terminal.show();
+    if (this.process) {
+      vscode.window.showInformationMessage('Cluster Watcher is already starting in the background.');
       return;
     }
     const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
     await this.manager.ensureAvailable(configured);
     const settings = configuration();
     await validateExecutable(settings.executable);
-    this.terminal = vscode.window.createTerminal(cliTerminalOptions(
-      'Cluster Watcher Service', settings,
-      serviceArguments(settings),
-    ));
-    this.terminal.show();
-    vscode.window.showInformationMessage('Cluster Watcher is starting; complete any password and OTP prompts in its terminal.');
-    setTimeout(() => void this.refresh(), 1000);
+    await validateBackgroundCredentialSupport(settings);
+    this.stopping = false;
+    this.authenticationCancelled = false;
+    this.publish({
+      state: 'starting', owned: true, pid: undefined, startedAt: new Date().toISOString(),
+      activity: 'Starting the service and checking reusable SSH sessions…', error: undefined, recentLines: [],
+    });
+    const owned = new BackgroundCliProcess(
+      settings.executable,
+      cliArguments(settings, backgroundServiceArguments(settings)),
+      {
+        onStart: (pid) => this.publish({ pid }),
+        onCredential: (request) => this.requestCredential(request, true),
+        onOutput: (line, recentLines) => this.processOutput(line, recentLines),
+        onProtocolError: (error) => this.publish({ state: 'error', error: error.message }),
+        onExit: (result) => this.serviceExited(owned, result),
+      },
+    );
+    this.process = owned;
+    owned.start();
+    void this.waitUntilReady(owned);
+  }
+
+  /** Poll cheaply while authentication is in progress, then refresh all views. */
+  async waitUntilReady(owned) {
+    while (this.process === owned && !owned.settled) {
+      if (await this.client.isClusterWatcherService()) {
+        this.publish({ state: 'running', owned: true, activity: undefined, error: undefined });
+        await this.refresh();
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+
+  /** Record an owned service's exit without treating an intentional stop as failure. */
+  serviceExited(owned, result) {
+    if (this.process !== owned) return;
+    this.process = undefined;
+    const expected = this.stopping || (result.code === 130 && this.authenticationCancelled);
+    this.stopping = false;
+    this.authenticationCancelled = false;
+    const diagnostic = result.error?.message
+      || this.lifecycle.error
+      || [...result.recentLines].reverse().find((line) => line.stream === 'stderr')?.text
+      || (result.code != null ? `Process exited with status ${result.code}` : `Process ended with ${result.signal || 'an unknown signal'}`);
+    this.publish(expected
+      ? { state: 'offline', owned: false, pid: undefined, activity: undefined, error: undefined }
+      : { state: 'error', owned: false, pid: undefined, activity: undefined, error: diagnostic });
+    void this.refresh();
   }
 
   stop() {
-    if (!this.terminal) {
-      vscode.window.showInformationMessage('The extension did not start the current service, so it was left running.');
+    if (!this.process) {
+      vscode.window.showInformationMessage('The extension does not own the current service, so it was left running.');
       return;
     }
-    this.terminal.dispose();
-    this.terminal = undefined;
+    this.stopping = true;
+    this.publish({ state: 'stopping', activity: 'Stopping the background service…' });
+    this.process.stop();
   }
 
-  /** Stop only a service terminal owned by the extension before replacing its executable. */
+  /** Stop only a service owned by the extension before replacing its executable. */
   async stopForBackendChange() {
-    if (!this.terminal) return;
-    this.terminal.dispose();
-    this.terminal = undefined;
+    if (!this.process) return;
+    const completion = this.process.completion;
+    this.stop();
+    await Promise.race([completion, new Promise((resolve) => setTimeout(resolve, 2000))]);
   }
 
-  showTerminal() {
-    if (this.terminal) this.terminal.show();
-    else vscode.window.showInformationMessage('No Cluster Watcher service terminal is owned by this extension.');
+  /** Re-open one or all closed sessions through the same background secret protocol. */
+  async login(machine) {
+    if (this.loginProcess) {
+      vscode.window.showInformationMessage('A Cluster Watcher login is already in progress.');
+      return;
+    }
+    if (this.process && ['starting', 'authenticating'].includes(this.lifecycle.state)) {
+      vscode.window.showInformationMessage('The background service is already authenticating SSH sessions.');
+      return;
+    }
+    const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
+    await this.manager.ensureAvailable(configured);
+    const settings = configuration();
+    await validateExecutable(settings.executable);
+    await validateBackgroundCredentialSupport(settings);
+    this.publish({ activity: machine ? `Logging in to ${machine}…` : 'Logging in to closed SSH sessions…', error: undefined });
+    const login = new BackgroundCliProcess(
+      settings.executable,
+      cliArguments(settings, backgroundLoginArguments(settings, typeof machine === 'string' ? machine : undefined)),
+      {
+        onCredential: (request) => this.requestCredential(request, false),
+        onOutput: (line, recentLines) => this.processOutput(line, recentLines),
+        onProtocolError: (error) => this.publish({ error: error.message }),
+      },
+    );
+    this.loginProcess = login;
+    login.start();
+    const result = await login.completion;
+    if (this.loginProcess === login) this.loginProcess = undefined;
+    const diagnostic = result.error?.message
+      || [...result.recentLines].reverse().find((line) => line.stream === 'stderr')?.text;
+    this.publish({ activity: undefined, ...(result.code && result.code !== 130 ? { error: diagnostic || `Login exited with status ${result.code}` } : {}) });
+    if (result.code === 0) vscode.window.showInformationMessage('Cluster Watcher SSH sessions are open.');
+    else if (result.code === 130) vscode.window.showInformationMessage('Cluster Watcher login was cancelled.');
+    else vscode.window.showErrorMessage(`Cluster Watcher login failed: ${diagnostic || `exit status ${result.code}`}`);
+    await this.refresh();
+  }
+
+  /** Inspect service reachability and SSH masters without opening new sessions. */
+  async refreshStatus() {
+    const checkedAt = Date.now();
+    const settings = configuration();
+    const [serviceResult, inventoryResult] = await Promise.allSettled([
+      this.client.isClusterWatcherService(),
+      runCli(settings, ['sessions', '--json', '--timeout', '2'], 60000),
+    ]);
+    const reachable = serviceResult.status === 'fulfilled' && serviceResult.value;
+    if (inventoryResult.status === 'rejected') {
+      this.sessionsError = inventoryResult.reason?.message || String(inventoryResult.reason);
+      this.provider.updateServer(this.lifecycle, this.sessions, this.sessionsError, checkedAt);
+    } else {
+      const inventory = inventoryResult.value;
+      if (inventory.code === 0) {
+        try {
+          this.sessions = JSON.parse(inventory.stdout);
+          this.sessionsError = undefined;
+        } catch (_error) {
+          this.sessionsError = 'cluster-watcher sessions returned invalid JSON';
+        }
+      } else {
+        this.sessionsError = inventory.stderr.trim() || `cluster-watcher sessions exited with status ${inventory.code}`;
+      }
+    }
+    if (reachable) {
+      this.publish({
+        state: this.process ? 'running' : 'attached', owned: Boolean(this.process),
+        activity: this.loginProcess ? this.lifecycle.activity : undefined, error: undefined,
+      });
+    } else if (!this.process && this.lifecycle.state !== 'error') {
+      this.publish({ state: 'offline', owned: false, pid: undefined, activity: undefined });
+    } else {
+      this.provider.updateServer(this.lifecycle, this.sessions, this.sessionsError, checkedAt);
+    }
+    return { outcome: 'updated', checkedAt };
   }
 
   dispose() {
-    this.closeSubscription.dispose();
+    this.loginProcess?.stop();
+    this.process?.stop();
   }
 }
 
@@ -301,6 +460,47 @@ class SidebarProvider {
     this.showingData = false;
     if (!this.view) return;
     this.view.webview.html = renderJobsApiDisabled(this.title(), restartCommandText(), this.freshness());
+  }
+}
+
+/** Render service ownership and reusable SSH masters in its own sidebar view. */
+class ServerSidebarProvider extends SidebarProvider {
+  constructor() {
+    super('server');
+    this.service = { state: 'offline', owned: false, recentLines: [] };
+    this.sessions = undefined;
+    this.sessionsError = undefined;
+  }
+
+  title() {
+    return 'Server Status';
+  }
+
+  resolveWebviewView(view) {
+    this.view = view;
+    this.view.description = undefined;
+    view.webview.options = { enableScripts: true };
+    view.webview.onDidReceiveMessage((message) => this.receive(message));
+    this.render();
+  }
+
+  updateServer(service, sessions, sessionsError, checkedAt = Date.now()) {
+    this.service = { ...service };
+    this.sessions = sessions;
+    this.sessionsError = sessionsError;
+    this.updatedAt = sessions?.generated_at || new Date(checkedAt).toISOString();
+    this.checkedAt = checkedAt;
+    this.render();
+  }
+
+  render() {
+    if (!this.view) return;
+    this.showingData = true;
+    this.view.webview.html = renderServerStatus({
+      service: this.service,
+      sessions: this.sessions,
+      sessionsError: this.sessionsError,
+    }, this.freshness());
   }
 }
 
@@ -567,29 +767,6 @@ async function runSetup() {
   terminal.show();
 }
 
-/**
- * Run ``cluster-watcher login [MACHINE]`` in a terminal for the password and
- * OTP prompts, refreshing the sidebar when the terminal closes. The running
- * service reuses the re-opened session on its next refresh.
- */
-async function login(machine, refresh) {
-  const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
-  await backendManager.ensureAvailable(configured);
-  const settings = configuration();
-  await validateExecutable(settings.executable);
-  const terminal = vscode.window.createTerminal(cliTerminalOptions(
-    machine ? `Cluster Watcher Login: ${machine}` : 'Cluster Watcher Login',
-    settings,
-    ['login', ...(typeof machine === 'string' ? [machine] : [])],
-  ));
-  const closed = vscode.window.onDidCloseTerminal((closedTerminal) => {
-    if (closedTerminal !== terminal) return;
-    closed.dispose();
-    void refresh();
-  });
-  terminal.show();
-}
-
 /** Open the CLI's configuration file in an editor tab, offering setup when it is missing. */
 async function editConfig() {
   const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
@@ -629,10 +806,15 @@ function activate(context) {
   const client = new BackendClient();
   const jobsProvider = new JobsSidebarProvider(context.globalState);
   const statusProvider = new SidebarProvider('status');
+  const serverProvider = new ServerSidebarProvider();
   const monitor = new JobMonitor();
+  let controller;
   const coordinator = new RefreshCoordinator(client, jobsProvider, statusProvider, monitor, {
     jobsApiDisabled,
     refreshSeconds: () => configuration().refreshSeconds,
+    refreshServer: () => controller
+      ? controller.refreshStatus()
+      : Promise.resolve({ outcome: 'unchanged', checkedAt: Date.now() }),
   });
   const refreshFeedback = new RefreshFeedback(
     (key, value) => vscode.commands.executeCommand('setContext', key, value),
@@ -651,17 +833,20 @@ function activate(context) {
   const refreshStatusWithFeedback = () => manualRefresh(
     'clusterWatcher.refreshingStatus', () => coordinator.refreshStatus(),
   );
-  let controller;
+  const refreshServerWithFeedback = () => manualRefresh(
+    'clusterWatcher.refreshingServer', () => coordinator.refreshServer(),
+  );
   backendManager = new BackendManager(vscode, context, extensionManifest.version, {
     onWillChange: () => controller?.stopForBackendChange(),
   });
-  controller = new ServiceController(client, () => coordinator.refresh(), backendManager);
+  controller = new ServiceController(client, () => coordinator.refresh(), backendManager, serverProvider);
   const logProvider = new JobLogDocumentProvider(client);
   const scriptProvider = new JobScriptDocumentProvider(client);
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('clusterWatcher.jobs', jobsProvider, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.window.registerWebviewViewProvider('clusterWatcher.status', statusProvider, { webviewOptions: { retainContextWhenHidden: true } }),
+    vscode.window.registerWebviewViewProvider('clusterWatcher.server', serverProvider, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.workspace.registerTextDocumentContentProvider('cluster-watcher-log', logProvider),
     vscode.workspace.registerTextDocumentContentProvider('cluster-watcher-script', scriptProvider),
     vscode.commands.registerCommand('clusterWatcher.startService', async () => {
@@ -673,8 +858,9 @@ function activate(context) {
     vscode.commands.registerCommand('clusterWatcher.refreshJobsBusy', refreshJobsWithFeedback),
     vscode.commands.registerCommand('clusterWatcher.refreshStatus', refreshStatusWithFeedback),
     vscode.commands.registerCommand('clusterWatcher.refreshStatusBusy', refreshStatusWithFeedback),
+    vscode.commands.registerCommand('clusterWatcher.refreshServer', refreshServerWithFeedback),
+    vscode.commands.registerCommand('clusterWatcher.refreshServerBusy', refreshServerWithFeedback),
     vscode.commands.registerCommand('clusterWatcher.openDashboard', () => vscode.env.openExternal(vscode.Uri.parse(configuration().backendUrl))),
-    vscode.commands.registerCommand('clusterWatcher.showServiceTerminal', () => controller.showTerminal()),
     vscode.commands.registerCommand('clusterWatcher.archiveJob', async (key) => {
       if (!await jobsProvider.archive(String(key))) vscode.window.showWarningMessage('That job is no longer available to archive.');
     }),
@@ -683,7 +869,7 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('clusterWatcher.copyServiceCommand', () => copyServiceCommand()),
     vscode.commands.registerCommand('clusterWatcher.runSetup', () => runSetup().catch(reportError)),
-    vscode.commands.registerCommand('clusterWatcher.login', (machine) => login(machine, () => coordinator.refresh()).catch(reportError)),
+    vscode.commands.registerCommand('clusterWatcher.login', (machine) => controller.login(machine).catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.editConfig', () => editConfig().catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.manageBackend', () => backendManager.manage().catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.openSettings', () => vscode.commands.executeCommand('workbench.action.openSettings', CONFIGURATION_SECTION)),
@@ -710,7 +896,7 @@ function activate(context) {
       if (event.affectsConfiguration(`${CONFIGURATION_SECTION}.dateFormat`)) {
         // Unchanged data is answered with 304, so redraw the pages here.
         setDateFormat(configuration().dateFormat);
-        for (const provider of [jobsProvider, statusProvider]) if (provider.showingData) provider.render();
+        for (const provider of [jobsProvider, statusProvider, serverProvider]) if (provider.showingData) provider.render();
       }
       if (event.affectsConfiguration(CONFIGURATION_SECTION)) {
         coordinator.schedule();
@@ -729,6 +915,7 @@ function activate(context) {
     void initialization.then(() => controller.start()).catch(reportStartError);
   } else {
     void initialization.then(async () => {
+      await controller.refreshStatus();
       if (await client.isClusterWatcherService()) return;
       const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
       await backendManager.offerFirstUse(configured);

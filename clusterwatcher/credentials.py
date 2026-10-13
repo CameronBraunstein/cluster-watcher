@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import getpass
+import json
 import os
 from pathlib import Path
 import socket
 import sys
 import tempfile
 import threading
+from typing import Callable, TextIO
 
 from .models import Machine
 from .askpass import ASKPASS_MODE_ENVIRONMENT_VARIABLE
@@ -18,6 +20,66 @@ from .ssh import session_status, start_interactive_session
 
 ASKPASS_SOCKET_ENV = "CLUSTER_WATCHER_ASKPASS_SOCKET"
 ASKPASS_PROGRAM = Path(__file__).with_name("askpass.py").resolve()
+CREDENTIAL_PROMPT_PREFIX = "CLUSTER_WATCHER_AUTH_PROMPT "
+SecretPrompt = Callable[[str, str], str]
+
+
+class CredentialPromptCancelled(RuntimeError):
+    """Raised when a machine-readable credential client cancels or closes."""
+
+
+class JsonLineCredentialPrompt:
+    """Exchange secret prompts over newline-delimited standard streams.
+
+    This private protocol lets a graphical client present its own password
+    field without placing credentials in command arguments, environment
+    variables, files, or process output. Requests are prefixed so ordinary
+    service diagnostics can share the output stream safely. Responses arrive
+    only on stdin and are never echoed.
+    """
+
+    def __init__(self, input_stream: TextIO | None = None, output_stream: TextIO | None = None) -> None:
+        self.input_stream = input_stream or sys.stdin
+        self.output_stream = output_stream or sys.stderr
+        self._request_id = 0
+
+    def __call__(self, kind: str, prompt: str) -> str:
+        """Request one password/OTP and return the client's secret response."""
+        self._request_id += 1
+        request = {
+            "version": 1,
+            "request_id": self._request_id,
+            "kind": kind,
+            "prompt": prompt,
+        }
+        encoded_request = json.dumps(request, separators=(",", ":"))
+        print(
+            f"{CREDENTIAL_PROMPT_PREFIX}{encoded_request}",
+            file=self.output_stream,
+            flush=True,
+        )
+        response_line = self.input_stream.readline(20_000)
+        if not response_line:
+            raise CredentialPromptCancelled("credential input was closed")
+        if len(response_line) >= 20_000 and not response_line.endswith("\n"):
+            raise CredentialPromptCancelled("credential client response was too large")
+        try:
+            response = json.loads(response_line)
+        except json.JSONDecodeError as exc:
+            raise CredentialPromptCancelled("credential client returned invalid JSON") from exc
+        if not isinstance(response, dict) or response.get("request_id") != self._request_id:
+            raise CredentialPromptCancelled("credential client returned an unexpected response")
+        if response.get("cancel") is True:
+            raise CredentialPromptCancelled("authentication was cancelled")
+        value = response.get("value")
+        if (
+            not isinstance(value, str)
+            or not value
+            or len(value) > 16_384
+            or any(character in value for character in ("\x00", "\r", "\n"))
+        ):
+            raise CredentialPromptCancelled("credential client returned an invalid secret")
+        return value
 
 
 def _askpass_program() -> tuple[Path, bool]:
@@ -151,18 +213,28 @@ def _authentication_failed(error: RuntimeError) -> bool:
     return any(marker in message for marker in ("permission denied", "authentication failed", "access denied"))
 
 
-def _start_credential_group(machines: list[Machine], timeout: int) -> list[tuple[Machine, RuntimeError]]:
+def _secret(kind: str, prompt: str, secret_prompt: SecretPrompt | None) -> str:
+    """Read one secret from the selected UI without retaining another copy."""
+    return secret_prompt(kind, prompt) if secret_prompt is not None else getpass.getpass(prompt)
+
+
+def _start_credential_group(
+    machines: list[Machine], timeout: int, secret_prompt: SecretPrompt | None = None,
+) -> list[tuple[Machine, RuntimeError]]:
     """Share one password while requesting a separate OTP for every machine."""
     group = machines[0].credential_group
+    label = group or machines[0].name
     names = ", ".join(machine.name for machine in machines)
     username = machines[0].username
-    print(f"Authenticating credential group {group!r} for {names}.", file=sys.stderr)
-    password = getpass.getpass(f"Password for {username} ({group}): ")
+    print(f"Authenticating credential group {label!r} for {names}.", file=sys.stderr)
+    password = _secret("password", f"Password for {username} ({label})", secret_prompt)
     errors: list[tuple[Machine, RuntimeError]] = []
     try:
         with CredentialBroker(password) as broker:
             for machine in machines:
-                otp = getpass.getpass(f"One-time code for {machine.name} ({machine.host}): ")
+                otp = _secret(
+                    "otp", f"One-time code for {machine.name} ({machine.host})", secret_prompt,
+                )
                 broker.update_otp(otp)
                 try:
                     start_interactive_session(machine, timeout, broker.environment())
@@ -174,7 +246,9 @@ def _start_credential_group(machines: list[Machine], timeout: int) -> list[tuple
                         f"Authentication for {machine.name} was rejected; its OTP may have expired.",
                         file=sys.stderr,
                     )
-                    otp = getpass.getpass(f"Fresh one-time code for {machine.name} ({machine.host}): ")
+                    otp = _secret(
+                        "otp", f"Fresh one-time code for {machine.name} ({machine.host})", secret_prompt,
+                    )
                     broker.update_otp(otp)
                     try:
                         start_interactive_session(machine, timeout, broker.environment())
@@ -211,15 +285,19 @@ def login_targets(machines: list[Machine], requested: list[str]) -> list[Machine
     ]
 
 
-def establish_interactive_sessions(machines: list[Machine], timeout: int) -> list[tuple[Machine, RuntimeError]]:
+def establish_interactive_sessions(
+    machines: list[Machine], timeout: int, secret_prompt: SecretPrompt | None = None,
+) -> list[tuple[Machine, RuntimeError]]:
     """Start missing reusable SSH masters, sharing named-group credentials.
 
-    Ungrouped machines preserve OpenSSH's normal terminal prompting. Grouped
-    machines prompt once for a shared password and separately for each host's
-    single-use OTP. A rejection refreshes only that host's OTP and retries it
-    once. Verified control masters are excluded before any credential prompt,
-    allowing separate CLI processes to reuse a dashboard or earlier command's
-    active session without asking for its password or OTP again.
+    Ungrouped machines preserve OpenSSH's normal terminal prompting unless a
+    graphical ``secret_prompt`` is supplied; graphical clients use the same
+    private askpass broker for a one-machine group. Named groups prompt once
+    for a shared password and separately for each host's single-use OTP. A
+    rejection refreshes only that host's OTP and retries it once. Verified
+    control masters are excluded before any credential prompt, allowing
+    separate CLI processes to reuse a dashboard or earlier command's active
+    session without asking for its password or OTP again.
     """
     machines = [
         machine for machine in machines
@@ -234,15 +312,21 @@ def establish_interactive_sessions(machines: list[Machine], timeout: int) -> lis
     errors: list[tuple[Machine, RuntimeError]] = []
     completed_groups: set[str] = set()
     for machine in machines:
-        if machine.credential_group is None:
+        if machine.credential_group is None and secret_prompt is None:
             try:
                 start_interactive_session(machine, timeout)
             except RuntimeError as exc:
                 errors.append((machine, exc))
             continue
+        if machine.credential_group is None:
+            # A graphical caller has no inherited terminal for OpenSSH's
+            # prompts. Use the same private askpass broker for this one host;
+            # password-only sites simply ignore the supplied OTP.
+            errors.extend(_start_credential_group([machine], timeout, secret_prompt))
+            continue
         if machine.credential_group in completed_groups:
             continue
         completed_groups.add(machine.credential_group)
         group_machines = [candidate for candidate in machines if candidate.credential_group == machine.credential_group]
-        errors.extend(_start_credential_group(group_machines, timeout))
+        errors.extend(_start_credential_group(group_machines, timeout, secret_prompt))
     return errors

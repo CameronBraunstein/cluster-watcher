@@ -5,7 +5,7 @@ const test = require('node:test');
 const { RefreshCoordinator, RefreshFeedback, refreshResultMessage } = require('../refresh');
 
 /** Build a coordinator whose collaborators record every observable update. */
-function harness(poll) {
+function harness(poll, refreshServer) {
   const jobsProvider = {
     cancelling: new Set(),
     updates: [],
@@ -34,7 +34,7 @@ function harness(poll) {
   };
   const coordinator = new RefreshCoordinator(
     { poll }, jobsProvider, statusProvider, monitor,
-    { jobsApiDisabled: () => false, refreshSeconds: () => 15 },
+    { jobsApiDisabled: () => false, refreshSeconds: () => 15, refreshServer },
   );
   return { coordinator, jobsProvider, statusProvider, monitor };
 }
@@ -93,6 +93,19 @@ test('combined refresh continues to poll both endpoints', async () => {
   assert.deepEqual(calls.sort(), ['/api/v1/jobs', '/api/v1/snapshot']);
   assert.equal(state.jobsProvider.updates.length, 1);
   assert.equal(state.statusProvider.updates.length, 1);
+});
+
+test('combined and server-only refreshes include the local service inventory', async () => {
+  const serverCalls = [];
+  const state = harness(
+    async (path) => ({ payload: { source: path }, etag: path }),
+    async () => { serverCalls.push('server'); return { outcome: 'updated', checkedAt: 1 }; },
+  );
+
+  await state.coordinator.refresh();
+  await state.coordinator.refreshServer();
+
+  assert.deepEqual(serverCalls, ['server', 'server']);
 });
 
 test('overlapping refreshes share the request for each endpoint', async () => {

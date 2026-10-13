@@ -23,7 +23,7 @@ from .commands import (
     UnknownMachineError,
 )
 from .config import DEFAULT_WAIT_THRESHOLD_MINUTES
-from .credentials import establish_interactive_sessions
+from .credentials import SecretPrompt, establish_interactive_sessions
 from .job_scripts import JobScriptNotFound
 from .jobs import JobLogNotFound, JobService, parse_since
 from .models import ClusterStatus, Machine
@@ -64,34 +64,28 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .job-progress-fill { display:block; height:100%; background:#2563eb; transition:width 1s linear; } .job-progress-text { display:block; max-width:100%; margin-top:.22rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.76rem; color:#666; }
 .job-progress-message { display:block; max-width:100%; margin-top:.5rem; overflow-wrap:anywhere; font-size:.76rem; line-height:1.3; color:#666; }
 .job-dependency-link { color:LinkText; font-family:ui-monospace, monospace; } .job-dependency-icon { display:inline-block; margin-left:.15rem; font-family:system-ui, sans-serif; font-weight:700; } .job-dependency-icon.waiting { font-weight:400; } .job-dependency-icon.satisfied { color:#16a34a; } .job-dependency-icon.failed { color:#dc2626; }
-.priority-context { display:flex; align-items:center; gap:.35rem; margin-top:.5rem; min-width:0; } .priority-gauge { display:flex; align-items:center; flex:1 1 auto; min-width:4rem; max-width:10rem; } .priority-track { position:relative; display:block; flex:1 1 auto; height:.3rem; border-radius:999px; background:linear-gradient(90deg,#dc2626,#777 50%,#16a34a); } .priority-marker { position:absolute; top:-.2rem; width:2px; height:.7rem; transform:translateX(-1px); background:CanvasText; box-shadow:0 0 0 1px Canvas; } .priority-prominent { margin-top:.5rem; } .priority-prominent .priority-track { height:.62rem; } .priority-prominent .priority-marker { top:-.18rem; height:.98rem; }
+.priority-context { display:flex; align-items:center; gap:.35rem; margin-top:.5rem; min-width:0; } .priority-gauge { display:flex; align-items:center; flex:1 1 auto; min-width:4rem; max-width:10rem; } .priority-track { position:relative; display:block; flex:1 1 auto; height:.3rem; border-radius:999px; background:linear-gradient(90deg,#dc2626,#777 50%,#16a34a); } .priority-marker { position:absolute; top:-.2rem; width:2px; height:.7rem; transform:translateX(-1px); background:CanvasText; box-shadow:0 0 0 1px Canvas; } .priority-prominent { margin-top:.5rem; } .priority-prominent .priority-track { height:.62rem; } .priority-prominent .priority-marker { top:-.18rem; height:.98rem; } .priority-help { color:#666; font-size:.8em; cursor:help; }
 .job-progress.pending .job-progress-fill { background:#7c3aed; } .job-message { margin-top:.5rem; font-size:.78rem; color:#666; }
 .job-progress.completed .job-progress-fill { background:#16a34a; } .job-progress.failed_early .job-progress-fill, .job-progress.failed_timeout .job-progress-fill { background:#dc2626; } .job-progress.cancelled .job-progress-fill, .job-progress.other .job-progress-fill { background:#6b7280; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; }
 .archived-jobs { margin-top:1rem; border-top:1px solid #8884; padding-top:.75rem; } .archived-jobs > summary { cursor:pointer; font-weight:700; }
 .job-card .job-progress { margin-top:.5rem; } .log-tail { max-width:720px; max-height:20rem; overflow:auto; white-space:pre-wrap; font-size:.75rem; background:#111; color:#eee; padding:.5rem; border-radius:.3rem; }
 .log-button { white-space:nowrap; cursor:pointer; }
-.partition-section { margin:1.25rem 0; } .partition-heading { display:flex; align-items:center; gap:.65rem; margin:0 0 .55rem; } .partition-heading h3 { margin:0; } .partition-heading > .priority-context { flex:0 1 12rem; margin:0; }
+.partition-section { margin:1.25rem 0; } .partition-heading { display:flex; align-items:center; gap:.65rem; margin:0 0 .55rem; } .partition-heading h3 { margin:0; }
 .partition-status { display:flex; position:relative; flex-wrap:wrap; gap:2px; cursor:help; } .node-state-block { width:.75rem; height:.75rem; border-radius:2px; }
 .partition-status[data-availability]::after { content:attr(data-availability); position:absolute; z-index:20; left:0; top:calc(100% + 4px); width:max-content; max-width:min(24rem, 80vw); padding:.25rem .4rem; border:1px solid #8888; outline:1px solid #fff; border-radius:2px; background:Canvas; color:CanvasText; font-size:.75rem; font-weight:400; line-height:1.25; white-space:normal; visibility:hidden; opacity:0; pointer-events:none; }
 .fast-hover { display:inline-block; position:relative; cursor:help; }
-.fast-hover[data-fast-tooltip]::after { content:attr(data-fast-tooltip); position:absolute; z-index:20; left:0; top:calc(100% + 4px); width:max-content; max-width:min(24rem, 80vw); padding:.25rem .4rem; border:1px solid #8888; outline:1px solid #fff; border-radius:2px; background:Canvas; color:CanvasText; font-size:.75rem; font-weight:400; line-height:1.25; white-space:normal; visibility:hidden; opacity:0; pointer-events:none; }
+.fast-hover[data-fast-tooltip]::after { content:attr(data-fast-tooltip); position:absolute; z-index:20; left:0; top:calc(100% + 4px); width:max-content; max-width:min(24rem, 80vw); padding:.25rem .4rem; border:1px solid #8888; outline:1px solid #fff; border-radius:2px; background:Canvas; color:CanvasText; font-size:.75rem; font-weight:400; line-height:1.25; white-space:pre-line; visibility:hidden; opacity:0; pointer-events:none; }
 @keyframes availability-hover-in { from { opacity:0; } to { opacity:1; } }
 .partition-status[data-availability]:hover::after, .fast-hover[data-fast-tooltip]:hover::after { visibility:visible; animation:availability-hover-in .05s linear .1s both; }
 .partition-compute { color:#666; font-size:.8rem; margin:-.2rem 0 .55rem; }
-.wait-chart { margin:.8rem 0 1.2rem; max-width:720px; } .wait-chart figcaption { font-size:.8rem; margin-bottom:.45rem; }
-.wait-chart-layout { display:grid; grid-template-columns:2.8rem minmax(260px, 1fr); gap:.4rem; }
-.wait-y-axis { height:190px; position:relative; font-size:.68rem; color:#666; }
-.wait-y-axis span { position:absolute; right:0; transform:translateY(50%); }
-.wait-groups { height:190px; display:flex; align-items:stretch; border-left:1px solid #8888; border-bottom:1px solid #8888; background:repeating-linear-gradient(to top, transparent 0, transparent calc(25% - 1px), #8883 25%); }
-.wait-group { position:relative; flex:1; min-width:54px; display:flex; align-items:flex-end; justify-content:center; gap:4px; padding:0 .25rem; }
-.wait-bar { width:min(18px, 24%); min-height:2px; position:relative; border-radius:3px 3px 0 0; cursor:help; }
-.wait-bar.wait-series-0 { background:#2563eb; } .wait-bar.wait-series-1 { background:#7c3aed; } .wait-bar.wait-series-2 { background:#ea580c; }
-.wait-bar.unavailable { height:10px !important; background:repeating-linear-gradient(135deg, #777 0 3px, transparent 3px 6px); border:1px solid #777; }
-.wait-bar.capped::after { content:'+'; position:absolute; top:-1rem; width:100%; text-align:center; font-size:.7rem; font-weight:700; }
-.wait-group-label { position:absolute; top:calc(100% + .28rem); font-size:.7rem; white-space:nowrap; }
-.wait-chart-key { display:flex; flex-wrap:wrap; gap:.35rem .8rem; margin:.8rem 0 0 3.2rem; font-size:.72rem; color:#666; }
-.wait-key-item { display:inline-flex; align-items:center; gap:.3rem; } .wait-key-swatch { width:.75rem; height:.75rem; border-radius:2px; }
+.launchability { display:flex; align-items:end; gap:3px; min-width:0; }
+.launch-shape { display:grid; grid-template-rows:.65rem .85rem; justify-items:center; gap:2px; }
+.launch-count { color:#666; font-size:.62rem; line-height:.65rem; }
+.launch-block { box-sizing:border-box; display:flex; align-items:center; justify-content:center; width:.85rem; height:.85rem; border:1px solid #0004; border-radius:2px; color:#fff; font-size:.62rem; font-weight:700; line-height:1; }
+.launch-wait-0 { background:#15803d; } .launch-wait-1 { background:#22c55e; } .launch-wait-2 { background:#eab308; color:#111; } .launch-wait-3 { background:#f97316; } .launch-wait-4 { background:#dc2626; }
+.launch-blocked { background:#111; } .launch-missing, .launch-pending { background:#777; }
+.launch-unsupported { color:#666; background:repeating-linear-gradient(135deg, transparent 0 3px, #7774 3px 6px); }
 .partition-section > summary { cursor:pointer; } .partition-section > summary .partition-heading { display:inline-flex; margin:0; }
 .node-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:.65rem; }
 .node { border:1px solid #8884; border-radius:.4rem; padding:.75rem; }
@@ -104,7 +98,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .error { color:#c33; white-space:pre-wrap; }
 .job-badges { display:flex; flex-wrap:wrap; gap:.35rem; } .job-badge { border:1px solid #8885; border-radius:.55rem; font-size:.82rem; padding:.2rem .5rem; white-space:nowrap; }
 .job-badge .job-progress { display:inline-grid; grid-template-columns:70px auto; align-items:center; gap:.35rem; margin:0 0 0 .35rem; } .job-badge .job-progress-track { width:70px; height:.4rem; } .job-badge .job-progress-text { margin:0; }
-@media (max-width:600px) { .title-row { flex-wrap:wrap; gap:.25rem .75rem; } .wait-chart-key { margin-left:0; } .job-badge .job-progress { display:none; } }
+@media (max-width:600px) { .title-row { flex-wrap:wrap; gap:.25rem .75rem; } .partition-heading { flex-wrap:wrap; } .job-badge .job-progress { display:none; } }
 </style></head><body><header><div class="title-row"><h1>Cluster Watcher</h1><span id="updated">Loading…</span><div class="refresh-countdown"><svg class="refresh-clock" viewBox="0 0 24 24" role="img" aria-labelledby="refresh-label"><circle class="refresh-clock-face" cx="12" cy="12" r="9.5"></circle><path class="refresh-clock-tick" d="M12 3.8v1.4M20.2 12h-1.4M12 20.2v-1.4M3.8 12h1.4"></path><line id="refresh-clock-hand" class="refresh-clock-hand" x1="12" y1="12" x2="12" y2="5"></line><circle class="refresh-clock-center" cx="12" cy="12" r="1.25"></circle></svg><span id="refresh-label">Waiting for first refresh…</span></div></div></header>
 <section class="my-jobs"><h2>My jobs</h2><div id="my-jobs-content">Waiting for job data…</div></section>
 <section class="key"><h2>How to read this dashboard</h2><div class="key-grid"><div><p><i class="swatch powered-off"></i> <b>Drained (powered off)</b> — unavailable and powered off.</p><p><i class="swatch drained"></i> <b>Drained</b> — removed from scheduling by an administrator.</p><p><i class="swatch allocated"></i> <b>Allocated</b> — fully assigned to jobs, including GPU-saturated nodes.</p></div><div><p><i class="swatch mixed-powered-off"></i> <b>Mixed~</b> — partly allocated and powered off/transitioning.</p><p><i class="swatch mixed"></i> <b>Mixed</b> — some resources are assigned to jobs and some remain free.</p><p><i class="swatch idle"></i> <b>Idle</b> — available for eligible new jobs.</p><p><b>Blue outlines</b> mark nodes and resource cells allocated to your running jobs. Pending-job times are Slurm scheduler estimates; node release times are only the earliest visible running-job end, not a promise.</p></div></div></section>
@@ -362,38 +356,54 @@ function jobBadges(jobs, partition, thresholds) {
   }).join('');
 }
 
-function requestedRuntime(minutes) {
-  if (minutes < 60) return `${minutes}m`;
-  if (minutes % 60 === 0) return `${minutes / 60}h`;
-  return `${Math.floor(minutes / 60)}h${minutes % 60}m`;
+const launchGpuCounts = [1, 2, 4, 8, 16, 32, 64];
+const launchErrorLabels = { denied:'access denied', minimum:'below the minimum request', limit:'over a limit', unavailable:'no node can run it now', timeout:'Slurm did not answer in time', budget:'not checked', error:'error' };
+
+function probeMinutes(row) {
+  return Number(row?.walltime_minutes ?? Number(row?.walltime_hours || 1) * 60);
 }
 
-// Why a probe failed (see wait_probes.classify_wait_error).
-const waitErrorLabels = { denied: 'access denied', minimum: 'below the minimum request', limit: 'over a limit', unavailable: 'no node can run it now', timeout: 'Slurm did not answer in time', budget: 'not checked', error: 'error' };
-function waitChart(estimates, partition, updatedAt) {
-  const rows = estimates?.[partition];
-  if (!rows?.length) return updatedAt ? '' : '<p>Checking queue waits…</p>';
-  const byGpus = new Map();
-  const durationMinutes = row => row.walltime_minutes ?? Math.round(row.walltime_hours * 60);
-  for (const row of rows) { const values = byGpus.get(row.gpus) || new Map(); values.set(durationMinutes(row), row); byGpus.set(row.gpus, values); }
-  const durations = [...new Set(rows.map(durationMinutes))].sort((left, right) => left - right);
-  const groups = [...byGpus.entries()].sort(([left], [right]) => left - right).map(([gpus, values]) => {
-    const memoryMb = [...values.values()][0]?.memory_mb;
-    const bars = durations.map((duration, index) => {
-      const row = values.get(duration), start = row?.start_time ? new Date(row.start_time) : null;
-      const waitHours = start && !Number.isNaN(start.getTime()) ? Math.max(0, (start.getTime() - Date.now()) / 3600000) : null;
-      const unavailable = waitHours === null, capped = waitHours !== null && waitHours > 24;
-      const height = unavailable ? 0 : Math.max(.8, Math.min(100, waitHours / 24 * 100));
-      const waitText = unavailable ? `unavailable${row?.error_kind ? ` (${waitErrorLabels[row.error_kind] || row.error_kind})` : ''}${row?.error ? `: ${row.error}` : ''}` : `${waitHours.toFixed(1)} hours${capped ? ' (chart capped at 24)' : ''}`;
-      const title = `${gpus} GPU${gpus === 1 ? '' : 's'}, ${requestedRuntime(duration)} runtime: ${waitText}`;
-      return `<span class="wait-bar wait-series-${index % 3}${unavailable ? ' unavailable' : ''}${capped ? ' capped' : ''}" style="height:${height}%" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></span>`;
-    }).join('');
-    const request = `${gpus} GPU${gpus === 1 ? '' : 's'}${memoryMb ? ` · ${memoryMb} MiB` : ''}`;
-    return `<div class="wait-group" title="${escapeHtml(request)}">${bars}<span class="wait-group-label">${gpus} GPU${gpus === 1 ? '' : 's'}</span></div>`;
+function baselineWaitEstimate(rows, gpus) {
+  return (rows || []).filter(row => Number(row.gpus) === gpus).sort((left, right) => Math.abs(probeMinutes(left) - 60) - Math.abs(probeMinutes(right) - 60) || probeMinutes(left) - probeMinutes(right))[0];
+}
+
+function launchWaitColor(seconds, thresholds) {
+  const limits = thresholds?.length ? thresholds : [5, 30, 60, 120];
+  const minutes = Math.max(0, Number(seconds) || 0) / 60;
+  const bucket = limits.findIndex(limit => minutes < Number(limit));
+  const index = bucket < 0 ? limits.length : bucket;
+  return Math.round(index * 4 / limits.length);
+}
+
+function launchabilityStrip(estimates, partition, totalGpus, updatedAt, thresholds) {
+  if (!(Number(totalGpus) > 0)) return '';
+  const rows = estimates?.[partition] || [], pending = !updatedAt;
+  const blocks = launchGpuCounts.map(gpus => {
+    const row = baselineWaitEstimate(rows, gpus), minutes = probeMinutes(row);
+    const runtime = minutes < 60 ? `${minutes}m job` : '1h job';
+    const label = `${gpus} GPU${gpus === 1 ? '' : 's'} · ${runtime}`;
+    let state = 'launch-missing', content = '?', detail;
+    if (gpus > totalGpus) {
+      state = 'launch-unsupported'; content = '—'; detail = `exceeds the partition's ${totalGpus} GPUs`;
+    } else if (!row) {
+      state = pending ? 'launch-pending' : 'launch-missing'; content = pending ? '…' : '?'; detail = pending ? 'still checking' : 'not probed';
+    } else if (row.error) {
+      const kind = row.error_kind || 'error';
+      state = ['denied', 'minimum', 'limit'].includes(kind) ? 'launch-blocked' : 'launch-missing';
+      content = state === 'launch-blocked' ? '×' : kind === 'timeout' || kind === 'error' ? '!' : '?';
+      detail = `${launchErrorLabels[kind] || kind}: ${row.error}`;
+    } else {
+      const start = new Date(row.start_time), waitSeconds = Number.isNaN(start.getTime()) ? null : Math.max(0, (start.getTime() - Date.now()) / 1000);
+      if (waitSeconds === null) { content = '!'; detail = 'invalid start estimate'; }
+      else {
+        state = `launch-wait-${launchWaitColor(waitSeconds, thresholds)}`; content = '';
+        detail = `${formatSeconds(waitSeconds)} estimated wait; expected start ${start.toLocaleString()}`;
+      }
+    }
+    const title = `${label}: ${detail}`;
+    return `<span class="launch-shape"><span class="launch-count">${gpus}</span><span class="fast-hover launch-block ${state}" role="img" aria-label="${escapeHtml(title)}" data-fast-tooltip="${escapeHtml(title)}">${content}</span></span>`;
   }).join('');
-  const key = durations.map((duration, index) => `<span class="wait-key-item"><i class="wait-key-swatch wait-bar wait-series-${index % 3}"></i>${requestedRuntime(duration)} requested runtime</span>`).join('');
-  const refreshed = updatedAt ? ` Probed ${new Date(updatedAt).toLocaleTimeString()}.` : '';
-  return `<figure class="wait-chart"><figcaption>Estimated queue wait in hours (0–24; + means over 24h).${escapeHtml(refreshed)}</figcaption><div class="wait-chart-layout"><div class="wait-y-axis"><span style="bottom:100%">24h</span><span style="bottom:75%">18h</span><span style="bottom:50%">12h</span><span style="bottom:25%">6h</span><span style="bottom:0">0h</span></div><div class="wait-groups" role="img" aria-label="Estimated queue wait by GPU count and requested runtime">${groups}</div></div><div class="wait-chart-key">${key}<span class="wait-key-item"><i class="wait-key-swatch wait-bar unavailable"></i>Unavailable</span></div></figure>`;
+  return `<span class="launchability" role="group" aria-label="Estimated launch wait for GPU requests">${blocks}</span>`;
 }
 
 const JOB_ARCHIVE_STORAGE_KEY = 'cluster-watcher.archived-jobs.v1';
@@ -487,6 +497,7 @@ function sortedJobs(jobs, listName) {
 
 const JOB_GROUP_ORDER = ['RUNNING', 'PENDING', 'FAILED_DEPENDENCY', 'COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED', 'OTHER'];
 const JOB_GROUP_LABELS = { RUNNING:'Running', PENDING:'Pending', FAILED_DEPENDENCY:'Failed Dependency', COMPLETED:'Completed', FAILED_EARLY:'Failed (Early)', FAILED_TIMEOUT:'Failed (Timeout)', CANCELLED:'Cancelled', OTHER:'Other' };
+const PRIORITY_HELP = 'Lower rank numbers are considered sooner, but QOS, reservations, resource fit, and backfill can change the start order.';
 const ACTIVE_JOB_STATES = new Set(['CONFIGURING', 'PENDING', 'REQUEUED', 'REQUEUE_FED', 'REQUEUE_HOLD', 'RESIZING', 'SIGNALING', 'STAGE_OUT', 'SUSPENDED']);
 function jobGroup(job) {
   const state = String(job.state || 'UNKNOWN').toUpperCase();
@@ -504,45 +515,37 @@ function relativeJobPriority(job, jobs) {
   const priority = Number(job.priority);
   if (!Number.isFinite(priority)) return null;
   const peers = jobs.filter(candidate => candidate.cluster === job.cluster && jobGroup(candidate) === 'PENDING' && candidate.priority != null && candidate.priority !== '' && Number.isFinite(Number(candidate.priority)));
-  if (peers.length < 2) return null;
+  if (!peers.length) return null;
   const values = peers.map(candidate => Number(candidate.priority));
   const lower = values.filter(value => value < priority).length;
   const equal = values.filter(value => value === priority).length;
   const higher = values.length - lower - equal;
-  const percent = (lower + (equal - 1) / 2) / (values.length - 1) * 100;
-  const tie = equal > 1 ? `, tied with ${equal - 1}` : '';
-  return { percent, title:`Priority ${priority.toLocaleString()}: position ${higher + 1} of ${values.length}${tie} among your visible Pending jobs on ${job.cluster}.` };
+  const tie = equal > 1 ? ` (tied with ${equal - 1})` : '';
+  const globalRank = Number(job.global_priority_rank), globalTotal = Number(job.global_priority_total);
+  const hasGlobalRank = Number.isInteger(globalRank) && globalRank > 0 && Number.isInteger(globalTotal) && globalTotal >= globalRank;
+  const hasGlobalPosition = hasGlobalRank && globalTotal > 1;
+  if (!hasGlobalPosition && peers.length < 2) return null;
+  const userPercent = peers.length > 1
+    ? (lower + (equal - 1) / 2) / (values.length - 1) * 100
+    : 100;
+  const global = hasGlobalRank
+    ? `Global priority ${globalRank} / ${globalTotal}` : 'Global priority unavailable';
+  const percent = hasGlobalPosition
+    ? (globalTotal - globalRank) / (globalTotal - 1) * 100
+    : userPercent;
+  return { percent, title:`${global}\nYour priority ${higher + 1} / ${values.length}${tie}` };
 }
 
 /** Render a compact, unlabeled, number-free low-to-high gauge with details on fast hover. */
 function priorityGauge(markers, title, prominent = false) {
   if (!markers.length) return '';
   const ticks = markers.map(percent => `<i class="priority-marker" style="left:${Math.max(0, Math.min(100, percent))}%"></i>`).join('');
-  return `<span class="priority-context${prominent ? ' priority-prominent' : ''}"><span class="priority-gauge fast-hover" role="img" aria-label="${escapeHtml(title)}" data-fast-tooltip="${escapeHtml(title)}"><span class="priority-track">${ticks}</span></span></span>`;
+  return `<span class="priority-context${prominent ? ' priority-prominent' : ''}"><span class="fast-hover priority-help" aria-label="${escapeHtml(PRIORITY_HELP)}" data-fast-tooltip="${escapeHtml(PRIORITY_HELP)}">Priority</span><span class="priority-gauge fast-hover" role="img" aria-label="${escapeHtml(title)}" data-fast-tooltip="${escapeHtml(title)}"><span class="priority-track">${ticks}</span></span></span>`;
 }
 
 function jobPriorityGauge(job, jobs, prominent = false) {
   const relative = relativeJobPriority(job, jobs);
   return relative ? priorityGauge([relative.percent], relative.title, prominent) : '';
-}
-
-/** Render a partition's configured job-priority factor relative to its peers. */
-function partitionPriorityGauge(partition, partitions, scheduling = {}) {
-  if (partition.priority_job_factor == null || partition.priority_job_factor === '') return '';
-  const factor = Number(partition.priority_job_factor);
-  const factors = partitions.map(candidate => Number(candidate.priority_job_factor)).filter(value => Number.isFinite(value) && value >= 0);
-  if (!Number.isFinite(factor) || factor < 0 || !factors.length) return '';
-  const maximum = Math.max(...factors);
-  const percent = maximum > 0 ? factor / maximum * 100 : 0;
-  const details = [
-    `Scheduler: ${scheduling.scheduler_type || 'unavailable'}`,
-    `priority plugin: ${scheduling.priority_type || 'unavailable'}`,
-    `partition job factor: ${factor.toLocaleString()}`,
-    `priority tier: ${partition.priority_tier ?? 'unavailable'}`,
-  ];
-  if (scheduling.priority_weight_partition != null) details.push(`partition weight: ${Number(scheduling.priority_weight_partition).toLocaleString()}`);
-  if (scheduling.priority_flags) details.push(`priority flags: ${scheduling.priority_flags}`);
-  return priorityGauge([percent], details.join('; '));
 }
 
 /** Render only the lifecycle rows meaningful for this card's state group. */
@@ -708,16 +711,17 @@ function compactGpuName(value) {
   return withoutBrand.split(/\\s+/).slice(0, 2).join(' ');
 }
 
-function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, estimates, estimatesUpdatedAt, partition, partitions, scheduling) {
+function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, estimates, estimatesUpdatedAt) {
   const availability = availabilityDescription(nodes);
   const status = [...nodes].sort((left, right) => statePriority(left) - statePriority(right) || String(left.name).localeCompare(String(right.name))).map(node => `<i class="node-state-block ${summaryStateClass(node)}"></i>`).join('');
   const summary = compute.get(name);
   const best = summary && summary.best_gpu;
+  const totalGpus = nodes.reduce((total, node) => total + asNumber(node.gpu?.total), 0);
   const details = best ? `${summary.rank ? `#${summary.rank} · ` : ''}<span class="fast-hover" data-fast-tooltip="${escapeHtml(best.name)}" aria-label="${escapeHtml(best.name)}">${escapeHtml(compactGpuName(best.name))}</span> · ${escapeHtml(best.vram_gb)} GB VRAM/GPU · ${escapeHtml(best.tensor_tflops.toLocaleString())} FP16/BF16 Tensor TFLOPS/GPU · ${escapeHtml(summary.cpu_threads.toLocaleString())} CPU threads` : 'GPU model not catalogued';
   const badges = jobBadges(jobs, name, thresholds);
-  const priority = partitionPriorityGauge(partition || {}, partitions || [], scheduling || {});
-  const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}</h3>${priority}<div class="partition-status" data-availability="${escapeHtml(availability)}" aria-label="${escapeHtml(availability)}">${status}</div>${badges ? `<div class="job-badges">${badges}</div>` : ''}</div>`;
-  const body = `<div class="partition-compute">${details}</div>${waitChart(estimates, name, estimatesUpdatedAt)}<div class="node-grid">${nodesByAvailableGpu(nodes).map(nodeCard).join('')}</div>`;
+  const launchability = launchabilityStrip(estimates, name, totalGpus, estimatesUpdatedAt, thresholds);
+  const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}</h3>${launchability}<div class="partition-status" data-availability="${escapeHtml(availability)}" aria-label="${escapeHtml(availability)}">${status}</div>${badges ? `<div class="job-badges">${badges}</div>` : ''}</div>`;
+  const body = `<div class="partition-compute">${details}</div><div class="node-grid">${nodesByAvailableGpu(nodes).map(nodeCard).join('')}</div>`;
   const disclosureKey = JSON.stringify([clusterName, name]);
   return `<details class="partition-section${summary?.aggregate ? ' aggregate-partition' : ''}" data-partition-key="${escapeHtml(disclosureKey)}"${partitionDisclosure.get(disclosureKey) ? ' open' : ''}><summary>${heading}</summary>${body}</details>`;
 }
@@ -726,7 +730,7 @@ function clusterView(cluster, waitThresholds) {
   let content;
   if (cluster.error) content = `<p class="error">${escapeHtml(cluster.error)}</p>` + (cluster.login_required ? `<p>The SSH session has closed. Log in again with <code>cluster-watcher login ${escapeHtml(cluster.name)}</code>.</p>` : '');
   else if (!cluster.nodes || !cluster.nodes.length) content = '<p>No individual node information was returned by scontrol.</p>';
-  else { const compute = new Map((cluster.partition_compute || []).map(summary => [summary.name, summary])); const partitions = cluster.partitions || []; const partitionInfo = new Map(partitions.map(partition => [partition.partition, partition])); content = partitionGroups(cluster.nodes, compute).map(group => partitionView(cluster.name, group, compute, cluster.user_jobs, waitThresholds || [5, 30, 60, 120], cluster.wait_estimates, cluster.wait_estimates_updated_at, partitionInfo.get(group[0]), partitions, cluster.scheduling)).join(''); }
+  else { const compute = new Map((cluster.partition_compute || []).map(summary => [summary.name, summary])); content = partitionGroups(cluster.nodes, compute).map(group => partitionView(cluster.name, group, compute, cluster.user_jobs, waitThresholds || [5, 30, 60, 120], cluster.wait_estimates, cluster.wait_estimates_updated_at)).join(''); }
   if (cluster.jobs) content += `<p><b>Jobs:</b> ${Object.entries(cluster.jobs).map(([state, count]) => `${escapeHtml(state)}=${count}`).join(', ') || 'none'}</p>`;
   return `<section class="cluster"><h2>${escapeHtml(cluster.name)} <small>${escapeHtml(cluster.username)}@${escapeHtml(cluster.host)}</small></h2>${content}</section>`;
 }
@@ -947,7 +951,10 @@ class StatusStore:
     def snapshot_payload(self) -> dict[str, object]:
         """Return the stable, versioned snapshot intended for API consumers."""
         with self._lock:
-            return build_snapshot(self._statuses, self._updated_at, self.refresh_seconds)
+            return build_snapshot(
+                self._statuses, self._updated_at, self.refresh_seconds,
+                self.wait_threshold_minutes,
+            )
 
     def run_forever(self, stop: threading.Event) -> None:
         while not stop.is_set():
@@ -1264,13 +1271,28 @@ def is_loopback_host(host: str) -> bool:
         return False
 
 
-def serve(machines: list[Machine], host: str, port: int, timeout: int, include_jobs: bool, refresh_seconds: int, open_browser: bool, wait_threshold_minutes: tuple[int, ...] = DEFAULT_WAIT_THRESHOLD_MINUTES, jobs_api_enabled: bool = False, command_api_enabled: bool = False) -> int:
+def serve(
+    machines: list[Machine],
+    host: str,
+    port: int,
+    timeout: int,
+    include_jobs: bool,
+    refresh_seconds: int,
+    open_browser: bool,
+    wait_threshold_minutes: tuple[int, ...] = DEFAULT_WAIT_THRESHOLD_MINUTES,
+    jobs_api_enabled: bool = False,
+    command_api_enabled: bool = False,
+    credential_prompt: SecretPrompt | None = None,
+) -> int:
     """Start the dashboard and its background collectors."""
     if (jobs_api_enabled or command_api_enabled) and not is_loopback_host(host):
         raise ValueError("--jobs-api and --command-api require a loopback --host (127.0.0.1, ::1, or localhost)")
-    for machine, error in establish_interactive_sessions(machines, timeout):
+    for machine, error in establish_interactive_sessions(machines, timeout, credential_prompt):
         print(f"Could not establish reusable SSH session for {machine.name}: {error}", file=sys.stderr)
-    store = StatusStore(machines, timeout, include_jobs, refresh_seconds, wait_threshold_minutes, jobs_api_enabled, command_api_enabled)
+    store = StatusStore(
+        machines, timeout, include_jobs, refresh_seconds, wait_threshold_minutes,
+        jobs_api_enabled, command_api_enabled,
+    )
     stop = threading.Event()
     threading.Thread(target=store.run_forever, args=(stop,), name="cluster-refresh", daemon=True).start()
     threading.Thread(target=store.run_wait_probes_forever, args=(stop,), name="wait-probes", daemon=True).start()

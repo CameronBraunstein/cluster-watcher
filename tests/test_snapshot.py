@@ -111,9 +111,13 @@ class SnapshotTests(TimedTestCase):
                 handler.wfile.write.assert_called_once_with(b"payload")
 
     def test_snapshot_contains_routing_resources_specs_and_waits(self):
-        snapshot = build_snapshot([example_status()], "2026-09-22T10:00:00+00:00", 15)
+        snapshot = build_snapshot(
+            [example_status()], "2026-09-22T10:00:00+00:00", 15,
+            (10, 45, 90, 180),
+        )
 
         self.assertEqual(snapshot["schema_version"], "1.0")
+        self.assertEqual(snapshot["wait_threshold_minutes"], [10, 45, 90, 180])
         self.assertEqual(snapshot["wait_probe_refresh_seconds"], 600)
         cluster = snapshot["clusters"][0]
         self.assertTrue(cluster["reachable"])

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from .compute import GPUProfile, profile_for
+from .config import DEFAULT_WAIT_THRESHOLD_MINUTES
 from .models import ClusterStatus
 from .wait_probes import WAIT_PROBE_REFRESH_SECONDS, classify_wait_error
 
@@ -274,8 +275,11 @@ def _cluster_resources(status: ClusterStatus) -> dict[str, object]:
     }
 
 
-def build_snapshot(statuses: list[ClusterStatus], generated_at: str | None, refresh_seconds: int) -> dict[str, object]:
-    """Build the public API document from an immutable view of cached status."""
+def build_snapshot(
+    statuses: list[ClusterStatus], generated_at: str | None, refresh_seconds: int,
+    wait_threshold_minutes: tuple[int, ...] = DEFAULT_WAIT_THRESHOLD_MINUTES,
+) -> dict[str, object]:
+    """Build the public API document, including configured launch-wait buckets."""
     clusters: list[dict[str, object]] = []
     for status in statuses:
         clusters.append(
@@ -302,5 +306,6 @@ def build_snapshot(statuses: list[ClusterStatus], generated_at: str | None, refr
         "generated_at": generated_at,
         "status_refresh_seconds": refresh_seconds,
         "wait_probe_refresh_seconds": WAIT_PROBE_REFRESH_SECONDS,
+        "wait_threshold_minutes": list(wait_threshold_minutes),
         "clusters": clusters,
     }

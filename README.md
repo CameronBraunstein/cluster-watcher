@@ -8,7 +8,7 @@ code once instead of on every query.
 <p align="center">
   <img src="docs/images/vscode-my-jobs.png" alt="My Jobs view: running, pending, completed, and failed job cards with progress bars; one expanded card shows its job ID, resources, lifecycle times, and actions" width="300">
   &nbsp;
-  <img src="docs/images/vscode-cluster-status.png" alt="Cluster Status view: partition cards with priority gauges and GPU specs; the expanded gpu-large card shows availability, CPU threads, and a log-log chart of wait time against requested GPUs" width="300">
+  <img src="docs/images/vscode-cluster-status.png" alt="Cluster Status view: compact partition cards with account-aware launchability blocks, GPU and CPU specifications, and physical availability" width="300">
 </p>
 <p align="center"><sub>The VS Code sidebar, shown with toy clusters and jobs.</sub></p>
 
@@ -16,7 +16,7 @@ code once instead of on every query.
   from every cluster, with live progress, wait estimates, dependency links,
   logs, batch scripts, and a confirm-first **End** button.
 - **Where to run next.** For each partition: free GPUs, GPU model, VRAM,
-  TFLOPS/s, partition priority, and Slurm's estimated wait for 1 to 64 GPUs.
+  TFLOPS/s, and account-aware launch estimates for 1 to 64 GPUs.
 - **Log in once.** Password and OTP are requested once per session. The
   dashboard, terminal commands, VS Code, and your own scripts all share the
   same OpenSSH connection.
@@ -280,7 +280,7 @@ username = "alice"
 | `default_partition_max_time_minutes`, `[machine.partition_max_time_minutes]` | Cap wait-probe runtimes (see [Estimated queue waits](#estimated-queue-waits)). |
 | `job_log_roots` | Absolute remote directories that explicit log `path` requests must stay inside. |
 | `interactive_auth`, `credential_group`, `control_persist` | Password + OTP logins and session lifetime (below). |
-| `[dashboard] wait_threshold_minutes` | Web dashboard pending-time buckets (see [Job progress](#job-progress-and-dependencies)). |
+| `[dashboard] wait_threshold_minutes` | Pending-job labels and launchability-strip color thresholds in the browser and VS Code (see [Estimated queue waits](#estimated-queue-waits)). |
 
 Wait probes use the smaller of their requested runtime and the partition
 maximum. This example defaults to 24 hours and caps a `gpudev` development
@@ -377,15 +377,18 @@ cluster-watcher serve --jobs-api
 
 ### VS Code sidebar
 
-The extension adds a Cluster Watcher icon to the Activity Bar with two views.
+The extension adds a Cluster Watcher icon to the Activity Bar with three views.
 It is a thin client for the service above and has no SSH or Slurm code of its
 own.
 
-**Getting started.** If no service is running, both views offer **Start
+**Getting started.** If no service is running, the sidebar offers **Start
 service & SSH sessions**, **Run setup wizard**, **Edit configuration**, and
-**Settings**. The service starts in an integrated terminal with
-`serve --jobs-api`, so password and OTP prompts work normally. If a service is
-already listening at `clusterWatcher.backendUrl` (default
+**Settings**. The service starts as an extension-owned background process with
+`serve --jobs-api`; password and OTP requests appear as masked VS Code input
+boxes, without opening a terminal. Secrets travel only over the child process's
+private stdin and are never placed in arguments, environment variables, logs,
+or configuration. If a service is already listening at
+`clusterWatcher.backendUrl` (default
 `http://127.0.0.1:8080/`), the extension attaches to it instead of starting
 another. On first use without a `cluster-watcher` command, it offers **Install
 and Add to PATH**, **Use Only in VS Code**, or **Choose Existing Executable**.
@@ -418,20 +421,32 @@ refreshes.
 
 #### Cluster Status
 
-Each cluster is a collapsible group of partition cards, ordered by compute
-rank:
-
-- **Collapsed:** partition name, [priority gauge](#priority-gauges), and the
-  best GPU's model, VRAM, and TFLOPS/s. Hover the model for its full name.
-- **Expanded:** the [GPU availability](#gpu-availability) bar, full GPU name,
-  CPU threads, and a line chart of **estimated wait vs. GPUs requested** with
-  logarithmic axes on both sides. Hover a column for its exact estimate (it
-  keeps counting down between refreshes) or Slurm's message. Shapes without an
-  estimate show a [short label](#why-a-wait-has-no-estimate) instead of a
-  point.
+Each cluster is a collapsible group of permanently expanded, compact partition
+cards ordered by compute rank. A card shows the partition name and
+[launchability strip](#estimated-queue-waits), followed by the best GPU's model,
+VRAM, TFLOPS/s, CPU-thread total, and an **Available GPUs** bar. Hover a launch
+block for its exact estimate, the GPU model for its full name, the VRAM amount
+for its label, the thread count for its CPU-thread label, or the availability
+bar for its node-state breakdown. Partition cards do not collapse and do not
+repeat the launch estimates in a graph.
 
 If a cluster's SSH session closes, its group shows **Log in again**, which
-runs `cluster-watcher login <cluster>` in a terminal.
+runs `cluster-watcher login <cluster>` in the background and presents any
+password/OTP requests as masked VS Code input boxes.
+
+#### Server Status
+
+The third view shows whether the service is starting, waiting for credentials,
+running in the background, attached to an independently started process, or
+stopped. It includes the owned process ID and URL, a bounded recent diagnostic
+tail, and every configured machine's reusable SSH-session state and approximate
+remaining idle lifetime. From this view you can start or stop an
+extension-owned service, open the browser dashboard, log in all closed
+interactive sessions, or log in one machine. An independently started service
+is never stopped by the extension. The managed process stops with the extension
+host; its OpenSSH masters can remain reusable for their configured
+`ControlPersist` period. Start `cluster-watcher serve` separately when the HTTP
+service itself must outlive VS Code.
 
 #### Refreshing, notifications, and settings
 
@@ -444,7 +459,7 @@ locally in the meantime.
 | Setting | Default | Effect |
 | --- | --- | --- |
 | `clusterWatcher.backendUrl` | `http://127.0.0.1:8080/` | Service to attach to. Never point it at an untrusted or public service. |
-| `clusterWatcher.autoStart` | `false` | Start the service when VS Code opens (off so MFA prompts never appear unexpectedly). |
+| `clusterWatcher.autoStart` | `false` | Start the managed background service when VS Code opens (off so masked MFA prompts never appear unexpectedly). |
 | `clusterWatcher.configPath` | — | Use a configuration file other than the default. |
 | `clusterWatcher.notifications` | `all` | Notify when a job completes, fails, or is cancelled (`all`, `failures`, `off`). |
 | `clusterWatcher.statusBar` | `true` | Show `N running · M pending` (or **offline**) in the status bar. |
@@ -689,37 +704,62 @@ earliest visible running-job end time, as a hint, not a guaranteed start.
 
 ### Priority gauges
 
-Priority gauges are unlabeled, number-free bars from low (red, left) to high
-(green, right); hover them for the exact values.
+Pending jobs get a number-free gauge when a global queue rank is available, or
+when at least two of your visible pending jobs on that cluster have numeric
+Slurm priorities. Hovering a bar gives the following two-line readout:
 
-- **Pending jobs** get a gauge when at least two of your visible pending jobs
-  on that cluster have numeric Slurm priorities. The tick is the job's rank
-  among them, not an absolute scale; the hover gives the raw priority, rank,
-  and scope. It normally sits in the expanded card. Without a wait estimate it
-  replaces that message in the summary, as thick as a progress bar.
-- **Partitions** get a gauge when Slurm reports `PriorityJobFactor`, as the
-  factor divided by the largest displayed factor. The hover gives the factor,
-  `PriorityTier`, and the cluster's `SchedulerType`, `PriorityType`,
-  `PriorityWeightPartition`, and `PriorityFlags`.
+```text
+Global priority <rank> / <all pending>
+Your priority <rank> / <your pending>
+```
 
-The partition factor only affects priority under `priority/multifactor` with a
-nonzero partition weight; `PriorityTier` controls scheduling/preemption tiers
-instead, and `NO_NORMAL_PART` changes normalization. Both gauges describe
-policy, not queue position: reservations, tiers, resource fit, and backfill
-can still change the actual start order. Unavailable data is omitted, never
-shown as zero.
+Rank 1 has the highest Slurm score. Tied scores share a rank. The
+global population is every pending array task visible through `squeue` on that
+cluster; the user population contains only your visible pending jobs there. If
+the cluster denies the queue-wide query, the first value says **unavailable**.
+The bar's marker visualizes the global rank, with rank 1 at the green end. If
+the global rank is unavailable, it falls back to the rank among your pending
+jobs. The hover always identifies both scopes. The **Priority** text immediately
+to the left of each bar has a short hover explaining that lower rank numbers
+are considered sooner, although scheduling policy and resource fit can change
+the start order.
+
+A better rank usually means earlier consideration than lower-ranked,
+resource-compatible jobs. It is not a guaranteed launch order, probability,
+or start-time forecast: QOS and scheduling tiers, reservations, resource fit,
+and backfill can all change which job starts. The gauge normally sits in the
+expanded card; without a start estimate it replaces that message in the
+summary.
+Partitions deliberately do not show `PriorityJobFactor`, because that policy
+component is not a meaningful measure of availability to the user.
+
+The previously displayed large number was Slurm's raw `Priority` value. It is
+a weighted scheduling score whose ingredients and scale are configured by each
+cluster; common factors include job age, fair-share, QOS, partition, and job
+size. Higher scores are generally considered first within the same scheduling
+tier when a job fits the available resources. A value such as `4,884,753` has
+no useful standalone meaning, cannot be compared across clusters, and changes
+as the queue and its age/fair-share components evolve. Cluster Watcher therefore
+shows both the cluster-wide and user-specific ranks while retaining the
+scheduling caveats above. The global histogram is computed remotely and joins
+the existing batched SSH refresh, so the complete queue is not transferred to
+the local machine and no extra SSH login is opened.
 
 ### Estimated queue waits
 
 Cluster Watcher asks Slurm when a hypothetical job **would** start, using
 `sbatch --test-only`; nothing is submitted or run. For each GPU partition it
-probes 1, 2, 4, … up to 64 GPUs, and the views show the one-hour shape:
-
-- **VS Code:** a log-log line chart per partition card.
-- **Terminal:** the `WAIT TIME` columns.
-- **Web dashboard:** a bar chart per partition, colored by 1-hour, 12-hour,
-  and 24-hour walltime, on a 0–24 h axis. `+` marks longer waits, and a
-  striped bar marks a missing estimate.
+probes 1, 2, 4, … up to 64 GPUs. Browser partition headings and the always-open
+VS Code partition cards show those shapes as labeled blocks, colored by the
+estimated wait for a one-hour job (or the partition's shorter maximum runtime):
+dark green below the first threshold, green below the second, yellow below the
+third, orange below
+the fourth, and red above it. The defaults are 5, 30, 60, and 120 minutes and
+come from `dashboard.wait_threshold_minutes`. Black `×` blocks are rejected by
+account/QOS policy, gray blocks are unavailable or unprobed, and striped `—`
+blocks exceed the partition's total GPU capacity. Hover any block for the
+exact runtime, estimate, expected start, or Slurm error. The terminal retains
+the corresponding `WAIT TIME` columns.
 
 `now` means immediate placement, and `—` means the partition has fewer GPUs
 than requested. Estimates reflect **your** account, QOS, fair-share, and the
@@ -856,6 +896,7 @@ cluster names, hosts, node names, capacities, and utilization.
 | `generated_at` | ISO 8601 time of the underlying status collection. |
 | `status_refresh_seconds` | Normal node/partition refresh interval. |
 | `wait_probe_refresh_seconds` | Slower `sbatch --test-only` refresh interval. |
+| `wait_threshold_minutes` | Configured launch-wait boundaries used to color browser and VS Code blocks. |
 | `clusters` | All configured clusters, including unreachable ones. |
 
 Each cluster has its `name` and `host`, `reachable`,
@@ -960,7 +1001,10 @@ The response has `schema_version`, `generated_at`, the applied `since` and
 normalized `state`, `exit_code`, `submit_at`, `start_at`, `end_at`,
 `elapsed_seconds`, `partition`, `nodes`, `expected_start_at`, and `reason`.
 Active jobs also have Slurm's numeric `priority` (when available) and
-`dependency` (for example `afterok:1000100(unfulfilled)`, or `null`).
+`dependency` (for example `afterok:1000100(unfulfilled)`, or `null`). Pending
+jobs additionally expose `global_priority_rank` and `global_priority_total`
+when the cluster permits the queue-wide priority query. Tied raw scores share
+the same competition rank.
 
 <details>
 <summary><b>Job record details and example</b></summary>
@@ -1071,7 +1115,8 @@ curl --fail-with-body --silent -H 'Content-Type: application/json' \
 ```
 
 `/api/v1/sessions` lists every visible machine with `name`, `host`,
-`username`, `available` (a live connection verified with `ssh -O check`),
+`username`, `interactive_auth`, `available` (a live connection verified with
+`ssh -O check`),
 `session_open`, `pid`, `control_persist_seconds`, `last_activity_at`,
 `estimated_remaining_seconds` (approximate, or `null`), and `error`. It never
 logs in.
@@ -1173,7 +1218,7 @@ flowchart TB
     subgraph human["Human interfaces"]
         Terminal["Terminal<br/>status N · jobs N · sessions<br/>exec · shell"]
         Browser["Browser dashboard<br/>capacity, jobs, countdown,<br/>archive, logs, and cancellation"]
-        VSCode["VS Code sidebar<br/>job and partition cards,<br/>archive, paged logs, and cancellation"]
+        VSCode["VS Code sidebar<br/>jobs, partitions, service/session status,<br/>background login, logs, and cancellation"]
         LocalState["UI-local state<br/>archives and open/closed sections"]
         LocalState --- Browser
         LocalState --- VSCode
@@ -1255,7 +1300,7 @@ modify Slurm jobs.
 | `clusterwatcher/terminal_*.py` | Terminal boards and their refresh loops. |
 | `clusterwatcher/setup_wizard.py`, `cli.py` | `setup`/`config` and command-line orchestration. |
 | `cluster_watcher.py` | Minimal executable entry point. |
-| `vscode/` | VS Code extension (a thin client of the loopback APIs). `renderers.js` draws the views and `wait-chart.js` the wait chart. |
+| `vscode/` | VS Code extension (a thin client of the loopback APIs). `renderers.js` draws the views and `launchability.js` classifies standard GPU-job waits. |
 
 ### Tests
 
@@ -1270,7 +1315,7 @@ tests rely on the CI job deadline.)
 
 The extension integration test downloads VS Code into `vscode/.vscode-test/`
 and checks that the extension activates, registers every command, and opens
-both views without a service. Headless Linux needs Xvfb:
+all three views without a service. Headless Linux needs Xvfb:
 
 ```bash
 cd vscode
@@ -1286,9 +1331,17 @@ Development Host. There:
 1. Make sure `cluster-watcher` is on `PATH` (or select an executable), and set
    `clusterWatcher.configPath` if needed.
 2. Open the Cluster Watcher view and run **Start Service & SSH Sessions**;
-   complete MFA in the terminal and check that both views refresh.
-3. Expand/collapse a group, job card, cluster, and partition card; archive and
-   restore a job; open `.err`/`.out` and use **Load 2,000 Older Lines**.
+   complete MFA in the masked VS Code prompts and check that all three views
+   refresh. Confirm **Server Status** reports the background process and SSH
+   sessions without opening a terminal.
+   The extension checks `cluster-watcher capabilities` before starting a
+   terminal-free login. If it reports that the executable is too old, rebuild
+   and install the backend from the same checkout with
+   `./install.sh --from-source --add-to-path`, then reload the Extension
+   Development Host.
+3. Expand/collapse a job group, job card, and cluster; confirm partition cards
+   remain compact and fully visible; archive and restore a job; open
+   `.err`/`.out` and use **Load 2,000 Older Lines**.
 4. Start `cluster-watcher serve --jobs-api --no-browser` separately, reload
    the host, and confirm that no second service starts.
 

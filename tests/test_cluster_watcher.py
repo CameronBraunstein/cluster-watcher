@@ -64,6 +64,21 @@ def managed_path_block(bin_directory: Path) -> str:
     )
 
 class ClusterWatcherTests(TimedTestCase):
+    @patch("clusterwatcher.cli.load_config")
+    def test_capabilities_are_machine_readable_without_loading_configuration(self, load_config):
+        """Let integrations reject an old backend before requesting credentials."""
+        output = StringIO()
+
+        with redirect_stdout(output):
+            result = main(["capabilities"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "schema_version": 1,
+            "capabilities": ["credential-stdin-json"],
+        })
+        load_config.assert_not_called()
+
     def test_package_exposes_terminal_and_module_entry_points(self):
         """Keep the installed command mapped to the same development CLI."""
         root = Path(__file__).parents[1]
@@ -533,6 +548,15 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertFalse(serve.call_args.args[8])
         self.assertTrue(serve.call_args.args[9])
 
+    @patch("clusterwatcher.cli.JsonLineCredentialPrompt")
+    @patch("clusterwatcher.cli.load_wait_threshold_minutes", return_value=(5, 30))
+    @patch("clusterwatcher.cli.load_config", return_value=[Machine("a", "host", "user")])
+    @patch("clusterwatcher.cli.serve", return_value=0)
+    def test_serve_forwards_machine_credential_protocol(self, serve, _load_config, _thresholds, prompt_type):
+        prompt = prompt_type.return_value
+        self.assertEqual(main(["serve", "--credential-stdin-json", "--no-browser"]), 0)
+        self.assertIs(serve.call_args.args[10], prompt)
+
     def test_load_and_build_ssh_command(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "clusters.toml"
@@ -703,6 +727,26 @@ class ClusterWatcherTests(TimedTestCase):
 
     @patch("clusterwatcher.credentials.session_status", return_value={"session_open": False})
     @patch("clusterwatcher.credentials.start_interactive_session")
+    def test_graphical_prompt_uses_askpass_for_an_ungrouped_machine(self, start_session, _status):
+        from clusterwatcher.credentials import establish_interactive_sessions
+
+        machine = Machine("solo", "solo.example", "alice", interactive_auth=True)
+        prompts = []
+
+        def prompt(kind, message):
+            prompts.append((kind, message))
+            return "password" if kind == "password" else "123456"
+
+        with patch("clusterwatcher.credentials.CredentialBroker") as broker_type:
+            broker = broker_type.return_value.__enter__.return_value
+            broker.environment.return_value = {"ASKPASS": "socket"}
+            self.assertEqual(establish_interactive_sessions([machine], 5, prompt), [])
+
+        self.assertEqual([kind for kind, _message in prompts], ["password", "otp"])
+        start_session.assert_called_once_with(machine, 5, {"ASKPASS": "socket"})
+
+    @patch("clusterwatcher.credentials.session_status", return_value={"session_open": False})
+    @patch("clusterwatcher.credentials.start_interactive_session")
     @patch("clusterwatcher.credentials.getpass.getpass", side_effect=["shared-password", "cluster_1-otp", "expired", "fresh", "cluster_3-otp"])
     def test_rejected_machine_otp_is_refreshed_and_only_that_host_retried(self, getpass_mock, start_session, _status):
         from clusterwatcher.credentials import establish_interactive_sessions
@@ -762,6 +806,11 @@ class ClusterWatcherTests(TimedTestCase):
                 "PriorityWeightPartition = 5000\nPriorityFlags = NO_NORMAL_PART\n"
             ),
             "queue": "RUNNING\nPENDING\nRUNNING\n",
+            "pending": (
+                "99|queued|PENDING|debug|None assigned|1|4|N/A|N/A|"
+                "2026-10-13T10:00:00|NULL|00:00:00|01:00:00|01:00:00|Priority|500\n"
+            ),
+            "priority_counts": "900|2\n500|3\n100|1\n",
         })
         status = collect_status(Machine("a", "host", "user"), 5, True)
         self.assertEqual(run_batch.call_count, 1)  # Every command shares one SSH call.
@@ -778,14 +827,19 @@ class ClusterWatcherTests(TimedTestCase):
             "priority_flags": "NO_NORMAL_PART",
         })
         self.assertEqual(status.jobs, {"PENDING": 1, "RUNNING": 2})
+        self.assertEqual(status.user_jobs[0]["global_priority_rank"], 3)
+        self.assertEqual(status.user_jobs[0]["global_priority_total"], 6)
 
     def test_job_parsing_marks_user_allocations_and_node_release_times(self):
         from clusterwatcher.slurm import (
             SQUEUE_RUNNING_END_COMMAND,
+            SQUEUE_PENDING_PRIORITY_COUNTS_COMMAND,
             SQUEUE_USER_PENDING_COMMAND,
             SQUEUE_USER_RUNNING_COMMAND,
+            annotate_global_priority_ranks,
             node_release_estimates,
             parse_jobs,
+            parse_priority_counts,
             slurm_duration_seconds,
             user_node_usage,
         )
@@ -832,6 +886,17 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertEqual((array_jobs[0]["gpus"], array_jobs[0]["cpus"]), (2, 16))
         self.assertEqual(array_jobs[0]["priority"], 98765)
         self.assertIn("%Q", SQUEUE_USER_PENDING_COMMAND)
+        self.assertIn("--states=PENDING", SQUEUE_PENDING_PRIORITY_COUNTS_COMMAND)
+        self.assertNotIn("--me", SQUEUE_PENDING_PRIORITY_COUNTS_COMMAND)
+
+        counts = parse_priority_counts("900|2\n500|3\n100|1\ninvalid\n500|2\n")
+        self.assertEqual(counts, {900: 2, 500: 5, 100: 1})
+        ranked = [{"priority": 900}, {"priority": 500}, {"priority": 100}, {"priority": 50}]
+        annotate_global_priority_ranks(ranked, counts)
+        self.assertEqual(
+            [(job.get("global_priority_rank"), job.get("global_priority_total")) for job in ranked],
+            [(1, 8), (3, 8), (8, 8), (None, None)],
+        )
 
     def test_gpu_count_parses_typed_and_untyped_gres(self):
         from clusterwatcher.slurm import SCONTROL_NODES_COMMAND, gpu_count
@@ -1059,7 +1124,9 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertIn("jobBadges", PAGE)
         self.assertIn("waitLabel", PAGE)
         self.assertIn("job-badge", PAGE)
-        self.assertIn("waitChart", PAGE)
+        self.assertIn("launchabilityStrip", PAGE)
+        self.assertIn("const launchGpuCounts = [1, 2, 4, 8, 16, 32, 64]", PAGE)
+        self.assertNotIn("function waitChart", PAGE)
         self.assertIn("jobsView", PAGE)
         self.assertIn("recentJobsView", PAGE)
         self.assertIn("/api/v1/jobs/", PAGE)
@@ -1077,15 +1144,32 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertIn("dependencyStatusDescription", PAGE)
         self.assertIn("expandedDependency", PAGE)
         self.assertIn("function relativeJobPriority(job, jobs)", PAGE)
-        self.assertIn("function partitionPriorityGauge(partition, partitions, scheduling = {})", PAGE)
+        self.assertIn("function launchWaitColor(seconds, thresholds)", PAGE)
+        self.assertIn("function baselineWaitEstimate(rows, gpus)", PAGE)
         self.assertIn("jobGroup(candidate) === 'PENDING'", PAGE)
-        self.assertIn("among your visible Pending jobs", PAGE)
-        self.assertNotIn("Higher is considered earlier", PAGE)
+        self.assertIn("Global priority ${globalRank} / ${globalTotal}", PAGE)
+        self.assertIn("Your priority ${higher + 1} / ${values.length}", PAGE)
+        self.assertIn("(globalTotal - globalRank) / (globalTotal - 1) * 100", PAGE)
+        self.assertIn("if (!hasGlobalPosition && peers.length < 2) return null", PAGE)
+        self.assertIn(": userPercent", PAGE)
+        self.assertIn("${global}\nYour priority", PAGE)
+        self.assertIn("Lower rank numbers are considered sooner", PAGE)
+        self.assertIn("resource fit, and backfill can change the start order", PAGE)
+        self.assertNotIn("Global priority ranks the job", PAGE)
+        self.assertIn("priority-help", PAGE)
+        self.assertIn('<span class="fast-hover priority-help"', PAGE)
+        self.assertIn('>Priority</span><span class="priority-gauge fast-hover"', PAGE)
+        self.assertIn('>Priority</span>', PAGE)
+        self.assertNotIn('>ⓘ</span>', PAGE)
+        self.assertIn("white-space:pre-line", PAGE)
+        self.assertNotIn("grouped.some(job => relativeJobPriority(job, sorted))", PAGE)
+        self.assertNotIn("Priority ${priority.toLocaleString()}: position", PAGE)
         self.assertIn("data-fast-tooltip=\"${escapeHtml(title)}\"", PAGE)
-        self.assertIn("partitionPriorityGauge(partition || {}, partitions || [], scheduling || {})", PAGE)
+        self.assertIn("launchabilityStrip(estimates, name, totalGpus, estimatesUpdatedAt, thresholds)", PAGE)
         self.assertIn(".priority-prominent .priority-track { height:.62rem; }", PAGE)
-        self.assertIn("priority_job_factor", PAGE)
-        self.assertIn("Scheduler: ${scheduling.scheduler_type || 'unavailable'}", PAGE)
+        self.assertNotIn("partitionPriorityGauge", PAGE)
+        self.assertNotIn("partition job factor", PAGE)
+        self.assertIn(".launch-wait-4 { background:#dc2626; }", PAGE)
         self.assertNotIn('<span aria-hidden="true">←</span>', PAGE)
         self.assertNotIn('<span aria-hidden="true">→</span>', PAGE)
         self.assertIn("job-dependency-icon", PAGE)
@@ -1110,7 +1194,7 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertIn("response.status === 503", PAGE)
         self.assertIn("response.headers.get('Retry-After')", PAGE)
         self.assertIn("if (!result.updated_at)", PAGE)
-        self.assertIn("Estimated queue wait in hours", PAGE)
+        self.assertIn("Estimated launch wait for GPU requests", PAGE)
         self.assertIn("My jobs", PAGE)
         self.assertIn("waiting for dependency", PAGE)
         self.assertIn("nodesByAvailableGpu", PAGE)

@@ -20,6 +20,14 @@ SQUEUE_COMMAND = "squeue --noheader --format='%T'"
 SQUEUE_USER_RUNNING_COMMAND = "TZ=UTC squeue --me --array --states=RUNNING --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r|%Q'"
 SQUEUE_USER_PENDING_COMMAND = "TZ=UTC squeue --me --array --start --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r|%Q'"
 SQUEUE_USER_JOBS_COMMAND = "TZ=UTC squeue --me --array --start --states=RUNNING,PENDING --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r|%Q'"
+# Transfer a priority histogram rather than every queued job. This still lets
+# the client rank the user's jobs against the visible cluster-wide queue.
+SQUEUE_PENDING_PRIORITY_COUNTS_COMMAND = (
+    "priority_file=$(mktemp) || exit 1; trap 'rm -f \"$priority_file\"' EXIT; "
+    "squeue --array --states=PENDING --noheader --format='%Q' >\"$priority_file\" || exit $?; "
+    "awk '$1 ~ /^[0-9]+$/ { count[$1]++ } "
+    "END { for (priority in count) print priority \"|\" count[priority] }' \"$priority_file\""
+)
 SQUEUE_RUNNING_END_COMMAND = "TZ=UTC squeue --states=RUNNING --noheader --format='%N|%e'"
 # GresUsed, which reports allocated GPUs, is emitted only in detailed output.
 SCONTROL_NODES_COMMAND = "scontrol show node --oneliner -d"
@@ -203,6 +211,37 @@ def parse_jobs(output: str) -> list[dict[str, object]]:
             "priority": int(priority) if priority.isdigit() else None,
         })
     return jobs
+
+
+def parse_priority_counts(output: str) -> dict[int, int]:
+    """Parse ``priority|count`` rows from the queue-wide pending histogram."""
+    counts: dict[int, int] = {}
+    for line in output.splitlines():
+        priority, separator, count = line.strip().partition("|")
+        if separator and priority.isdigit() and count.isdigit() and int(count) > 0:
+            counts[int(priority)] = counts.get(int(priority), 0) + int(count)
+    return counts
+
+
+def annotate_global_priority_ranks(
+    jobs: list[dict[str, object]], counts: dict[int, int],
+) -> None:
+    """Attach cluster-wide pending rank and population to the user's jobs.
+
+    Tied scores share the same competition rank: scores ``100, 100, 90``
+    receive ranks ``1, 1, 3``. Missing or nonnumeric scores remain unranked.
+    """
+    total = sum(counts.values())
+    higher = 0
+    ranks: dict[int, int] = {}
+    for priority, count in sorted(counts.items(), reverse=True):
+        ranks[priority] = higher + 1
+        higher += count
+    for job in jobs:
+        priority = job.get("priority")
+        if isinstance(priority, int) and priority in ranks and total:
+            job["global_priority_rank"] = ranks[priority]
+            job["global_priority_total"] = total
 
 
 def parse_scheduling_config(output: str) -> dict[str, object]:
@@ -490,6 +529,7 @@ def collect_status(
     if include_personal_details:
         commands["running"] = SQUEUE_USER_RUNNING_COMMAND
         commands["pending"] = SQUEUE_USER_PENDING_COMMAND
+        commands["priority_counts"] = SQUEUE_PENDING_PRIORITY_COUNTS_COMMAND
         if capacity:
             commands["releases"] = SQUEUE_RUNNING_END_COMMAND
     if include_jobs and capacity:
@@ -541,6 +581,11 @@ def collect_status(
             if include_personal_details:
                 running_jobs = parse_jobs(sections["running"].output())
                 pending_jobs = parse_jobs(sections["pending"].output())
+                priority_section = sections["priority_counts"]
+                if priority_section.returncode == 0:
+                    annotate_global_priority_ranks(
+                        pending_jobs, parse_priority_counts(priority_section.stdout),
+                    )
                 usage = user_node_usage(running_jobs)
                 releases = node_release_estimates(sections["releases"].output()) if capacity else None
                 for node in status.nodes or []:

@@ -1,7 +1,7 @@
 {
   "name": "cluster-watcher",
   "displayName": "Cluster Watcher",
-  "description": "Monitor Cluster Watcher Slurm jobs and partition capacity from the VS Code sidebar.",
+  "description": "Monitor Slurm jobs and capacity, manage the local service, and reopen SSH sessions from the VS Code sidebar.",
   "version": "0.1.5",
   "publisher": "CameronBraunstein",
   "license": "GPL-3.0-or-later",
@@ -73,12 +73,18 @@
         "icon": "$(sync~spin)"
       },
       {
-        "command": "clusterWatcher.openDashboard",
-        "title": "Cluster Watcher: Open Web Dashboard"
+        "command": "clusterWatcher.refreshServer",
+        "title": "Cluster Watcher: Refresh Server Status",
+        "icon": "$(refresh)"
       },
       {
-        "command": "clusterWatcher.showServiceTerminal",
-        "title": "Cluster Watcher: Show Service Terminal"
+        "command": "clusterWatcher.refreshServerBusy",
+        "title": "Cluster Watcher: Refreshing Server Status",
+        "icon": "$(sync~spin)"
+      },
+      {
+        "command": "clusterWatcher.openDashboard",
+        "title": "Cluster Watcher: Open Web Dashboard"
       },
       {
         "command": "clusterWatcher.loadMoreLog",
@@ -127,6 +133,11 @@
           "id": "clusterWatcher.status",
           "name": "Cluster Status",
           "type": "webview"
+        },
+        {
+          "id": "clusterWatcher.server",
+          "name": "Server Status",
+          "type": "webview"
         }
       ]
     },
@@ -138,6 +149,10 @@
         },
         {
           "command": "clusterWatcher.refreshStatusBusy",
+          "when": "false"
+        },
+        {
+          "command": "clusterWatcher.refreshServerBusy",
           "when": "false"
         }
       ],
@@ -160,6 +175,16 @@
         {
           "command": "clusterWatcher.refreshStatusBusy",
           "when": "view == clusterWatcher.status && clusterWatcher.refreshingStatus",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clusterWatcher.refreshServer",
+          "when": "view == clusterWatcher.server && !clusterWatcher.refreshingServer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clusterWatcher.refreshServerBusy",
+          "when": "view == clusterWatcher.server && clusterWatcher.refreshingServer",
           "group": "navigation@1"
         }
       ],
@@ -211,7 +236,7 @@
         "clusterWatcher.autoStart": {
           "type": "boolean",
           "default": false,
-          "description": "Start Cluster Watcher in an integrated terminal when no existing service is found."
+          "description": "Start Cluster Watcher as a managed background process when no existing service is found. Password and OTP prompts use secure VS Code input boxes."
         },
         "clusterWatcher.notifications": {
           "type": "string",

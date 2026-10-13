@@ -91,12 +91,15 @@ class CapacityCadenceTests(TimedTestCase):
     @patch("clusterwatcher.slurm.run_batch")
     def test_jobs_only_refresh_sends_only_personal_queries_and_keeps_capacity(self, run_batch):
         running = "10|train|RUNNING|gpu|node01|1|4|gres/gpu:1|2026-09-22T10:00:00|2026-09-22T09:59:00|NULL|00:10:00|01:00:00|00:50:00|None\n"
-        run_batch.return_value = {"running": Section(running, "", 0), "pending": Section("", "", 0)}
+        run_batch.return_value = {
+            "running": Section(running, "", 0), "pending": Section("", "", 0),
+            "priority_counts": Section("", "", 0),
+        }
         previous = self.previous()
 
         status = collect_status(MACHINE, 5, True, previous=previous, refresh_capacity=False)
 
-        self.assertEqual(list(run_batch.call_args.args[2]), ["running", "pending"])
+        self.assertEqual(list(run_batch.call_args.args[2]), ["running", "pending", "priority_counts"])
         self.assertEqual(status.partitions, previous.partitions)
         self.assertEqual(status.jobs, {"RUNNING": 3})
         self.assertEqual(status.scheduling, previous.scheduling)
@@ -109,24 +112,25 @@ class CapacityCadenceTests(TimedTestCase):
     def test_first_refresh_or_due_capacity_collects_everything(self, run_batch):
         run_batch.return_value = {
             name: Section("", "", 0)
-            for name in ("sinfo", "nodes", "scheduler", "running", "pending", "releases", "queue")
+            for name in ("sinfo", "nodes", "scheduler", "running", "pending", "priority_counts", "releases", "queue")
         }
 
         collect_status(MACHINE, 5, True, previous=None, refresh_capacity=False)
 
         self.assertEqual(
             list(run_batch.call_args.args[2]),
-            ["sinfo", "nodes", "scheduler", "running", "pending", "releases", "queue"],
+            ["sinfo", "nodes", "scheduler", "running", "pending", "priority_counts", "releases", "queue"],
         )
 
     @patch("clusterwatcher.slurm.run_batch")
     def test_unavailable_scheduler_details_do_not_hide_other_status(self, run_batch):
         run_batch.return_value = {
             name: Section("", "", 0)
-            for name in ("sinfo", "nodes", "running", "pending", "releases", "queue")
+            for name in ("sinfo", "nodes", "running", "pending", "priority_counts", "releases", "queue")
         }
         run_batch.return_value["sinfo"] = Section("gpu|up|1|0/8/0/8|idle\n", "", 0)
         run_batch.return_value["scheduler"] = Section("", "config unavailable", 1)
+        run_batch.return_value["priority_counts"] = Section("", "queue priorities unavailable", 1)
 
         status = collect_status(MACHINE, 5, True)
 
@@ -134,6 +138,7 @@ class CapacityCadenceTests(TimedTestCase):
         self.assertIsNone(status.resource_error)
         self.assertEqual(status.partitions[0]["partition"], "gpu")
         self.assertEqual(status.scheduling, {})
+        self.assertFalse(any("global_priority_rank" in job for job in status.user_jobs))
 
     @patch("clusterwatcher.dashboard.collect_status")
     def test_status_store_refreshes_capacity_at_most_every_minute(self, collect):

@@ -43,8 +43,11 @@ cluster-watcher serve --command-api --no-browser   # add sessions/remote command
 `--jobs-api` and `--command-api` may be combined, but neither is needed to read
 the capacity snapshot. Do not ask the user to enable the command API for an
 observational task. Startup can require password/OTP interaction; an agent must
-not try to automate those secret prompts. The user's normal browser and VS Code
-clients can attach to the same running service and shared SSH masters.
+not try to automate those secret prompts. The VS Code extension can own the
+service as a background child and present masked credential input directly to
+the human; its Server Status view also inventories shared SSH masters. Browser,
+CLI, and VS Code clients can attach to the same running service and shared SSH
+masters.
 
 ## Discover and read the service
 

@@ -4,24 +4,36 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
+- Services started from the sidebar now run as extension-owned background
+  processes instead of integrated terminals. Password and OTP requests use
+  masked VS Code input boxes and a private stdin protocol, and re-login uses
+  the same flow. A new **Server Status** view shows lifecycle, PID/URL, bounded
+  diagnostics, reusable SSH-session health, and start/stop/login controls.
+  The extension now probes the backend's machine-readable capabilities first,
+  so an older installed executable produces upgrade guidance instead of an
+  `unrecognized arguments: --credential-stdin-json` failure.
 - Expanded Pending cards show a compact, number-free gauge ranking each job's
   Slurm priority against the user's other visible pending jobs on that
   cluster. If no wait estimate exists, the thicker gauge moves into the card
-  summary. Cluster Status places a normalized `PriorityJobFactor` gauge beside
-  every partition name. Exact values and scheduler configuration stay in fast
-  hover text, directional arrows are omitted, and unsupported or
-  non-comparable data is hidden.
-- Priority gauges no longer carry a visible "Priority" label.
+  summary. Its hover now shows both `Global priority x / total` and `Your
+  priority y / your total`; a lightweight queue-wide histogram supplies the
+  global rank. The two ranks occupy separate hover lines, and a visible
+  **Priority** label to the left of each bar replaces the info icon and gives a
+  short reminder that lower rank numbers are better, followed by a scheduling
+  caveat. The marker now visualizes the global rank, falling back to the user's
+  rank only when cluster-wide data is unavailable; a single pending job now
+  receives a gauge when its global rank is known. Cluster Status now
+  replaces the misleading partition-priority
+  gauge with account-aware launchability blocks for 1–64 GPUs. Blocks use the
+  configured wait thresholds, expose exact estimates and errors on hover, and
+  replace the duplicate expanded wait graph. Partition cards are now
+  permanently expanded and compact: GPU model, labeled VRAM hover, TFLOPS/s,
+  labeled CPU-thread hover, and the availability bar remain visible together.
 - A collapsed job card shows its full-name hover label only while the pointer
   is over the title, not anywhere on the card. The copyable job-ID badge moved
   from the expanded metadata line to the right of the progress bar (or
   priority gauge), and appears only while the card is expanded.
-- Cluster Status shows each partition as a collapsible card instead of a table
-  row. The collapsed card shows the partition name, priority gauge, GPU model,
-  VRAM, and TFLOPS/s; expanding it adds GPU availability, the full GPU name,
-  CPU threads, and a line chart of estimated wait against requested GPU count
-  with logarithmic axes. Hover a chart column for its exact, live-counting
-  estimate or Slurm's error message.
+- Cluster Status shows each partition as a compact card instead of a table row.
 
 ## 0.1.5 — 2026-10-09
 
