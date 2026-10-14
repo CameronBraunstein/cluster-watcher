@@ -113,7 +113,9 @@ The archive is stored in VS Code extension global state and survives editor
 restarts. Group, job-card, and cluster disclosure choices survive live data
 refreshes: the webview reports each expand/collapse to the extension, which
 renders the remembered state into every refreshed page (for the current VS Code
-session). Cluster names are collapsible headings in **Cluster Status**. The
+session). Archive and restore actions also retain the current viewport by
+anchoring it to a nearby unchanged card across the rerender. Cluster names are
+collapsible headings in **Cluster Status**. The
 native **My Jobs** and **Cluster Status** view headings replace redundant titles
 inside each webview. A compact `Last update: <date and time with seconds>` line
 appears directly below each heading. Each heading has its own **Refresh**
@@ -214,9 +216,9 @@ The main README explains the scheduling semantics; unavailable data is simply
 omitted.
 
 **Server Status** sits below Cluster Status. It reports the managed process as
-starting, waiting for credentials, running, stopping, or stopped; a compatible
-service started elsewhere is shown on one line as **Attached to an existing
-service: `<URL>`**, with a clickable dashboard URL. The URL is a button styled
+starting, waiting for credentials, running, stopping, or stopped. Both a
+compatible service started elsewhere and an extension-owned service show only
+the clickable dashboard URL, with no status prefix. The URL is a button styled
 as a link, so its process/start tooltip is not accompanied by a dummy `#`
 target. A smaller toggle appears to the left of smaller text, preserving the
 standard local URL at minimum sidebar width; it is green when on and gray when

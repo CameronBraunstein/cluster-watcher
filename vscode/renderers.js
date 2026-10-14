@@ -299,9 +299,32 @@ button.button{border:0;font:inherit;cursor:pointer}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
-  const savedScrollY = Number(api.getState()?.scrollY) || 0;
-  const rememberScroll = () => api.setState({ ...(api.getState() || {}), scrollY: window.scrollY });
-  requestAnimationFrame(() => window.scrollTo(0, savedScrollY));
+  const savedViewport = api.getState() || {};
+  const savedScrollY = Number(savedViewport.scrollY) || 0;
+  const visibleJobCards = () => [...document.querySelectorAll('[data-job-ref]')]
+    .filter((card) => card.getClientRects().length);
+  const rememberScroll = (excludedCard) => {
+    const anchor = visibleJobCards()
+      .filter((card) => card !== excludedCard)
+      .map((card) => ({ card, top: card.getBoundingClientRect().top }))
+      .sort((left, right) => Math.abs(left.top) - Math.abs(right.top))[0];
+    api.setState({
+      ...(api.getState() || {}), scrollY: window.scrollY,
+      anchorRef: anchor?.card.dataset.jobRef, anchorTop: anchor?.top,
+    });
+  };
+  const restoreScroll = () => {
+    const anchor = visibleJobCards().find((card) => card.dataset.jobRef === savedViewport.anchorRef);
+    const anchorTop = Number(savedViewport.anchorTop);
+    if (anchor && Number.isFinite(anchorTop)) {
+      window.scrollBy(0, anchor.getBoundingClientRect().top - anchorTop);
+    } else {
+      window.scrollTo(0, savedScrollY);
+    }
+  };
+  // A replaced webview document may settle over more than one layout frame.
+  requestAnimationFrame(() => { restoreScroll(); requestAnimationFrame(restoreScroll); });
+  window.addEventListener('load', restoreScroll, { once: true });
   let scrollFrame;
   window.addEventListener('scroll', () => {
     if (scrollFrame) return;
@@ -373,7 +396,8 @@ button.button{border:0;font:inherit;cursor:pointer}
     const button = event.target.closest('[data-command]');
     if (!button) return;
     event.preventDefault();
-    rememberScroll();
+    const movesJob = ['clusterWatcher.archiveJob', 'clusterWatcher.restoreJob'].includes(button.dataset.command);
+    rememberScroll(movesJob ? button.closest('[data-job-ref]') : undefined);
     let args = [];
     try { args = JSON.parse(button.dataset.args || '[]'); } catch (_error) { args = []; }
     api.postMessage({ type: 'command', command: button.dataset.command, args });
@@ -476,7 +500,6 @@ function renderServerStatus(payload = {}, freshness = {}) {
   const state = String(service.state || 'offline').toLowerCase();
   const labels = {
     offline: 'Stopped', starting: 'Starting', authenticating: 'Waiting for credentials',
-    attached: 'Attached to an existing service',
     stopping: 'Stopping', error: 'Error',
   };
   const serviceOn = ['running', 'attached', 'starting', 'authenticating', 'stopping'].includes(state);
@@ -491,7 +514,7 @@ function renderServerStatus(payload = {}, freshness = {}) {
   const linkedUrl = service.url && ['running', 'attached'].includes(state)
     ? `<button class="service-url" ${commandButtonAttributes('clusterWatcher.openDashboard')} aria-label="${escapeHtml(`${service.url}. `)}${serviceDetailsAttribute}" data-fast-tooltip="${serviceDetailsAttribute}">${escapeHtml(service.url)}</button>`
     : '';
-  const summaryLabel = state === 'attached' ? 'Attached to an existing service:' : labels[state] || '';
+  const summaryLabel = labels[state] || '';
   const summaryText = `${summaryLabel ? `<strong>${escapeHtml(summaryLabel)}</strong>` : ''}${linkedUrl}`;
   const serviceSummary = `<div class="service-summary">${toggle}${summaryText}</div>`;
 

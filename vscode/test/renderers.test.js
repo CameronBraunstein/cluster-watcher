@@ -119,7 +119,8 @@ test('server status shows background ownership and per-machine login actions', (
     service: { state: 'attached', owned: false, pid: 4321, startedAt: '2026-10-13T09:00:00Z', url: 'http://127.0.0.1:8080/' },
     sessions: { machines: [] },
   });
-  assert.match(attached, /<div class="service-summary"><button class="service-toggle on"[^>]*><\/button><strong>Attached to an existing service:<\/strong><button class="service-url"[^>]*>http:\/\/127\.0\.0\.1:8080\/<\/button>/);
+  assert.match(attached, /<div class="service-summary"><button class="service-toggle on"[^>]*><\/button><button class="service-url"[^>]*>http:\/\/127\.0\.0\.1:8080\/<\/button>/);
+  assert.doesNotMatch(attached, /Attached to an existing service/);
   assert.match(attached, /data-fast-tooltip="Process: 4321&#10;Started: [^"]+"/);
   assert.match(attached, /data-command="clusterWatcher\.stopService"[^>]*data-fast-tooltip="Stop service"/);
   assert.doesNotMatch(attached, /<dt>URL<\/dt>|Open dashboard/);
@@ -364,8 +365,11 @@ test('webview buttons post allow-listed commands instead of using command URIs',
   );
   const html = renderJobs({ jobs: [{ job_id: '1', cluster: 'cluster_0', state: 'RUNNING' }] });
   assert.match(html, /type: 'command', command: button\.dataset\.command/);
-  assert.match(html, /const savedScrollY = Number\(api\.getState\(\)\?\.scrollY\) \|\| 0/);
-  assert.match(html, /rememberScroll\(\);\s+let args/);
+  assert.match(html, /const savedViewport = api\.getState\(\) \|\| \{\}/);
+  assert.match(html, /visibleJobCards\(\)\.find\(\(card\) => card\.dataset\.jobRef === savedViewport\.anchorRef\)/);
+  assert.match(html, /requestAnimationFrame\(\(\) => \{ restoreScroll\(\); requestAnimationFrame\(restoreScroll\); \}\)/);
+  assert.match(html, /const movesJob = \['clusterWatcher\.archiveJob', 'clusterWatcher\.restoreJob'\]\.includes\(button\.dataset\.command\)/);
+  assert.match(html, /rememberScroll\(movesJob \? button\.closest\('\[data-job-ref\]'\) : undefined\);\s+let args/);
 });
 
 test('welcome view offers start, setup, config, and settings with escaped detail', () => {

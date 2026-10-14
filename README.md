@@ -417,7 +417,8 @@ editor title bar pages backward. **script** shows Slurm's exact copy while the
 job is queued or running; after it ends, it shows the current file named on
 the `sbatch` command line, with a warning that it may have changed. Archives
 are stored in VS Code's global state, and open/closed groups and cards survive
-refreshes.
+refreshes. Archiving or restoring a job keeps the viewport anchored to a nearby
+unchanged job card rather than jumping to the top of **My Jobs**.
 
 #### Cluster Status
 
@@ -442,11 +443,10 @@ The third view shows whether the service is starting, waiting for credentials,
 attached to an independently started process, or stopped. Its compact first
 line puts a small start/stop toggle on the left. Both the control and text are
 sized to preserve the complete local dashboard URL at the sidebar's minimum
-width. A running extension-owned
-service shows its dashboard URL without a redundant status label; an attached
-service reads **Attached to an existing service: `<URL>`**. The URL opens the
-dashboard through a button styled as a link, avoiding a second `#` link-target
-tooltip; its single hover text gives the service process ID and start time. The
+width. Both extension-owned and attached services show only the dashboard URL,
+without a redundant status label. The URL opens the dashboard through a button
+styled as a link, avoiding a second `#` link-target tooltip; its single hover
+text gives the service process ID and start time. The
 green/on toggle says **Stop service** on hover, and the gray/off toggle says
 **Start service**. The view also includes a bounded recent diagnostic tail and
 every configured machine's reusable SSH-session state and approximate remaining
