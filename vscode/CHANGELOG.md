@@ -4,6 +4,8 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
+## 0.2.0 - 2026-10-13
+
 - Archiving or restoring a job now preserves the **My Jobs** viewport instead
   of resetting the sidebar to the top.
 - Attached and extension-owned services now use the same URL-only Server Status
