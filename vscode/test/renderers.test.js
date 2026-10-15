@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderServerStatus, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
+const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderServerStatus, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
 const { launchabilityStrip, waitColorIndex, waitEstimate } = require('../launchability');
 
 test('jobs retain terminal state grouping and lifecycle visibility', () => {
@@ -48,10 +48,19 @@ test('status shows every partition detail compactly without a card disclosure', 
     name: 'gpu-h100', rank: 1, aggregate: false,
     cpus: { total: 128 },
     gpus: {
-      total: 8, schedulable_idle: 2,
+      total: 8, allocated: 4, idle: 4, schedulable_idle: 2, unavailable_idle: 2,
       models: [{ name: 'NVIDIA H100 NVL', vram_gb: 80, fp16_bf16_tensor_tflops: 989 }],
     },
     node_states: { IDLE: 2, MIXED: 0, ALLOCATED: 3, RESERVED: 1, DOWN: 1 },
+    nodes: [
+      { state: 'IDLE', gpus: { total: 1, allocated: 0, idle: 1, schedulable_idle: 1 } },
+      { state: 'IDLE', gpus: { total: 1, allocated: 0, idle: 1, schedulable_idle: 1 } },
+      { state: 'ALLOCATED', gpus: { total: 1, allocated: 1, idle: 0, schedulable_idle: 0 } },
+      { state: 'ALLOCATED', gpus: { total: 1, allocated: 1, idle: 0, schedulable_idle: 0 } },
+      { state: 'ALLOCATED', gpus: { total: 2, allocated: 2, idle: 0, schedulable_idle: 0 } },
+      { state: 'RESERVED', gpus: { total: 1, allocated: 0, idle: 1, schedulable_idle: 0 } },
+      { state: 'DOWN', gpus: { total: 1, allocated: 0, idle: 1, schedulable_idle: 0 } },
+    ],
     wait_estimates: [
       { gpus: 1, estimated_wait_seconds: 300, error: null },
       { gpus: 2, estimated_wait_seconds: null, error: 'Access/permission denied' },
@@ -70,17 +79,26 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(card, /class="launch-block launch-blocked"[^>]*>×<\/span>/);
   assert.equal((card.match(/class="launch-shape"/g) || []).length, 7);
   assert.match(card, /<span class="gpu-model" data-fast-tooltip="NVIDIA H100 NVL" aria-label="NVIDIA H100 NVL">H100<\/span> · <span class="vram-spec" data-fast-tooltip="VRAM: 80 GB" aria-label="VRAM: 80 GB">80 GB<\/span> · 989 TFLOPS\/s · <span class="thread-spec" data-fast-tooltip="CPU threads: 128 threads" aria-label="CPU threads: 128 threads">128 threads<\/span>/);
-  assert.match(card, /<div class="partition-availability"><span class="partition-availability-label">Free GPUs<\/span><div class="availability-cell"><div class="availability"[^>]*>.*?<\/div><span>2\/8<\/span><\/div><\/div>/);
+  assert.match(card, /<span class="partition-availability-label">GPU:<\/span>/);
+  assert.match(card, /class="availability-count" aria-label="2 of 8 free"/);
+  assert.match(card, /<span class="partition-availability-label">Nodes:<\/span>/);
+  assert.match(card, /class="availability-count" aria-label="2 of 7 free"/);
   assert.doesNotMatch(card, /<details|<summary|data-disclosure-key|wait-chart|wait-figure|<svg/);
   assert.match(html, /\.partition-specs\{[^}]*white-space:normal;overflow-wrap:anywhere/);
   assert.match(html, /\.partition-title\{[^}]*flex-wrap:wrap/);
   assert.match(html, /\.partition-title>\.name\{[^}]*margin-right:auto/);
   assert.match(html, /\.partition-title>\.launchability\{[^}]*flex:0 0 auto;margin-left:0/);
-  assert.match(html, /\.availability-cell\{display:flex;align-items:center;gap:3px;white-space:nowrap\}/);
+  assert.match(html, /\.availability-cell\{display:flex;align-items:center;gap:2px;white-space:nowrap\}/);
+  assert.match(html, /\.partition-availability\{[^}]*gap:0/);
+  assert.match(html, /\.partition-availability-label\{[^}]*flex:0 0 36px;width:36px;padding-right:2px[^}]*text-align:left/);
+  assert.match(html, /\.availability-count\{font-variant-numeric:tabular-nums;white-space:nowrap\}/);
+  assert.match(card, /aria-label="2 of 8 free">2\/8 Free<\/span>/);
+  assert.match(card, /aria-label="2 of 7 free">2\/7 Free<\/span>/);
   assert.ok(html.indexOf('class="available"') < html.indexOf('class="unavailable"'));
-  assert.match(html, /data-availability="Nodes: 2 idle, 3 full, 1 reserved, 1 down"/);
-  assert.match(html, /data-fast-tooltip="Nodes: 2 idle, 3 full, 1 reserved, 1 down"/);
-  assert.doesNotMatch(html, /data-availability="[^"]*GPUs:/);
+  assert.match(html, /data-availability="2 idle, 4 allocated, 1 reserved, 1 down"/);
+  assert.match(html, /data-fast-tooltip="2 idle, 4 allocated, 1 reserved, 1 down"/);
+  assert.match(html, /data-availability="2 idle, 3 full, 1 reserved, 1 down"/);
+  assert.match(html, /data-fast-tooltip="2 idle, 3 full, 1 reserved, 1 down"/);
   assert.match(html, /const FAST_HOVER_DELAY_MS = 100/);
   assert.match(html, /querySelectorAll\('\[data-fast-tooltip\]'\)/);
   assert.doesNotMatch(html, /0 mixed/);
@@ -146,9 +164,27 @@ test('availability tooltips group restrictive Slurm states and omit zero counts'
   assert.equal(availabilityStateLabel('MIXED+RESERVED'), 'reserved');
   assert.equal(
     availabilityTitle(partition),
-    'Nodes: 2 idle, 3 full, 2 reserved, 1 drained',
+    '2 idle, 3 full, 2 reserved, 1 drained',
   );
   assert.doesNotMatch(availabilityTitle(partition), /down/);
+  assert.equal(
+    availabilityTitle({ nodes: [{ state: 'IDLE' }, { state: 'MIXED' }, { state: 'MIXED' }] }),
+    '1 idle, 2 mixed',
+  );
+});
+
+test('GPU availability tooltips count resources separately from node states', () => {
+  const partition = {
+    gpus: { total: 8, allocated: 2, idle: 6, schedulable_idle: 3, unavailable_idle: 3 },
+    nodes: [
+      { state: 'MIXED', gpus: { total: 4, allocated: 1, idle: 3, schedulable_idle: 3 } },
+      { state: 'ALLOCATED', gpus: { total: 1, allocated: 1, idle: 0, schedulable_idle: 0 } },
+      { state: 'IDLE+DRAIN', gpus: { total: 2, allocated: 0, idle: 2, schedulable_idle: 0 } },
+      { state: 'RESERVED', gpus: { total: 1, allocated: 0, idle: 1, schedulable_idle: 0 } },
+    ],
+  };
+
+  assert.equal(gpuAvailabilityTitle(partition), '3 idle, 2 allocated, 1 reserved, 2 drained');
 });
 
 test('GPU catalog names are reduced to recognizable model labels', () => {

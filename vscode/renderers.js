@@ -285,13 +285,13 @@ function archiveIcon() {
 function document(title, body, freshness = {}) {
   const nonce = crypto.randomBytes(16).toString('base64');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:3px 0;background:var(--vscode-sideBar-background);min-width:0}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none;min-width:0}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card-summary-title[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:0;top:calc(100% + 2px);max-width:calc(100% - 14px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open]) .card-summary-title[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{position:relative;display:flex;min-width:0}.card-summary-progress{display:flex;align-items:center;gap:5px;min-width:0}.card-summary-progress>:not(.job-id){flex:1 1 auto;min-width:0}.card-summary-progress>.job-id{flex:0 0 auto;font-size:.72em}.card:not([open]) .card-summary-progress>.job-id{display:none}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0;max-width:100%}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px;min-width:0}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta{min-width:0;white-space:normal;overflow-wrap:anywhere}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:3px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0;cursor:help}.available{background:var(--vscode-testing-iconPassed)}.fast-tooltip{position:fixed;z-index:100;display:none;max-width:220px;padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));outline:1px solid #fff;border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:pre-line;pointer-events:none}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em;min-width:0}.times dt{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd{margin:0;min-width:0;white-space:normal;text-align:right}.times dd.dependency-value{overflow-wrap:anywhere}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px;min-width:0}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
+body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:3px 0;background:var(--vscode-sideBar-background);min-width:0}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none;min-width:0}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card-summary-title[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:0;top:calc(100% + 2px);max-width:calc(100% - 14px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open]) .card-summary-title[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{position:relative;display:flex;min-width:0}.card-summary-progress{display:flex;align-items:center;gap:5px;min-width:0}.card-summary-progress>:not(.job-id){flex:1 1 auto;min-width:0}.card-summary-progress>.job-id{flex:0 0 auto;font-size:.72em}.card:not([open]) .card-summary-progress>.job-id{display:none}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0;max-width:100%}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px;min-width:0}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta{min-width:0;white-space:normal;overflow-wrap:anywhere}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:2px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0;cursor:help}.availability-count{font-variant-numeric:tabular-nums;white-space:nowrap}.available{background:var(--vscode-testing-iconPassed)}.fast-tooltip{position:fixed;z-index:100;display:none;max-width:220px;padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));outline:1px solid #fff;border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:pre-line;pointer-events:none}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em;min-width:0}.times dt{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd{margin:0;min-width:0;white-space:normal;text-align:right}.times dd.dependency-value{overflow-wrap:anywhere}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px;min-width:0}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
 .card-summary-title[data-full-name]::after{outline:1px solid #fff}
 .card[open] .name{white-space:normal;overflow-wrap:anywhere}
 .progress-message{display:block;max-width:100%;font-size:.72em;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
 .dependency-icon{display:inline-block;margin-left:2px;font-family:system-ui,sans-serif;font-weight:700;cursor:help}.dependency-icon.waiting{font-weight:400}.dependency-icon.satisfied{color:var(--vscode-testing-iconPassed)}.dependency-icon.failed{color:var(--vscode-errorForeground)}
 .priority-context{display:flex;align-items:center;gap:5px;margin-top:6px;min-width:0}.priority-gauge{display:flex;align-items:center;flex:1 1 auto;min-width:54px;max-width:150px;cursor:help}.priority-track{position:relative;display:block;flex:1 1 auto;height:4px;border-radius:3px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed))}.priority-marker{position:absolute;top:-3px;width:2px;height:10px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.priority-prominent{margin-top:5px}.priority-prominent .priority-track{height:6px}.priority-prominent .priority-marker{top:-3px;height:12px}.priority-help{color:var(--vscode-descriptionForeground);font-size:.8em;cursor:help}
-.partition-card{padding:5px}.partition-title{align-items:center;flex-wrap:wrap;gap:4px 7px}.partition-title>.name{flex:0 1 auto;margin-right:auto}.partition-title>.launchability{flex:0 0 auto;margin-left:0}.partition-specs{display:block;margin-top:3px;font-size:.72em;white-space:normal;overflow-wrap:anywhere}.gpu-model,.vram-spec,.thread-spec{cursor:help}.partition-availability{display:flex;align-items:center;gap:4px;margin-top:4px;font-size:.72em}.partition-availability-label{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd>.availability-cell{justify-content:flex-end}
+.partition-card{padding:5px}.partition-title{align-items:center;flex-wrap:wrap;gap:4px 7px}.partition-title>.name{flex:0 1 auto;margin-right:auto}.partition-title>.launchability{flex:0 0 auto;margin-left:0}.partition-specs{display:block;margin-top:3px;font-size:.72em;white-space:normal;overflow-wrap:anywhere}.gpu-model,.vram-spec,.thread-spec{cursor:help}.partition-availability{display:flex;align-items:center;gap:0;margin-top:4px;font-size:.72em}.partition-availability-label{box-sizing:border-box;flex:0 0 36px;width:36px;padding-right:2px;color:var(--vscode-descriptionForeground);text-align:left;white-space:nowrap}.times dd>.availability-cell{justify-content:flex-end}
 .launchability{display:flex;align-items:end;gap:2px;margin-left:auto;min-width:0}.launch-shape{display:grid;grid-template-rows:7px 9px;justify-items:center;gap:1px}.launch-count{color:var(--vscode-descriptionForeground);font-size:7px;line-height:7px}.launch-block{box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:9px;height:9px;border:1px solid color-mix(in srgb,var(--vscode-foreground) 24%,transparent);border-radius:2px;color:#fff;font-size:7px;font-weight:700;line-height:1;cursor:help}.launch-wait-0{background:#15803d}.launch-wait-1{background:#22c55e}.launch-wait-2{background:#eab308;color:#111}.launch-wait-3{background:#f97316}.launch-wait-4{background:#dc2626}.launch-blocked{background:#111}.launch-missing,.launch-pending{background:#777}.launch-unsupported{color:var(--vscode-descriptionForeground);background:repeating-linear-gradient(135deg,transparent 0 2px,color-mix(in srgb,var(--vscode-descriptionForeground) 25%,transparent) 2px 4px)}
 .job-id:hover,.job-id:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--vscode-focusBorder)}
 button.button{border:0;font:inherit;cursor:pointer}
@@ -770,10 +770,19 @@ function availabilityStateLabel(state) {
   return value.replace(/[+_]+/g, ' ');
 }
 
-/** Build an availability tooltip, omitting node-state categories with no nodes. */
+/** Build a node-availability tooltip, omitting categories with no nodes. */
 function availabilityTitle(partition) {
   const categories = new Map();
-  for (const [state, rawCount] of Object.entries(partition.node_states || {})) {
+  let states = Object.entries(partition.node_states || {});
+  if (!states.length && Array.isArray(partition.nodes)) {
+    const counts = new Map();
+    for (const node of partition.nodes) {
+      const state = String(node.state || 'unknown');
+      counts.set(state, (counts.get(state) || 0) + 1);
+    }
+    states = [...counts.entries()];
+  }
+  for (const [state, rawCount] of states) {
     const count = Number(rawCount) || 0;
     if (!count) continue;
     const label = availabilityStateLabel(state);
@@ -785,7 +794,76 @@ function availabilityTitle(partition) {
     return (leftIndex < 0 ? order.length : leftIndex) - (rightIndex < 0 ? order.length : rightIndex) || left.localeCompare(right);
   });
   const nodes = entries.map(([label, count]) => `${count} ${label}`).join(', ');
-  return nodes ? `Nodes: ${nodes}` : 'Node state details unavailable';
+  return nodes || 'Node state details unavailable';
+}
+
+/** Add a positive resource count to a compact tooltip category. */
+function addAvailabilityCount(categories, label, rawCount) {
+  const count = Math.max(0, Number(rawCount) || 0);
+  if (count) categories.set(label, (categories.get(label) || 0) + count);
+}
+
+/**
+ * Describe the red/green GPU bar in GPU units rather than node units.
+ *
+ * Schedulable idle GPUs remain ``idle``. Allocated GPUs are counted
+ * independently, while idle GPUs made unavailable by a restrictive node
+ * state retain that state (reserved, drained, down, and so on).
+ */
+function gpuAvailabilityTitle(partition) {
+  const categories = new Map();
+  const nodes = Array.isArray(partition.nodes) ? partition.nodes : [];
+  if (nodes.length) {
+    for (const node of nodes) {
+      const gpu = node.gpus || node.gpu || {};
+      const total = Math.max(0, Number(gpu.total) || 0);
+      const allocated = Math.min(total, Math.max(0, Number(gpu.allocated) || 0));
+      const idle = Math.min(total - allocated, Math.max(0, Number(gpu.schedulable_idle) || 0));
+      addAvailabilityCount(categories, 'idle', idle);
+      addAvailabilityCount(categories, 'allocated', allocated);
+      const restricted = Math.max(0, total - allocated - idle);
+      if (restricted) {
+        const state = availabilityStateLabel(node.state);
+        const label = ['idle', 'mixed', 'full'].includes(state) ? 'unavailable' : state;
+        addAvailabilityCount(categories, label, restricted);
+      }
+    }
+  } else {
+    const gpu = partition.gpus || {};
+    const total = Math.max(0, Number(gpu.total) || 0);
+    const idle = Math.min(total, Math.max(0, Number(gpu.schedulable_idle) || 0));
+    const allocated = Math.min(total - idle, Math.max(0, Number(gpu.allocated) || 0));
+    const unavailable = Math.max(0, total - idle - allocated);
+    addAvailabilityCount(categories, 'idle', idle);
+    addAvailabilityCount(categories, 'allocated', allocated);
+    addAvailabilityCount(categories, 'unavailable', unavailable);
+  }
+  const order = ['idle', 'allocated', 'reserved', 'drained', 'down', 'maintenance', 'rebooting', 'powered off', 'unavailable'];
+  const entries = [...categories.entries()].sort(([left], [right]) => {
+    const leftIndex = order.indexOf(left), rightIndex = order.indexOf(right);
+    return (leftIndex < 0 ? order.length : leftIndex) - (rightIndex < 0 ? order.length : rightIndex) || left.localeCompare(right);
+  });
+  const details = entries.map(([label, count]) => `${count} ${label}`).join(', ');
+  return details || 'GPU availability details unavailable';
+}
+
+/** Return the fully idle node count and total represented by a partition. */
+function nodeAvailabilityCounts(partition) {
+  let idle = 0, total = 0;
+  const states = Object.entries(partition.node_states || {});
+  if (states.length) {
+    for (const [state, rawCount] of states) {
+      const count = Math.max(0, Number(rawCount) || 0);
+      total += count;
+      if (partition.available !== false && availabilityStateLabel(state) === 'idle') idle += count;
+    }
+  } else if (Array.isArray(partition.nodes)) {
+    total = partition.nodes.length;
+    idle = partition.available === false ? 0 : partition.nodes.filter((node) => availabilityStateLabel(node.state) === 'idle').length;
+  } else {
+    total = Math.max(0, Number(partition.reported_nodes) || 0);
+  }
+  return { idle, total };
 }
 
 /** Render compact GPU and CPU specifications with exact accessible hover labels. */
@@ -801,14 +879,12 @@ function partitionSpecs(partition, profile) {
   return `<span class="gpu-model" data-fast-tooltip="${escapeHtml(fullGpuName)}" aria-label="${escapeHtml(fullGpuName)}">${escapeHtml(compactGpuName(fullGpuName))}</span> · ${vram} · ${tflops} TFLOPS/s · ${thread}`;
 }
 
-/** Render the green/red schedulable-GPU bar with its ``idle/total`` fraction. */
-function availabilityBar(partition) {
-  const total = Number(partition.gpus?.total) || 0;
-  const idle = Number(partition.gpus?.schedulable_idle) || 0;
+/** Render one green/red availability bar with its ``free/total`` fraction. */
+function availabilityBar(idle, total, title) {
   const availablePercent = total ? Math.max(0, Math.min(100, idle / total * 100)) : 0;
   const unavailablePercent = total ? 100 - availablePercent : 100;
-  const availability = escapeHtml(availabilityTitle(partition));
-  return `<div class="availability-cell"><div class="availability" data-availability="${availability}" data-fast-tooltip="${availability}" aria-label="${availability}"><span class="available" style="width:${availablePercent}%"></span><span class="unavailable" style="width:${unavailablePercent}%"></span></div><span>${idle}/${total}</span></div>`;
+  const availability = escapeHtml(title);
+  return `<div class="availability-cell"><div class="availability" data-availability="${availability}" data-fast-tooltip="${availability}" aria-label="${availability}"><span class="available" style="width:${availablePercent}%"></span><span class="unavailable" style="width:${unavailablePercent}%"></span></div><span class="availability-count" aria-label="${idle} of ${total} free">${idle}/${total} Free</span></div>`;
 }
 
 /**
@@ -819,7 +895,10 @@ function partitionCard(partition, pending, asOf, thresholds) {
   const profile = bestGpu(partition);
   const name = `${partition.name}${partition.aggregate ? ' (aggregate)' : ''}`;
   const launchability = launchabilityStrip(partition, pending, asOf, thresholds);
-  return `<article class="card partition-card${partition.aggregate ? ' aggregate' : ''}"><div class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${launchability}</div><div class="muted partition-specs">${partitionSpecs(partition, profile)}</div><div class="partition-availability"><span class="partition-availability-label">Free GPUs</span>${availabilityBar(partition)}</div></article>`;
+  const gpuTotal = Math.max(0, Number(partition.gpus?.total) || 0);
+  const idleGpus = Math.min(gpuTotal, Math.max(0, Number(partition.gpus?.schedulable_idle) || 0));
+  const nodeCounts = nodeAvailabilityCounts(partition);
+  return `<article class="card partition-card${partition.aggregate ? ' aggregate' : ''}"><div class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${launchability}</div><div class="muted partition-specs">${partitionSpecs(partition, profile)}</div><div class="partition-availability"><span class="partition-availability-label">GPU:</span>${availabilityBar(idleGpus, gpuTotal, gpuAvailabilityTitle(partition))}</div><div class="partition-availability"><span class="partition-availability-label">Nodes:</span>${availabilityBar(nodeCounts.idle, nodeCounts.total, availabilityTitle(partition))}</div></article>`;
 }
 
 /**
@@ -849,4 +928,4 @@ function renderStatus(payload, disclosures = {}, freshness = {}) {
   return document('Cluster Status', clusters.join('') || '<p>No clusters returned.</p>', freshness);
 }
 
-module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, isFailureGroup, jobGroup, jobRef, launchabilityStrip, openAttribute, parseDependency, relativeJobPriority, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderMessage, renderServerStatus, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };
+module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, isFailureGroup, jobGroup, jobRef, launchabilityStrip, openAttribute, parseDependency, relativeJobPriority, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderMessage, renderServerStatus, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };

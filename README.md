@@ -425,13 +425,21 @@ unchanged job card rather than jumping to the top of **My Jobs**.
 Each cluster is a collapsible group of permanently expanded, compact partition
 cards ordered by compute rank. A card shows the partition name and
 [launchability strip](#estimated-queue-waits), followed by the best GPU's model,
-VRAM, TFLOPS/s, CPU-thread total, and a **Free GPUs** bar. Hover a launch
-block for its exact estimate, the GPU model for its full name, the VRAM amount
-for its label, the thread count for its CPU-thread label, or the availability
-bar for its node-state breakdown. Partition cards do not collapse and do not
+VRAM, TFLOPS/s, CPU-thread total, and aligned **GPU:** and **Nodes:**
+availability bars whose fractions end in **Free**. Hover a launch block for its exact estimate, the GPU model for its full
+name, the VRAM amount
+for its label, or the thread count for its CPU-thread label. Hover **GPU:**
+for the GPU resource breakdown (idle, allocated, reserved, drained, and other
+unavailable categories), or **Nodes:** for the partition's node-state
+breakdown. Partition cards do not collapse and do not
 repeat the launch estimates in a graph. A narrow card moves the complete
 launchability strip flush left below the partition name instead of compressing
 both onto one unreadable line.
+
+The availability labels begin flush with the card's left edge and share one
+compact column, so both bars start at the same position. A small gap separates
+each bar from its fraction; trailing **Free** labels do not use a separate
+alignment column.
 
 If a cluster's SSH session closes, its group shows **Log in again**, which
 runs `cluster-watcher login <cluster>` in the background and presents any
@@ -675,12 +683,19 @@ are noticed within about two minutes.
 
 ### GPU availability
 
-The availability bar shows **schedulable idle** GPUs in green, then everything
-else in red, followed by `schedulable idle / total`. An unallocated GPU on a
+The **GPU:** bar shows **schedulable idle** GPUs in green, then everything
+else in red, followed by `schedulable idle / total`. Its tooltip accounts for
+the GPUs behind each color as idle, allocated, reserved, drained, down, or
+another applicable unavailable category. An unallocated GPU on a
 drained, down, maintenance, rebooting, powered-off, reserved, failed, or
 unresponsive node is deliberately **not** counted as available. Hover the bar
-in a graphical view for a node-state breakdown (idle, mixed, full, reserved,
-drained, down, …); zero counts are omitted.
+in a graphical view for this GPU-level breakdown; zero counts are omitted.
+
+The **Nodes:** bar directly below it counts only fully idle, schedulable
+nodes in green. Mixed nodes can contribute free GPUs to the GPU bar but remain
+red in the node bar. Its fraction is `fully idle / total nodes`, and its
+tooltip gives the node-state breakdown (idle, mixed, full, reserved, drained,
+down, …).
 
 GPU requests are recognized in both Slurm's `gpu:TYPE:COUNT` GRES form and the
 `gres/gpu:COUNT` form. When Slurm leaves `Gres`/`GresUsed` empty, collection
