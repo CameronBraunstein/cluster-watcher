@@ -79,7 +79,7 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(card, /class="launch-block launch-blocked"[^>]*>×<\/span>/);
   assert.equal((card.match(/class="launch-shape"/g) || []).length, 7);
   assert.match(card, /<span class="gpu-model" data-fast-tooltip="NVIDIA H100 NVL" aria-label="NVIDIA H100 NVL">H100<\/span> · <span class="vram-spec" data-fast-tooltip="VRAM: 80 GB" aria-label="VRAM: 80 GB">80 GB<\/span> · 989 TFLOPS\/s · <span class="thread-spec" data-fast-tooltip="CPU threads: 128 threads" aria-label="CPU threads: 128 threads">128 threads<\/span>/);
-  assert.match(card, /<span class="partition-availability-label">GPU:<\/span>/);
+  assert.match(card, /<span class="partition-availability-label">GPUs:<\/span>/);
   assert.match(card, /class="availability-count" aria-label="2 of 8 free"/);
   assert.match(card, /<span class="partition-availability-label">Nodes:<\/span>/);
   assert.match(card, /class="availability-count" aria-label="2 of 7 free"/);
@@ -536,11 +536,12 @@ test('launchability blocks carry exact hover estimates and count down locally', 
     ],
   };
   const html = renderStatus({ generated_at: '2026-10-06T10:00:00Z', wait_threshold_minutes: [5, 30, 60, 120], clusters: [{ name: 'c', reachable: true, partitions: [partition] }] });
-  assert.match(html, /data-fast-tooltip="1 GPU · 1h job: 15m estimated wait; expected start 2026-10-06T10:15:00Z" data-launch-wait="\[900,1791280800000,&quot;1 GPU · 1h job&quot;,\[5,30,60,120\],&quot;2026-10-06T10:15:00Z&quot;\]"/);
+  assert.match(html, /data-fast-tooltip="1 GPU · 1h job: 15m estimated wait" data-launch-wait="\[900,1791280800000,&quot;1 GPU · 1h job&quot;,\[5,30,60,120\]\]"/);
   assert.match(html, /class="launch-block launch-blocked"[^>]*data-fast-tooltip="2 GPUs · 1h job: Access denied"[^>]*>×<\/span>/);
   assert.match(html, /querySelectorAll\('\[data-launch-wait\]'\)/);
   assert.match(html, /waitColorIndex\(remaining, thresholds\)/);
-  assert.match(html, /expected start ' \+ expectedStart/);
+  assert.match(html, /target\.dataset\.fastTooltip = label \+ ': ' \+ formatDuration\(remaining\) \+ ' estimated wait'/);
+  assert.doesNotMatch(html, /expected start 2026-10-06T10:15:00Z/);
 });
 
 test('launchability selects the one-hour probe and preserves capped runtimes', () => {

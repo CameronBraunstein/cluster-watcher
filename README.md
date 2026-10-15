@@ -425,10 +425,10 @@ unchanged job card rather than jumping to the top of **My Jobs**.
 Each cluster is a collapsible group of permanently expanded, compact partition
 cards ordered by compute rank. A card shows the partition name and
 [launchability strip](#estimated-queue-waits), followed by the best GPU's model,
-VRAM, TFLOPS/s, CPU-thread total, and aligned **GPU:** and **Nodes:**
+VRAM, TFLOPS/s, CPU-thread total, and aligned **GPUs:** and **Nodes:**
 availability bars whose fractions end in **Free**. Hover a launch block for its exact estimate, the GPU model for its full
 name, the VRAM amount
-for its label, or the thread count for its CPU-thread label. Hover **GPU:**
+for its label, or the thread count for its CPU-thread label. Hover **GPUs:**
 for the GPU resource breakdown (idle, allocated, reserved, drained, and other
 unavailable categories), or **Nodes:** for the partition's node-state
 breakdown. Partition cards do not collapse and do not
@@ -687,7 +687,7 @@ are noticed within about two minutes.
 
 ### GPU availability
 
-The **GPU:** bar shows **schedulable idle** GPUs in green, then everything
+The **GPUs:** bar shows **schedulable idle** GPUs in green, then everything
 else in red, followed by `schedulable idle / total`. Its tooltip accounts for
 the GPUs behind each color as idle, allocated, reserved, drained, down, or
 another applicable unavailable category. An unallocated GPU on a
@@ -797,8 +797,8 @@ the fourth, and red above it. The defaults are 5, 30, 60, and 120 minutes and
 come from `dashboard.wait_threshold_minutes`. Black `×` blocks are rejected by
 account/QOS policy, gray blocks are unavailable or unprobed, and striped `—`
 blocks exceed the partition's total GPU capacity. Hover any block for the
-exact runtime, estimate, expected start, or Slurm error. The terminal retains
-the corresponding `WAIT TIME` columns.
+exact runtime, estimated wait, or Slurm error. Successful wait tooltips end at
+“estimated wait”; the terminal retains the corresponding `WAIT TIME` columns.
 
 `now` means immediate placement, and `—` means the partition has fewer GPUs
 than requested. Estimates reflect **your** account, QOS, fair-share, and the

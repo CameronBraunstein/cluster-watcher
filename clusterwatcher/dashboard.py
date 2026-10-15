@@ -398,7 +398,7 @@ function launchabilityStrip(estimates, partition, totalGpus, updatedAt, threshol
       if (waitSeconds === null) { content = '!'; detail = 'invalid start estimate'; }
       else {
         state = `launch-wait-${launchWaitColor(waitSeconds, thresholds)}`; content = '';
-        detail = `${formatSeconds(waitSeconds)} estimated wait; expected start ${start.toLocaleString()}`;
+        detail = `${formatSeconds(waitSeconds)} estimated wait`;
       }
     }
     const title = `${label}: ${detail}`;

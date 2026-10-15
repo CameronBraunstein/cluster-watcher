@@ -378,11 +378,10 @@ button.button{border:0;font:inherit;cursor:pointer}
       target.dataset.fastTooltip = label + ': ' + formatDuration(Math.max(0, seconds - (now - asOf) / 1000));
     });
     document.querySelectorAll('[data-launch-wait]').forEach((target) => {
-      const [seconds, asOf, label, thresholds, expectedStart] = JSON.parse(target.dataset.launchWait);
+      const [seconds, asOf, label, thresholds] = JSON.parse(target.dataset.launchWait);
       const remaining = Math.max(0, seconds - (now - asOf) / 1000);
       target.className = target.className.replace(/launch-wait-\d/g, 'launch-wait-' + waitColorIndex(remaining, thresholds));
-      target.dataset.fastTooltip = label + ': ' + formatDuration(remaining) + ' estimated wait'
-        + (expectedStart ? '; expected start ' + expectedStart : '');
+      target.dataset.fastTooltip = label + ': ' + formatDuration(remaining) + ' estimated wait';
       target.setAttribute('aria-label', target.dataset.fastTooltip);
     });
   };
@@ -899,7 +898,7 @@ function partitionCard(partition, pending, asOf, thresholds) {
   const idleGpus = Math.min(gpuTotal, Math.max(0, Number(partition.gpus?.schedulable_idle) || 0));
   const nodeCounts = nodeAvailabilityCounts(partition);
   const countWidth = Math.max(`${idleGpus}/${gpuTotal} Free`.length, `${nodeCounts.idle}/${nodeCounts.total} Free`.length);
-  return `<article class="card partition-card${partition.aggregate ? ' aggregate' : ''}" style="--availability-count-width:${countWidth}ch"><div class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${launchability}</div><div class="muted partition-specs">${partitionSpecs(partition, profile)}</div><div class="partition-availability"><span class="partition-availability-label">GPU:</span>${availabilityBar(idleGpus, gpuTotal, gpuAvailabilityTitle(partition))}</div><div class="partition-availability"><span class="partition-availability-label">Nodes:</span>${availabilityBar(nodeCounts.idle, nodeCounts.total, availabilityTitle(partition))}</div></article>`;
+  return `<article class="card partition-card${partition.aggregate ? ' aggregate' : ''}" style="--availability-count-width:${countWidth}ch"><div class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${launchability}</div><div class="muted partition-specs">${partitionSpecs(partition, profile)}</div><div class="partition-availability"><span class="partition-availability-label">GPUs:</span>${availabilityBar(idleGpus, gpuTotal, gpuAvailabilityTitle(partition))}</div><div class="partition-availability"><span class="partition-availability-label">Nodes:</span>${availabilityBar(nodeCounts.idle, nodeCounts.total, availabilityTitle(partition))}</div></article>`;
 }
 
 /**

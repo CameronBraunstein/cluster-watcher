@@ -1169,6 +1169,8 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertNotIn("Priority ${priority.toLocaleString()}: position", PAGE)
         self.assertIn("data-fast-tooltip=\"${escapeHtml(title)}\"", PAGE)
         self.assertIn("launchabilityStrip(estimates, name, totalGpus, estimatesUpdatedAt, thresholds)", PAGE)
+        self.assertIn('detail = `${formatSeconds(waitSeconds)} estimated wait`;', PAGE)
+        self.assertNotIn('estimated wait; expected start', PAGE)
         self.assertIn(".priority-prominent .priority-track { height:.62rem; }", PAGE)
         self.assertNotIn("partitionPriorityGauge", PAGE)
         self.assertNotIn("partition job factor", PAGE)

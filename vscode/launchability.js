@@ -67,8 +67,7 @@ function waitTitle(partition, count, pending = false) {
   if (!waitFits(partition, count)) return `${label}: exceeds the partition's ${Number(partition.gpus?.total) || 0} GPUs`;
   if (!estimate) return `${label}: ${pending ? 'still checking' : 'not probed'}`;
   if (estimate.error) return `${label}: ${estimate.error}`;
-  const start = estimate.expected_start_at ? `; expected start ${estimate.expected_start_at}` : '';
-  return `${label}: ${formatDuration(estimate.estimated_wait_seconds)} estimated wait${start}`;
+  return `${label}: ${formatDuration(estimate.estimated_wait_seconds)} estimated wait`;
 }
 
 /**
@@ -99,7 +98,7 @@ function launchabilityStrip(
     } else {
       const seconds = Math.max(0, Number(estimate.estimated_wait_seconds) || 0);
       state = `launch-wait-${waitColorIndex(seconds, thresholds)}`;
-      dynamic = ` data-launch-wait="${escapeHtml(JSON.stringify([seconds, asOf, `${count} GPU${count === 1 ? '' : 's'} · ${runtimeLabel(estimate)}`, thresholds, estimate.expected_start_at || '']))}"`;
+      dynamic = ` data-launch-wait="${escapeHtml(JSON.stringify([seconds, asOf, `${count} GPU${count === 1 ? '' : 's'} · ${runtimeLabel(estimate)}`, thresholds]))}"`;
       content = '';
     }
     const title = waitTitle(partition, count, pending);
