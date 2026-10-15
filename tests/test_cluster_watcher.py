@@ -19,7 +19,7 @@ from clusterwatcher.dashboard import PAGE, StatusStore
 from clusterwatcher.models import ClusterStatus, Machine
 from clusterwatcher.slurm import collect_status
 from clusterwatcher.ssh import ssh_command, start_interactive_session
-from helpers import TimedTestCase
+from helpers import TEST_CONFIG, TimedTestCase
 
 
 CONFIG = b'''[[machine]]
@@ -370,7 +370,7 @@ class ClusterWatcherTests(TimedTestCase):
     @patch("clusterwatcher.cli.load_config", return_value=[Machine("CLUSTER_0", "host", "alice")])
     def test_jobs_cli_forwards_optional_refresh_interval(self, _load_config, establish, run_board):
         """Expose one-shot and periodically refreshed personal jobs from the CLI."""
-        self.assertEqual(main(["jobs", "7", "--timeout", "12"]), 0)
+        self.assertEqual(main(["--config", str(TEST_CONFIG), "jobs", "7", "--timeout", "12"]), 0)
 
         establish.assert_called_once_with([Machine("CLUSTER_0", "host", "alice")], 12)
         run_board.assert_called_once_with([Machine("CLUSTER_0", "host", "alice")], 12, 7)
@@ -397,7 +397,7 @@ class ClusterWatcherTests(TimedTestCase):
         self, _load_config, establish, run_board,
     ):
         """Expose live capacity refresh while retaining machine selection."""
-        self.assertEqual(main(["status", "30", "cluster_1", "--timeout", "12"]), 0)
+        self.assertEqual(main(["--config", str(TEST_CONFIG), "status", "30", "cluster_1", "--timeout", "12"]), 0)
 
         selected = [Machine("cluster_1", "cluster_1.example", "alice")]
         establish.assert_called_once_with(selected, 12)
@@ -449,14 +449,14 @@ class ClusterWatcherTests(TimedTestCase):
         output = StringIO()
 
         with redirect_stdout(output):
-            result = main(["sessions", "--json"])
+            result = main(["--config", str(TEST_CONFIG), "sessions", "--json"])
 
         self.assertEqual(result, 0)
         self.assertEqual(json.loads(output.getvalue())["machines"][0]["name"], "cluster_3")
 
         output = StringIO()
         with redirect_stdout(output):
-            result = main(["sessions"])
+            result = main(["--config", str(TEST_CONFIG), "sessions"])
         self.assertEqual(result, 0)
         self.assertIn("cluster_3\topen\t1h 1m 1s\talice@cluster_3.example", output.getvalue())
 
@@ -475,7 +475,7 @@ class ClusterWatcherTests(TimedTestCase):
         stdout, stderr = StringIO(), StringIO()
 
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            result = main(["exec", "--timeout", "20", "cluster_3", "--", "bash", "-lc", "echo $HOME"])
+            result = main(["--config", str(TEST_CONFIG), "exec", "--timeout", "20", "cluster_3", "--", "bash", "-lc", "echo $HOME"])
 
         self.assertEqual(result, 7)
         self.assertEqual(stdout.getvalue(), "result\n")
@@ -495,7 +495,7 @@ class ClusterWatcherTests(TimedTestCase):
             "connection_dropped": False, "exit_code": 0,
         }
 
-        self.assertEqual(main(["exec", "cluster_3", "--", "sleep", "600"]), 0)
+        self.assertEqual(main(["--config", str(TEST_CONFIG), "exec", "cluster_3", "--", "sleep", "600"]), 0)
 
         service_type.assert_called_once_with([Machine("cluster_3", "cluster_3.example", "alice")], 5)
         service_type.return_value.execute.assert_called_once_with("cluster_3", "sleep 600", None)
@@ -510,7 +510,7 @@ class ClusterWatcherTests(TimedTestCase):
             "connection_dropped": False, "exit_code": 0,
         }
 
-        result = main(["exec", "--timeout", "600", "cluster_3", "--", "sleep", "500"])
+        result = main(["--config", str(TEST_CONFIG), "exec", "--timeout", "600", "cluster_3", "--", "sleep", "500"])
 
         self.assertEqual(result, 0)
         service_type.return_value.execute.assert_called_once_with("cluster_3", "sleep 500", 600)
@@ -533,7 +533,7 @@ class ClusterWatcherTests(TimedTestCase):
     def test_shell_cli_returns_the_ssh_exit_status(self, service_type, _load_config):
         service_type.return_value.shell.return_value = 9
 
-        self.assertEqual(main(["shell", "cluster_3"]), 9)
+        self.assertEqual(main(["--config", str(TEST_CONFIG), "shell", "cluster_3"]), 9)
 
         service_type.return_value.shell.assert_called_once_with("cluster_3")
 
@@ -541,7 +541,7 @@ class ClusterWatcherTests(TimedTestCase):
     @patch("clusterwatcher.cli.load_config", return_value=[Machine("a", "host", "user")])
     @patch("clusterwatcher.cli.serve", return_value=0)
     def test_jobs_api_flag_does_not_require_global_job_summary(self, serve, _load_config, _thresholds):
-        self.assertEqual(main(["serve", "--jobs-api", "--no-browser"]), 0)
+        self.assertEqual(main(["--config", str(TEST_CONFIG), "serve", "--jobs-api", "--no-browser"]), 0)
         self.assertFalse(serve.call_args.args[4])
         self.assertTrue(serve.call_args.args[8])
 
@@ -549,7 +549,7 @@ class ClusterWatcherTests(TimedTestCase):
     @patch("clusterwatcher.cli.load_config", return_value=[Machine("a", "host", "user")])
     @patch("clusterwatcher.cli.serve", return_value=0)
     def test_command_api_flag_is_forwarded(self, serve, _load_config, _thresholds):
-        self.assertEqual(main(["serve", "--command-api", "--no-browser"]), 0)
+        self.assertEqual(main(["--config", str(TEST_CONFIG), "serve", "--command-api", "--no-browser"]), 0)
         self.assertFalse(serve.call_args.args[8])
         self.assertTrue(serve.call_args.args[9])
 
@@ -559,7 +559,7 @@ class ClusterWatcherTests(TimedTestCase):
     @patch("clusterwatcher.cli.serve", return_value=0)
     def test_serve_forwards_machine_credential_protocol(self, serve, _load_config, _thresholds, prompt_type):
         prompt = prompt_type.return_value
-        self.assertEqual(main(["serve", "--credential-stdin-json", "--no-browser"]), 0)
+        self.assertEqual(main(["--config", str(TEST_CONFIG), "serve", "--credential-stdin-json", "--no-browser"]), 0)
         self.assertIs(serve.call_args.args[10], prompt)
 
     def test_load_and_build_ssh_command(self):
@@ -1062,6 +1062,15 @@ class ClusterWatcherTests(TimedTestCase):
             self.assertEqual(main(["--config", str(config), "list"]), 0)
             self.assertEqual(compute._config_path, config)
             self.assertEqual(compute.profile_for("c", ["gpu-x"]).vram_gb, 16)
+
+    def test_cli_still_rejects_a_missing_selected_config(self):
+        """A test fixture must not make a genuinely absent config optional."""
+        with tempfile.TemporaryDirectory() as directory, redirect_stderr(StringIO()) as stderr:
+            missing = Path(directory) / "clusters.toml"
+            with self.assertRaises(SystemExit) as raised:
+                main(["--config", str(missing), "list"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("configuration file not found", stderr.getvalue())
 
     def test_gpu_profiles_are_scoped_to_the_source_cluster(self):
         from clusterwatcher.compute import profile_for, rank_partitions

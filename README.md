@@ -1383,7 +1383,9 @@ cd vscode && npm test                      # extension unit tests (Node.js 20+)
 
 Each Python test has a five-second watchdog on POSIX, so a stuck test fails
 instead of hanging. (Windows lacks the needed timer signals, so its platform
-tests rely on the CI job deadline.)
+tests rely on the CI job deadline.) CLI tests use the tracked
+`tests/clusters.test.toml` fixture; neither local tests nor CI need your
+personal `clusters.toml`.
 
 The extension integration test downloads VS Code into `vscode/.vscode-test/`
 and checks that the extension activates, registers every command, and opens
