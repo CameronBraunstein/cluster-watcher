@@ -73,7 +73,7 @@ test('status shows every partition detail compactly without a card disclosure', 
     clusters: [{ name: 'cluster_0', reachable: true, partitions: [partition] }],
   });
 
-  const card = html.match(/<article class="card partition-card">.*?<\/article>/s)[0];
+  const card = html.match(/<article class="card partition-card" style="--availability-count-width:8ch">.*?<\/article>/s)[0];
   assert.match(card, /<div class="card-summary-title partition-title"><span class="name">gpu-h100<\/span><span class="launchability"/);
   assert.match(card, /class="launch-block launch-wait-1"/);
   assert.match(card, /class="launch-block launch-blocked"[^>]*>×<\/span>/);
@@ -93,7 +93,8 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /\.partition-availability-label\{[^}]*flex:0 0 36px;width:36px;padding-right:2px[^}]*text-align:left/);
   assert.match(html, /\.partition-availability>\.availability-cell\{display:grid;grid-template-columns:minmax\(0,1fr\) minmax\(0,max-content\);column-gap:2px;flex:1 1 auto;min-width:0\}/);
   assert.match(html, /\.partition-availability \.availability-cell>\.availability\{width:100%;min-width:0\}/);
-  assert.match(html, /\.partition-availability \.availability-count\{overflow:hidden;text-overflow:ellipsis\}/);
+  assert.match(html, /\.partition-card\{padding:5px;container-type:inline-size\}/);
+  assert.match(html, /\.partition-availability \.availability-count\{width:max-content;min-width:min\(var\(--availability-count-width\),45cqw\);max-width:100%;overflow:hidden;text-overflow:ellipsis\}/);
   assert.match(html, /\.availability-count\{font-variant-numeric:tabular-nums;white-space:nowrap\}/);
   assert.match(card, /aria-label="2 of 8 free" title="2\/8 Free">2\/8 Free<\/span>/);
   assert.match(card, /aria-label="2 of 7 free" title="2\/7 Free">2\/7 Free<\/span>/);
@@ -117,12 +118,13 @@ test('status shows every partition detail compactly without a card disclosure', 
 test('long availability fractions keep their complete value available on hover', () => {
   const partition = {
     name: 'large', gpus: { total: 12345, schedulable_idle: 1234 },
-    node_states: { IDLE: 1234, ALLOCATED: 11111 },
+    node_states: { IDLE: 2, ALLOCATED: 5 },
   };
   const html = renderStatus({ clusters: [{ name: 'large-cluster', reachable: true, partitions: [partition] }] });
 
+  assert.match(html, /<article class="card partition-card" style="--availability-count-width:15ch">/);
   assert.match(html, /aria-label="1234 of 12345 free" title="1234\/12345 Free">1234\/12345 Free<\/span>/);
-  assert.equal((html.match(/1234\/12345 Free<\/span>/g) || []).length, 2);
+  assert.match(html, /aria-label="2 of 7 free" title="2\/7 Free">2\/7 Free<\/span>/);
 });
 
 test('server status shows background ownership and per-machine login actions', () => {
