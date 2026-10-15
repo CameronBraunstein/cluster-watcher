@@ -392,6 +392,9 @@ or configuration. If a service is already listening at
 `http://127.0.0.1:8080/`), the extension attaches to it instead of starting
 another. On first use without a `cluster-watcher` command, it offers **Install
 and Add to PATH**, **Use Only in VS Code**, or **Choose Existing Executable**.
+In an unpackaged Linux or macOS development checkout without release metadata,
+the first choice downloads the latest release through `install.sh` and checks
+its `SHA256SUMS`; a source-build fallback is also available.
 
 #### My Jobs
 
@@ -1371,6 +1374,24 @@ Development Host. There:
 
 1. Make sure `cluster-watcher` is on `PATH` (or select an executable), and set
    `clusterWatcher.configPath` if needed.
+   On Linux, the extension checks the prebuilt backend's glibc requirement
+   using Node's runtime report, then `getconf GNU_LIBC_VERSION` if that report
+   omits it. If the host is incompatible or its glibc version cannot be
+   verified, install from this checkout with
+   `./install.sh --from-source --add-to-path` and use **Choose Existing
+   Executable** in **Manage Backend Installation**. Select the installed
+   executable by absolute path if VS Code has not picked up the new `PATH`.
+   In a Linux or macOS development checkout, select **Download Latest Release
+   (No PATH Change)** or **Download Latest Release and Add to PATH** from the
+   first-use prompt or **Manage Backend Installation**. The checkout's
+   `install.sh` downloads the latest release, verifies `SHA256SUMS`, and the
+   extension selects the installed executable. **Build from Source** remains
+   available in the same menus if the prebuilt release cannot run (Python
+   3.11+ and build dependencies required). Neither development option needs
+   `backend-manifest.json`; packaged releases still require it for pinned,
+   exact-version downloads. The latest release can lag a development checkout.
+   Development installs are standalone commands; use `./uninstall.sh` to
+   remove one, rather than the extension's managed-backend uninstall action.
 2. Open the Cluster Watcher view and run **Start Service & SSH Sessions**;
    complete MFA in the masked VS Code prompts and check that all three views
    refresh. Confirm **Server Status** reports the background process and SSH
@@ -1399,9 +1420,10 @@ code --install-extension cluster-watcher-0.1.0.vsix
 
 A VSIX does not bundle all six native programs. It contains exact-version
 URLs, sizes, and SHA-256 digests, and downloads only the one the host needs.
-Without `vscode/backend-manifest.json`, a development checkout can still use
-an existing executable, but `npm run package` and `npm run publish` refuse to
-build a release.
+Without `vscode/backend-manifest.json`, an unpackaged development checkout
+can download the latest release, build from source, or use an existing
+executable. `npm run package` and `npm run publish` still refuse to build a
+release without the manifest.
 
 <details>
 <summary><b>Marketplace publishing</b></summary>

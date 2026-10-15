@@ -66,17 +66,32 @@ function releaseTarget(manifest, platform = process.platform, architecture = pro
 }
 
 /** Detect the user-facing OS/libc version relevant to a release target. */
-async function hostCompatibilityVersion(platform = process.platform) {
+async function hostCompatibilityVersion(platform = process.platform, {
+  report = process.report,
+  run = execFile,
+} = {}) {
   if (platform === 'win32') return os.release();
   if (platform === 'darwin') {
     return new Promise((resolve, reject) => {
-      execFile('/usr/bin/sw_vers', ['-productVersion'], (error, stdout, stderr) => {
+      run('/usr/bin/sw_vers', ['-productVersion'], (error, stdout, stderr) => {
         if (error) reject(new Error(String(stderr).trim() || 'Could not determine the macOS version.'));
         else resolve(String(stdout).trim());
       });
     });
   }
-  if (platform === 'linux') return process.report?.getReport()?.header?.glibcVersionRuntime;
+  if (platform === 'linux') {
+    try {
+      const reported = report?.getReport()?.header?.glibcVersionRuntime;
+      if (reported) return reported;
+    } catch (_error) { /* Some extension hosts cannot generate a runtime report. */ }
+    // Electron's Node runtime may omit glibcVersionRuntime even on glibc hosts.
+    return new Promise((resolve) => {
+      run('getconf', ['GNU_LIBC_VERSION'], { timeout: 3000 }, (error, stdout) => {
+        const match = !error && /^glibc\s+(\d+(?:\.\d+)+)\s*$/.exec(String(stdout));
+        resolve(match ? match[1] : undefined);
+      });
+    });
+  }
   return undefined;
 }
 
@@ -88,7 +103,10 @@ async function assertHostSupported(target, platform = process.platform, detected
   }
   const glibcMinimum = /^glibc>=(.+)$/.exec(target.abi || '');
   if (glibcMinimum && (!version || compareVersions(version, glibcMinimum[1]) < 0)) {
-    throw new Error(`glibc ${glibcMinimum[1]} or newer is required (this host reports ${version || 'a non-glibc runtime'}).`);
+    const detail = version ? `detected glibc ${version}` : 'the glibc version could not be determined';
+    throw new Error(`This prebuilt backend requires glibc ${glibcMinimum[1]} or newer (${detail}). `
+      + 'Install from a source checkout with ./install.sh --from-source --add-to-path, '
+      + 'then choose that executable in Cluster Watcher: Manage Backend Installation.');
   }
 }
 
@@ -469,13 +487,63 @@ async function loadReleaseManifest(extensionPath) {
   try { return JSON.parse(raw); } catch (_error) { throw new Error('The embedded backend manifest is not valid JSON.'); }
 }
 
+/** Locate a development checkout only when no release manifest is embedded. */
+async function sourceCheckoutRoot(extensionPath, platform = process.platform) {
+  if (platform === 'win32') return undefined;
+  const root = path.dirname(extensionPath);
+  try {
+    await fsp.access(path.join(extensionPath, 'backend-manifest.json'));
+    return undefined;
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const required = ['install.sh', 'cluster-watcher.spec', 'pyproject.toml'];
+  const present = await Promise.all(required.map(async (name) => {
+    try { return (await fsp.stat(path.join(root, name))).isFile(); }
+    catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+  }));
+  return present.every(Boolean) ? root : undefined;
+}
+
+/** Run a checkout's installer for either a verified release or a local build. */
+async function installFromCheckout(root, addToPath, fromSource, {
+  run = execFile,
+  env = process.env,
+  homedir = os.homedir(),
+} = {}) {
+  const executable = path.join(env.XDG_BIN_HOME || path.join(env.HOME || homedir, '.local', 'bin'), 'cluster-watcher');
+  const args = [path.join(root, 'install.sh'), ...(fromSource ? ['--from-source'] : []), ...(addToPath ? ['--add-to-path'] : [])];
+  await new Promise((resolve, reject) => {
+    run('bash', args, { cwd: root, env, timeout: 20 * 60 * 1000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
+      const detail = [stderr, stdout].filter(Boolean).join('\n').trim().slice(-3000);
+      if (error) reject(new Error(`${fromSource ? 'Source build' : 'Release download'} failed: ${detail || error.message}`));
+      else resolve();
+    });
+  });
+  return executable;
+}
+
+/** Download and verify the latest release using the checkout installer. */
+function downloadFromCheckout(root, addToPath, options) {
+  return installFromCheckout(root, addToPath, false, options);
+}
+
+/** Build from the checkout using the same installer and destination. */
+function installFromSource(root, addToPath, options) {
+  return installFromCheckout(root, addToPath, true, options);
+}
+
 /** Coordinate install choices and VS Code UI while keeping the core testable. */
 class BackendManager {
-  constructor(vscode, context, extensionVersion, { onWillChange = async () => {} } = {}) {
+  constructor(vscode, context, extensionVersion, {
+    onWillChange = async () => {},
+    sourceInstall = installFromSource,
+    checkoutDownload = downloadFromCheckout,
+  } = {}) {
     this.vscode = vscode;
     this.context = context;
     this.extensionVersion = extensionVersion;
     this.onWillChange = onWillChange;
+    this.sourceInstall = sourceInstall;
+    this.checkoutDownload = checkoutDownload;
     this.layout = installLayout();
     this.ownership = undefined;
   }
@@ -528,7 +596,7 @@ class BackendManager {
     return !this.managedNeedsUpdate();
   }
 
-  /** Validate current selection; offer all three first-use choices if missing. */
+  /** Validate current selection; offer the available first-use choices if missing. */
   async ensureAvailable(configuredExecutable = 'cluster-watcher') {
     if (this.managedNeedsUpdate() && !await this.offerManagedUpdate()) {
       throw new Error('The managed backend must be updated to match this extension before use.');
@@ -559,6 +627,19 @@ class BackendManager {
         return true;
       } catch (_error) { /* Offer installation below. */ }
     }
+    const development = Boolean(await sourceCheckoutRoot(this.context.extensionPath));
+    if (development) {
+      const choice = await this.vscode.window.showQuickPick([
+        { label: 'Download Latest Release and Add to PATH', mode: 'download', addToPath: true },
+        { label: 'Download Latest Release (No PATH Change)', mode: 'download', addToPath: false },
+        { label: 'Build from Source and Add to PATH', mode: 'source', addToPath: true },
+        { label: 'Build from Source (No PATH Change)', mode: 'source', addToPath: false },
+        { label: 'Choose Existing Executable', mode: 'choose' },
+      ], { title: 'Install Cluster Watcher for this development host' });
+      if (choice?.mode === 'choose') return Boolean(await this.chooseExisting());
+      if (choice?.mode) return Boolean(await this.install(choice.addToPath, choice.mode));
+      return false;
+    }
     const installPath = 'Install and Add to PATH';
     const vscodeOnly = 'Use Only in VS Code';
     const choose = 'Choose Existing Executable';
@@ -572,15 +653,31 @@ class BackendManager {
     return false;
   }
 
-  /** Download and activate the exact backend paired with this extension. */
-  async install(addToPath) {
+  /** Install a release or build a development checkout, one transaction at a time. */
+  async install(addToPath, mode = 'download') {
     if (this.installation) return this.installation;
-    this.installation = this.runInstall(addToPath).finally(() => { this.installation = undefined; });
+    this.installation = this.runInstall(addToPath, mode).finally(() => { this.installation = undefined; });
     return this.installation;
   }
 
-  /** Perform one serialized download/install transaction. */
-  async runInstall(addToPath) {
+  /** Perform one serialized download or source-build transaction. */
+  async runInstall(addToPath, mode = 'download') {
+    const checkout = await sourceCheckoutRoot(this.context.extensionPath);
+    if (checkout) {
+      const fromSource = mode === 'source';
+      const executable = await this.vscode.window.withProgress({
+        location: this.vscode.ProgressLocation.Notification,
+        title: fromSource ? 'Building Cluster Watcher from this checkout' : 'Downloading the latest Cluster Watcher release',
+        cancellable: false,
+      }, () => fromSource ? this.sourceInstall(checkout, addToPath) : this.checkoutDownload(checkout, addToPath));
+      await smokeTestExecutable(executable);
+      await this.onWillChange();
+      await this.setSelection({ source: 'external', externalExecutablePath: executable });
+      this.applyTerminalEnvironment();
+      this.vscode.window.showInformationMessage(`Cluster Watcher ${fromSource ? 'built from source' : 'downloaded'} at ${executable}.`);
+      return true;
+    }
+    if (mode === 'source') throw new Error('Source installation requires a Linux or macOS development checkout.');
     const releaseManifest = await loadReleaseManifest(this.context.extensionPath);
     let lastPercent = 0;
     const ownership = await this.vscode.window.withProgress({
@@ -631,12 +728,17 @@ class BackendManager {
   async manage() {
     this.ownership = await readInstallManifest(this.layout).catch(() => undefined);
     const selectedManaged = this.selection()?.source === 'managed';
+    const development = Boolean(await sourceCheckoutRoot(this.context.extensionPath));
     const items = [];
     if (this.ownership && !selectedManaged) items.push({ label: '$(check) Use Managed Backend', action: 'use-managed' });
     items.push(
-      { label: '$(cloud-download) Install or Repair Managed Backend', action: 'install-only' },
-      { label: '$(terminal) Install or Repair and Add to PATH', action: 'install-path' },
+      { label: development ? '$(cloud-download) Download Latest Release (No PATH Change)' : '$(cloud-download) Install or Repair Managed Backend', action: 'install-only' },
+      { label: development ? '$(terminal) Download Latest Release and Add to PATH' : '$(terminal) Install or Repair and Add to PATH', action: 'install-path' },
       { label: '$(file-binary) Choose Existing Executable', action: 'choose' },
+    );
+    if (development) items.push(
+      { label: '$(tools) Build from Source (No PATH Change)', action: 'build-only' },
+      { label: '$(terminal) Build from Source and Add to PATH', action: 'build-path' },
     );
     if (this.ownership?.system_path?.kind === 'none') items.push({ label: '$(add) Add Managed Backend to PATH', action: 'add-path' });
     if (['posix-profile', 'windows-user'].includes(this.ownership?.system_path?.kind)) {
@@ -650,6 +752,8 @@ class BackendManager {
     if (!choice) return;
     if (choice.action === 'install-only') await this.install(false);
     else if (choice.action === 'install-path') await this.install(true);
+    else if (choice.action === 'build-only') await this.install(false, 'source');
+    else if (choice.action === 'build-path') await this.install(true, 'source');
     else if (choice.action === 'choose') await this.chooseExisting();
     else if (choice.action === 'use-managed') {
       await smokeTestExecutable(this.layout.executable);
@@ -686,9 +790,11 @@ module.exports = {
   assertHostSupported,
   compareVersions,
   downloadVerified,
+  downloadFromCheckout,
+  hostCompatibilityVersion,
+  installFromSource,
   installBackend,
   installLayout,
-  hostCompatibilityVersion,
   loadReleaseManifest,
   managedPathBlock,
   normalizedTarget,
@@ -696,6 +802,7 @@ module.exports = {
   preferredProfile,
   readInstallManifest,
   releaseTarget,
+  sourceCheckoutRoot,
   removeManagedPath,
   shellSingleQuote,
   smokeTestExecutable,

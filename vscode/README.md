@@ -14,6 +14,17 @@ configuration, SSH, MFA, Slurm queries, and refresh scheduling.
   the exact backend version paired with the extension and verify its embedded
   SHA-256 checksum before running it. You can change the choice at any time
   with **Cluster Watcher: Manage Backend Installation**.
+  In an unpackaged Linux or macOS development checkout with no
+  `backend-manifest.json`, the first choices are **Download Latest Release
+  and Add to PATH** and **Download Latest Release (No PATH Change)**. They
+  run the checkout's `install.sh`, verify the release against `SHA256SUMS`,
+  and select the installed command automatically. **Build from Source** is
+  available in the same menu if the release binary cannot run; it requires
+  Python 3.11+ and build dependencies. A development download may be older
+  than the extension checkout. No-PATH choices leave shell profiles unchanged;
+  add-to-PATH choices use the installer's safety checks. Development-checkout
+  installs are standalone external commands, so remove one with the checkout's
+  `uninstall.sh`, not **Uninstall Managed Backend**.
 - A manual installation remains supported. On Linux or macOS, install the
   prebuilt executable with
 
@@ -31,6 +42,12 @@ configuration, SSH, MFA, Slurm queries, and refresh scheduling.
 - If an existing executable is not on `PATH`, select it through **Manage
   Backend Installation**. `clusterWatcher.executable` remains a fallback for
   settings created before the managed installer was introduced.
+  On Linux, the prebuilt installer verifies glibc through Node's runtime
+  report or `getconf GNU_LIBC_VERSION`. If the prebuilt backend is incompatible
+  or its glibc version cannot be verified, run
+  `./install.sh --from-source --add-to-path` in a matching source checkout,
+  then choose the resulting command with **Choose Existing Executable**. Use
+  its absolute path if the extension host has not picked up the new `PATH`.
 
 **My Jobs** uses collapsible state groups instead of terminal-style banners.
 Each job is another collapsible card whose compact form contains its name,

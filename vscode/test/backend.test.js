@@ -10,6 +10,9 @@ const {
   addManagedPath,
   assertHostSupported,
   BackendManager,
+  downloadFromCheckout,
+  hostCompatibilityVersion,
+  installFromSource,
   installBackend,
   installLayout,
   managedPathBlock,
@@ -17,6 +20,7 @@ const {
   readInstallManifest,
   releaseTarget,
   removeManagedPath,
+  sourceCheckoutRoot,
   uninstallBackend,
 } = require('../backend');
 
@@ -63,6 +67,179 @@ test('minimum OS and glibc versions are compared numerically', async () => {
   );
   await assertHostSupported({ system: 'linux', abi: 'glibc>=2.17' }, 'linux', '2.36');
   await assert.rejects(assertHostSupported({ system: 'linux', abi: 'glibc>=2.17' }, 'linux', '2.16'), /glibc 2\.17/);
+  await assert.rejects(
+    assertHostSupported({ system: 'linux', abi: 'glibc>=2.17' }, 'linux', ''),
+    /glibc version could not be determined.*install from a source checkout/i,
+  );
+});
+
+test('Linux compatibility falls back to getconf when the extension runtime omits glibc', async () => {
+  const reported = await hostCompatibilityVersion('linux', {
+    report: { getReport: () => ({ header: { glibcVersionRuntime: '2.36' } }) },
+    run: () => { throw new Error('getconf should not run when Node reports glibc'); },
+  });
+  assert.equal(reported, '2.36');
+  const commands = [];
+  const run = (command, args, options, callback) => {
+    commands.push([command, args, options]);
+    callback(null, 'glibc 2.28\n', '');
+  };
+  const version = await hostCompatibilityVersion('linux', {
+    report: { getReport: () => ({ header: {} }) }, run,
+  });
+  assert.equal(version, '2.28');
+  assert.deepEqual(commands, [['getconf', ['GNU_LIBC_VERSION'], { timeout: 3000 }]]);
+  await assertHostSupported({ system: 'linux', abi: 'glibc>=2.17' }, 'linux', version);
+});
+
+test('Linux compatibility does not misidentify an unknown libc as non-glibc', async () => {
+  const missing = await hostCompatibilityVersion('linux', {
+    report: { getReport: () => { throw new Error('report unavailable'); } },
+    run: (_command, _args, _options, callback) => callback(new Error('getconf unavailable'), '', ''),
+  });
+  assert.equal(missing, undefined);
+  await assert.rejects(
+    assertHostSupported({ system: 'linux', abi: 'glibc>=2.17' }, 'linux', missing || ''),
+    (error) => /glibc version could not be determined/.test(error.message)
+      && /--from-source --add-to-path/.test(error.message)
+      && !/non-glibc/.test(error.message),
+  );
+});
+
+test('a checkout without release metadata supports source installation in development', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cluster-watcher-dev-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const extensionPath = path.join(root, 'vscode');
+  await fs.mkdir(extensionPath);
+  for (const name of ['install.sh', 'cluster-watcher.spec', 'pyproject.toml']) {
+    await fs.writeFile(path.join(root, name), 'test fixture');
+  }
+  assert.equal(await sourceCheckoutRoot(extensionPath, 'linux'), root);
+  assert.equal(await sourceCheckoutRoot(extensionPath, 'win32'), undefined);
+
+  let invocation;
+  const executable = await installFromSource(root, false, {
+    env: { HOME: '/test-home', XDG_BIN_HOME: '/test-bin' },
+    run: (command, args, options, callback) => {
+      invocation = { command, args, options };
+      callback(null, '', '');
+    },
+  });
+  assert.equal(executable, '/test-bin/cluster-watcher');
+  assert.equal(invocation.command, 'bash');
+  assert.deepEqual(invocation.args, [path.join(root, 'install.sh'), '--from-source']);
+  assert.equal(invocation.options.cwd, root);
+  assert.equal(invocation.options.timeout, 20 * 60 * 1000);
+  await installFromSource(root, true, {
+    env: { HOME: '/test-home' },
+    run: (command, args, _options, callback) => {
+      assert.equal(command, 'bash');
+      assert.deepEqual(args, [path.join(root, 'install.sh'), '--from-source', '--add-to-path']);
+      callback(null, '', '');
+    },
+  });
+  await assert.rejects(installFromSource(root, false, {
+    env: { HOME: '/test-home' },
+    run: (_command, _args, _options, callback) => callback(new Error('failed'), 'build failed', ''),
+  }), /Source build failed: build failed/);
+  await downloadFromCheckout(root, true, {
+    env: { HOME: '/test-home' },
+    run: (command, args, _options, callback) => {
+      assert.equal(command, 'bash');
+      assert.deepEqual(args, [path.join(root, 'install.sh'), '--add-to-path']);
+      callback(null, '', '');
+    },
+  });
+  await assert.rejects(downloadFromCheckout(root, false, {
+    env: { HOME: '/test-home' },
+    run: (_command, _args, _options, callback) => callback(new Error('failed'), '', 'checksum mismatch'),
+  }), /Release download failed: checksum mismatch/);
+  await fs.writeFile(path.join(extensionPath, 'backend-manifest.json'), '{}');
+  assert.equal(await sourceCheckoutRoot(extensionPath, 'linux'), undefined);
+});
+
+test('development first-use installation selects the source-built command', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cluster-watcher-dev-choice-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const extensionPath = path.join(root, 'vscode');
+  await fs.mkdir(extensionPath);
+  for (const name of ['install.sh', 'cluster-watcher.spec', 'pyproject.toml']) {
+    await fs.writeFile(path.join(root, name), 'test fixture');
+  }
+  const values = new Map();
+  const context = {
+    extensionPath,
+    globalState: {
+      get: (key) => values.get(key),
+      update: async (key, value) => values.set(key, value),
+    },
+    environmentVariableCollection: { delete() {}, prepend() {} },
+  };
+  let choices;
+  const vscode = {
+    ProgressLocation: { Notification: 1 },
+    window: {
+      showInformationMessage: async () => undefined,
+      showQuickPick: async (items) => { choices = items; return items.find((item) => item.mode === 'source' && !item.addToPath); },
+      withProgress: async (_options, callback) => callback({ report() {} }),
+    },
+  };
+  let requested;
+  const manager = new BackendManager(vscode, context, '0.1.2', {
+    sourceInstall: async (checkout, addToPath) => {
+      requested = { checkout, addToPath };
+      return process.execPath;
+    },
+  });
+  assert.equal(await manager.offerFirstUse('missing-cluster-watcher', true), true);
+  assert.deepEqual(requested, { checkout: root, addToPath: false });
+  assert.deepEqual(choices.map((item) => item.label), [
+    'Download Latest Release and Add to PATH',
+    'Download Latest Release (No PATH Change)',
+    'Build from Source and Add to PATH',
+    'Build from Source (No PATH Change)',
+    'Choose Existing Executable',
+  ]);
+  assert.equal(manager.executable(), process.execPath);
+  assert.equal(manager.selection().source, 'external');
+});
+
+test('development first-use download selects the verified-release install path', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cluster-watcher-dev-download-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const extensionPath = path.join(root, 'vscode');
+  await fs.mkdir(extensionPath);
+  for (const name of ['install.sh', 'cluster-watcher.spec', 'pyproject.toml']) {
+    await fs.writeFile(path.join(root, name), 'test fixture');
+  }
+  const values = new Map();
+  const context = {
+    extensionPath,
+    globalState: {
+      get: (key) => values.get(key),
+      update: async (key, value) => values.set(key, value),
+    },
+    environmentVariableCollection: { delete() {}, prepend() {} },
+  };
+  const vscode = {
+    ProgressLocation: { Notification: 1 },
+    window: {
+      showInformationMessage: async () => undefined,
+      showQuickPick: async (items) => items.find((item) => item.mode === 'download' && !item.addToPath),
+      withProgress: async (_options, callback) => callback({ report() {} }),
+    },
+  };
+  let requested;
+  const manager = new BackendManager(vscode, context, '0.1.2', {
+    sourceInstall: async () => { throw new Error('source build must not run'); },
+    checkoutDownload: async (checkout, addToPath) => {
+      requested = { checkout, addToPath };
+      return process.execPath;
+    },
+  });
+  assert.equal(await manager.offerFirstUse('missing-cluster-watcher', true), true);
+  assert.deepEqual(requested, { checkout: root, addToPath: false });
+  assert.equal(manager.executable(), process.execPath);
 });
 
 test('managed install verifies size and checksum, smoke-tests, and records ownership', async (t) => {
