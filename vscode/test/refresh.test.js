@@ -2,15 +2,17 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { RefreshCoordinator, RefreshFeedback, refreshResultMessage } = require('../refresh');
+const { RefreshCoordinator, RefreshFeedback, initialCollectionPending, refreshResultMessage } = require('../refresh');
 
 /** Build a coordinator whose collaborators record every observable update. */
-function harness(poll, refreshServer) {
+function harness(poll, refreshServer, options = {}) {
   const jobsProvider = {
     cancelling: new Set(),
     updates: [],
     checks: [],
     errors: [],
+    loadings: 0,
+    loading() { this.loadings += 1; },
     update(payload, checkedAt) { this.updates.push({ payload, checkedAt }); },
     checked(checkedAt) { this.checks.push(checkedAt); },
     error(error) { this.errors.push(error); },
@@ -20,6 +22,8 @@ function harness(poll, refreshServer) {
     updates: [],
     checks: [],
     errors: [],
+    loadings: 0,
+    loading() { this.loadings += 1; },
     update(payload, checkedAt) { this.updates.push({ payload, checkedAt }); },
     checked(checkedAt) { this.checks.push(checkedAt); },
     error(error) { this.errors.push(error); },
@@ -27,6 +31,8 @@ function harness(poll, refreshServer) {
   const monitor = {
     updates: [],
     checks: [],
+    loadings: 0,
+    loading() { this.loadings += 1; },
     update(payload, cancelling, checkedAt) { this.updates.push({ payload, cancelling, checkedAt }); },
     checked(checkedAt) { this.checks.push(checkedAt); },
     jobsApiDisabled() {},
@@ -34,10 +40,99 @@ function harness(poll, refreshServer) {
   };
   const coordinator = new RefreshCoordinator(
     { poll }, jobsProvider, statusProvider, monitor,
-    { jobsApiDisabled: () => false, refreshSeconds: () => 15, refreshServer },
+    { jobsApiDisabled: () => false, refreshSeconds: () => 15, refreshServer, ...options },
   );
   return { coordinator, jobsProvider, statusProvider, monitor };
 }
+
+test('a reachable service immediately replaces stale offline indicators with loading', () => {
+  const state = harness(async () => ({ payload: {}, etag: 'ready' }));
+
+  state.coordinator.serviceReachable();
+
+  assert.equal(state.jobsProvider.loadings, 1);
+  assert.equal(state.statusProvider.loadings, 1);
+  assert.equal(state.monitor.loadings, 1);
+});
+
+test('the initial-collection 503 is loading and retries promptly without an offline state', async () => {
+  const retryCallbacks = [];
+  const delays = [];
+  const requests = [];
+  const pending = Object.assign(new Error('The first cluster status collection has not completed'), { status: 503 });
+  const state = harness(async (path) => {
+    requests.push(path);
+    if (requests.length <= 2) throw pending;
+    return { payload: { source: path }, etag: path };
+  }, undefined, {
+    setTimeout: (callback, delay) => { retryCallbacks.push(callback); delays.push(delay); return retryCallbacks.length; },
+    clearTimeout: () => {},
+  });
+
+  const first = await state.coordinator.refresh();
+  assert.deepEqual(first.map((result) => result.outcome), ['loading', 'loading']);
+  assert.deepEqual(delays, [1000, 1000]);
+  assert.equal(state.monitor.loadings, 1);
+  assert.equal(state.jobsProvider.loadings, 1);
+  assert.equal(state.statusProvider.loadings, 1);
+  assert.equal(state.monitor.updates.length, 0);
+  assert.equal(state.jobsProvider.errors.length, 0);
+  assert.equal(state.statusProvider.errors.length, 0);
+
+  retryCallbacks.forEach((callback) => callback());
+  await state.coordinator.refresh();
+  assert.equal(state.jobsProvider.updates.length, 1);
+  assert.equal(state.statusProvider.updates.length, 1);
+});
+
+test('a pre-start request failure cannot restore offline after the service becomes reachable', async () => {
+  let rejectJobs;
+  let rejectStatus;
+  const callbacks = [];
+  const state = harness((path) => new Promise((_resolve, reject) => {
+    if (path === '/api/v1/jobs') rejectJobs = reject;
+    else rejectStatus = reject;
+  }), undefined, {
+    setTimeout: (callback) => { callbacks.push(callback); return callbacks.length; },
+    clearTimeout: () => {},
+  });
+
+  const first = state.coordinator.refresh();
+  state.coordinator.serviceReachable();
+  rejectJobs(new Error('Connection refused before startup'));
+  rejectStatus(new Error('Connection refused before startup'));
+  assert.deepEqual((await first).map((result) => result.outcome), ['loading', 'loading']);
+  assert.equal(callbacks.length, 2);
+  assert.equal(state.jobsProvider.errors.length, 0);
+  assert.equal(state.statusProvider.errors.length, 0);
+});
+
+test('unrelated server errors do not enter first-load retry', async () => {
+  const unexpected = Object.assign(new Error('Database unavailable'), { status: 503 });
+  assert.equal(initialCollectionPending(unexpected), false);
+  const state = harness(async () => { throw unexpected; }, undefined, {
+    setTimeout: () => { throw new Error('should not retry'); },
+  });
+
+  const result = await state.coordinator.refreshJobs();
+  assert.equal(result.outcome, 'error');
+  assert.equal(state.monitor.loadings, 0);
+  assert.equal(state.jobsProvider.errors.length, 1);
+});
+
+test('disposing the coordinator cancels a scheduled first-load retry', async () => {
+  const cleared = [];
+  const pending = Object.assign(new Error('The first cluster status collection has not completed'), { status: 503 });
+  const state = harness(async () => { throw pending; }, undefined, {
+    setTimeout: () => 7,
+    clearTimeout: (handle) => cleared.push(handle),
+  });
+
+  await state.coordinator.refreshJobs();
+  state.coordinator.dispose();
+
+  assert.deepEqual(cleared, [7]);
+});
 
 test('My Jobs refresh polls and updates only the jobs endpoint', async () => {
   const calls = [];

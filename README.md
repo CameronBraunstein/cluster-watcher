@@ -395,6 +395,12 @@ and Add to PATH**, **Use Only in VS Code**, or **Choose Existing Executable**.
 In an unpackaged Linux or macOS development checkout without release metadata,
 the first choice downloads the latest release through `install.sh` and checks
 its `SHA256SUMS`; a source-build fallback is also available.
+As soon as the service becomes reachable, any obsolete offline state in
+**My Jobs**, **Cluster Status**, or the status-bar item switches to **Loading**.
+While the backend performs its first cluster collection, the sidebar retries
+its temporary HTTP 503 responses every second instead of waiting for the
+normal refresh interval. The job and cluster views show data independently as
+soon as each endpoint is ready.
 
 #### My Jobs
 

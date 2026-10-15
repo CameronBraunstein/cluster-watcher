@@ -2,7 +2,18 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderServerStatus, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
+const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, renderLoading, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderServerStatus, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
+
+test('first-collection loading views have no offline warning or start button', () => {
+  for (const title of ['My Jobs', 'Cluster Status']) {
+    const html = renderLoading(title);
+    assert.match(html, /role="status">Cluster Watcher is running\. Loading/);
+    assert.doesNotMatch(html, /service is not reachable|Start service &amp; SSH sessions|class="error"/);
+    const connecting = renderLoading(title, {}, true);
+    assert.match(connecting, /Connecting to the local Cluster Watcher service/);
+    assert.doesNotMatch(connecting, /is running/);
+  }
+});
 const { launchabilityStrip, waitColorIndex, waitEstimate } = require('../launchability');
 
 test('jobs retain terminal state grouping and lifecycle visibility', () => {

@@ -9,7 +9,7 @@ const { LOG_TAIL_LINES, logDocumentContent, logRequestPath, prependLogPage, virt
 const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = require('./events');
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
 const { RefreshCoordinator, RefreshFeedback, refreshResultMessage } = require('./refresh');
-const { isFailureGroup, jobRef, localTime, setDateFormat, renderJobs, renderJobsApiDisabled, renderMessage, renderServerStatus, renderStatus, renderWelcome, stateGroup } = require('./renderers');
+const { isFailureGroup, jobRef, localTime, setDateFormat, renderJobs, renderJobsApiDisabled, renderLoading, renderServerStatus, renderStatus, renderWelcome, stateGroup } = require('./renderers');
 const {
   ExecutableValidationError, backgroundLoginArguments, backgroundServiceArguments, cliArguments,
   jobsApiDisabled, responseError, cliTerminalOptions, configurationError, resolveConfigPath,
@@ -133,11 +133,12 @@ class BackendClient {
 
 /** Own a background service while allowing attachment to a separately run service. */
 class ServiceController {
-  constructor(client, refresh, manager, provider) {
+  constructor(client, refresh, manager, provider, onReachable = () => {}) {
     this.client = client;
     this.refresh = refresh;
     this.manager = manager;
     this.provider = provider;
+    this.onReachable = onReachable;
     this.process = undefined;
     this.loginProcess = undefined;
     this.stopping = false;
@@ -152,7 +153,9 @@ class ServiceController {
 
   /** Publish lifecycle changes immediately to the Server Status view. */
   publish(changes = {}) {
+    const wasReachable = ['running', 'attached'].includes(this.lifecycle.state);
     this.lifecycle = { ...this.lifecycle, ...changes, url: configuration().backendUrl };
+    if (!wasReachable && ['running', 'attached'].includes(this.lifecycle.state)) this.onReachable();
     this.provider.updateServer(this.lifecycle, this.sessions, this.sessionsError);
   }
 
@@ -413,6 +416,9 @@ class SidebarProvider {
     this.disclosures = {};
     /** The last data received from the service, and whether the view currently shows it. */
     this.payload = undefined;
+    this.hasSuccessfulData = false;
+    this.loadingState = false;
+    this.errorState = undefined;
     this.showingData = false;
     this.updatedAt = undefined;
     this.checkedAt = undefined;
@@ -425,8 +431,13 @@ class SidebarProvider {
     // Command URIs stay disabled: buttons post a message and receive() enforces WEBVIEW_COMMANDS.
     view.webview.options = { enableScripts: true };
     view.webview.onDidReceiveMessage((message) => this.receive(message));
-    if (this.payload) this.render();
-    else view.webview.html = renderMessage(this.title(), 'Connecting to the local Cluster Watcher service…', '', this.freshness());
+    if (this.loadingState || (!this.hasSuccessfulData && !this.errorState)) {
+      view.webview.html = renderLoading(this.title(), this.freshness(), !this.loadingState);
+    } else if (this.errorState?.kind === 'offline') {
+      view.webview.html = renderWelcome(this.title(), this.errorState.detail, this.freshness());
+    } else if (this.errorState?.kind === 'jobs-api-off') {
+      view.webview.html = renderJobsApiDisabled(this.title(), restartCommandText(), this.freshness());
+    } else this.render();
   }
 
   /**
@@ -435,6 +446,8 @@ class SidebarProvider {
    */
   checked(at) {
     this.checkedAt = at;
+    this.loadingState = false;
+    this.errorState = undefined;
     if (!this.view) return;
     if (!this.showingData && this.payload) this.render();
     else void this.view.webview.postMessage({ type: 'checked', at });
@@ -473,6 +486,9 @@ class SidebarProvider {
   /** Record when the current payload changed and when the request completed. */
   recordRefresh(payload, checkedAt) {
     this.payload = payload;
+    this.hasSuccessfulData = true;
+    this.loadingState = false;
+    this.errorState = undefined;
     this.updatedAt = payload.generated_at || payload.updated_at;
     this.checkedAt = checkedAt;
   }
@@ -482,6 +498,15 @@ class SidebarProvider {
     this.render();
   }
 
+  /** Show first-load progress while the service is reachable but has no data. */
+  loading() {
+    if (this.loadingState || (this.showingData && this.hasSuccessfulData)) return;
+    this.loadingState = true;
+    this.errorState = undefined;
+    this.showingData = false;
+    if (this.view) this.view.webview.html = renderLoading(this.title(), this.freshness());
+  }
+
   render() {
     if (!this.view || !this.payload) return;
     this.showingData = true;
@@ -489,15 +514,19 @@ class SidebarProvider {
   }
 
   error(error) {
+    this.loadingState = false;
     this.showingData = false;
-    if (!this.view) return;
     const detail = error instanceof Error ? error.message : String(error);
+    this.errorState = { kind: 'offline', detail };
+    if (!this.view) return;
     this.view.webview.html = renderWelcome(this.title(), detail, this.freshness());
   }
 
   /** Explain that the service runs without the jobs API and how to restart it. */
   jobsApiDisabled() {
+    this.loadingState = false;
     this.showingData = false;
+    this.errorState = { kind: 'jobs-api-off' };
     if (!this.view) return;
     this.view.webview.html = renderJobsApiDisabled(this.title(), restartCommandText(), this.freshness());
   }
@@ -554,11 +583,6 @@ class JobsSidebarProvider extends SidebarProvider {
     this.cancelling = new Set();
   }
 
-  resolveWebviewView(view) {
-    super.resolveWebviewView(view);
-    this.render();
-  }
-
   update(payload, checkedAt = Date.now()) {
     this.recordRefresh(payload, checkedAt);
     const stillActive = new Set((payload.jobs || [])
@@ -577,6 +601,10 @@ class JobsSidebarProvider extends SidebarProvider {
 
   render() {
     if (!this.view) return;
+    if (this.loadingState) {
+      this.view.webview.html = renderLoading(this.title(), this.freshness());
+      return;
+    }
     this.showingData = true;
     this.view.webview.html = renderJobs({
       ...this.payload,
@@ -672,10 +700,12 @@ class JobMonitor {
     this.states = null;
     /** Jobs from the latest payload, retained so a 304 check can update the hover timestamp. */
     this.jobs = [];
+    this.viewState = 'initial';
   }
 
   /** Process one jobs payload; ``cancelling`` suppresses jobs the user ended. */
   update(payload, cancelling, refreshedAt) {
+    this.viewState = 'data';
     const jobs = payload.jobs || [];
     this.jobs = jobs;
     const { states, finished } = jobTransitions(this.states, jobs);
@@ -693,6 +723,7 @@ class JobMonitor {
 
   /** Update the hover timestamp after an unchanged conditional jobs response. */
   checked(refreshedAt) {
+    this.viewState = 'data';
     const summary = statusSummary(this.jobs, refreshedAt);
     this.item.text = summary.text;
     this.item.tooltip = summary.tooltip;
@@ -702,6 +733,7 @@ class JobMonitor {
 
   /** Distinguish a running service without --jobs-api from an unreachable one. */
   jobsApiDisabled() {
+    this.viewState = 'disabled';
     this.item.text = '$(warning) Cluster Watcher: jobs API off';
     this.item.tooltip = 'The Cluster Watcher service is running without --jobs-api. Click to show My Jobs for the fix.';
     this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
@@ -710,9 +742,20 @@ class JobMonitor {
 
   /** Reflect an unreachable service without forgetting the known job states. */
   offline() {
+    this.viewState = 'offline';
     this.item.text = '$(debug-disconnect) Cluster Watcher offline';
     this.item.tooltip = 'The Cluster Watcher service is not reachable. Click to show My Jobs.';
     this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+    this.show(configuration());
+  }
+
+  /** Replace an obsolete offline banner while the first jobs fetch is pending. */
+  loading() {
+    if (this.viewState === 'data' || this.viewState === 'loading') return;
+    this.viewState = 'loading';
+    this.item.text = '$(sync~spin) Cluster Watcher loading…';
+    this.item.tooltip = 'The service is running; waiting for the first jobs update.';
+    this.item.backgroundColor = undefined;
     this.show(configuration());
   }
 
@@ -879,7 +922,7 @@ function activate(context) {
   backendManager = new BackendManager(vscode, context, extensionManifest.version, {
     onWillChange: () => controller?.stopForBackendChange(),
   });
-  controller = new ServiceController(client, () => coordinator.refresh(), backendManager, serverProvider);
+  controller = new ServiceController(client, () => coordinator.refresh(), backendManager, serverProvider, () => coordinator.serviceReachable());
   const logProvider = new JobLogDocumentProvider(client);
   const scriptProvider = new JobScriptDocumentProvider(client);
 

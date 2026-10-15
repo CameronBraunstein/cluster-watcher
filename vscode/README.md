@@ -50,6 +50,11 @@ configuration, SSH, MFA, Slurm queries, and refresh scheduling.
   its absolute path if the extension host has not picked up the new `PATH`.
 
 **My Jobs** uses collapsible state groups instead of terminal-style banners.
+On first startup, the service can be running before its first Slurm collection
+finishes. During that interval, offline **My Jobs**, **Cluster Status**, and
+status-bar views show **Loading** rather than start-service controls. The extension
+retries the backend's temporary first-collection response every second; each
+view replaces Loading as soon as its own data arrives.
 Each job is another collapsible card whose compact form contains its name,
 progress color bar, and completion/start estimate. Long names stay on one line
 and end in an ellipsis; hovering the title (not the rest of the card) shows an

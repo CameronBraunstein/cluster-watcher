@@ -463,6 +463,15 @@ function renderMessage(title, message, action = '', freshness = {}) {
   return document(title, `<p class="error">${escapeHtml(message)}</p>${action}`, freshness);
 }
 
+/** Render startup progress without suggesting that the service is offline. */
+function renderLoading(title, freshness = {}, connecting = false) {
+  const subject = title === 'My Jobs' ? 'jobs' : 'cluster status';
+  const message = connecting
+    ? `Connecting to the local Cluster Watcher service to load ${subject}…`
+    : `Cluster Watcher is running. Loading ${subject}…`;
+  return document(title, `<p class="muted" role="status">${message}</p>`, freshness);
+}
+
 /**
  * Render the view shown when the service is reachable but was started without
  * ``--jobs-api``: why My Jobs is empty, and the command that fixes it.
@@ -928,4 +937,4 @@ function renderStatus(payload, disclosures = {}, freshness = {}) {
   return document('Cluster Status', clusters.join('') || '<p>No clusters returned.</p>', freshness);
 }
 
-module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, isFailureGroup, jobGroup, jobRef, launchabilityStrip, openAttribute, parseDependency, relativeJobPriority, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderMessage, renderServerStatus, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };
+module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, isFailureGroup, jobGroup, jobRef, launchabilityStrip, openAttribute, parseDependency, relativeJobPriority, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderLoading, renderMessage, renderServerStatus, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };

@@ -1,5 +1,10 @@
 'use strict';
 
+/** Recognize the backend's temporary response before its first Slurm collection. */
+function initialCollectionPending(error) {
+  return error?.status === 503 && /first cluster status collection has not completed/i.test(error.message || '');
+}
+
 /**
  * Coordinate independent jobs and cluster-status polling.
  *
@@ -17,6 +22,8 @@ class RefreshCoordinator {
    * @param {(error: unknown) => boolean} options.jobsApiDisabled Detect an intentionally disabled jobs API.
    * @param {() => number} options.refreshSeconds Return the current polling interval in seconds.
    * @param {() => Promise<object>} [options.refreshServer] Refresh local service/session state.
+   * @param {(callback: Function, delay: number) => unknown} [options.setTimeout] Schedule a first-load retry.
+   * @param {(handle: unknown) => void} [options.clearTimeout] Cancel a first-load retry.
    */
   constructor(client, jobsProvider, statusProvider, monitor, options) {
     this.client = client;
@@ -26,12 +33,45 @@ class RefreshCoordinator {
     this.isJobsApiDisabled = options.jobsApiDisabled;
     this.refreshSeconds = options.refreshSeconds;
     this.serverRefresh = options.refreshServer;
+    this.setTimeout = options.setTimeout || setTimeout;
+    this.clearTimeout = options.clearTimeout || clearTimeout;
     /** ETags of the last data rendered per endpoint, for conditional polling. */
     this.etags = {};
     this.jobsInFlight = undefined;
     this.statusInFlight = undefined;
     this.serverInFlight = undefined;
+    this.jobsRetry = undefined;
+    this.statusRetry = undefined;
     this.timer = undefined;
+    this.disposed = false;
+    this.serviceGeneration = 0;
+  }
+
+  /** Replace stale offline indicators as soon as a service becomes reachable. */
+  serviceReachable() {
+    this.serviceGeneration += 1;
+    this.jobsProvider.loading();
+    this.statusProvider.loading();
+    this.monitor.loading();
+  }
+
+  /** Retry a known first-collection 503 without waiting for the normal interval. */
+  retryFirstCollection(kind) {
+    if (this.disposed) return;
+    const key = kind === 'jobs' ? 'jobsRetry' : 'statusRetry';
+    if (this[key] !== undefined) return;
+    this[key] = this.setTimeout(() => {
+      this[key] = undefined;
+      void (kind === 'jobs' ? this.refreshJobs() : this.refreshStatus());
+    }, 1000);
+  }
+
+  /** A manual or startup refresh supersedes a scheduled first-load retry. */
+  clearFirstCollectionRetry(kind) {
+    const key = kind === 'jobs' ? 'jobsRetry' : 'statusRetry';
+    if (this[key] === undefined) return;
+    this.clearTimeout(this[key]);
+    this[key] = undefined;
   }
 
   /** Refresh both views, reusing any endpoint refresh already in progress. */
@@ -54,6 +94,7 @@ class RefreshCoordinator {
 
   /** Refresh only My Jobs, coalescing overlapping requests. */
   async refreshJobs() {
+    this.clearFirstCollectionRetry('jobs');
     if (this.jobsInFlight) return this.jobsInFlight;
     const operation = this.runJobs().finally(() => {
       if (this.jobsInFlight === operation) this.jobsInFlight = undefined;
@@ -64,6 +105,7 @@ class RefreshCoordinator {
 
   /** Refresh only Cluster Status, coalescing overlapping requests. */
   async refreshStatus() {
+    this.clearFirstCollectionRetry('status');
     if (this.statusInFlight) return this.statusInFlight;
     const operation = this.runStatus().finally(() => {
       if (this.statusInFlight === operation) this.statusInFlight = undefined;
@@ -74,6 +116,7 @@ class RefreshCoordinator {
 
   /** Poll and render the jobs endpoint without touching Cluster Status. */
   async runJobs() {
+    const generation = this.serviceGeneration;
     try {
       const result = await this.client.poll('/api/v1/jobs', this.etags.jobs);
       const checkedAt = Date.now();
@@ -89,6 +132,12 @@ class RefreshCoordinator {
       return { outcome: 'updated', checkedAt };
     } catch (error) {
       this.etags.jobs = undefined;
+      if (initialCollectionPending(error) || generation !== this.serviceGeneration) {
+        this.monitor.loading();
+        this.jobsProvider.loading();
+        this.retryFirstCollection('jobs');
+        return { outcome: 'loading', checkedAt: Date.now() };
+      }
       if (this.isJobsApiDisabled(error)) {
         this.monitor.jobsApiDisabled();
         this.jobsProvider.jobsApiDisabled();
@@ -102,6 +151,7 @@ class RefreshCoordinator {
 
   /** Poll and render the snapshot endpoint without touching My Jobs. */
   async runStatus() {
+    const generation = this.serviceGeneration;
     try {
       const result = await this.client.poll('/api/v1/snapshot', this.etags.status);
       const checkedAt = Date.now();
@@ -114,6 +164,11 @@ class RefreshCoordinator {
       return { outcome: 'updated', checkedAt };
     } catch (error) {
       this.etags.status = undefined;
+      if (initialCollectionPending(error) || generation !== this.serviceGeneration) {
+        this.statusProvider.loading();
+        this.retryFirstCollection('status');
+        return { outcome: 'loading', checkedAt: Date.now() };
+      }
       this.statusProvider.error(error);
       return { outcome: 'error', checkedAt: Date.now(), error };
     }
@@ -127,7 +182,10 @@ class RefreshCoordinator {
 
   /** Stop scheduled polling. */
   dispose() {
+    this.disposed = true;
     if (this.timer) clearInterval(this.timer);
+    this.clearFirstCollectionRetry('jobs');
+    this.clearFirstCollectionRetry('status');
   }
 }
 
@@ -177,4 +235,4 @@ function refreshResultMessage(result, formattedAt) {
   return undefined;
 }
 
-module.exports = { RefreshCoordinator, RefreshFeedback, refreshResultMessage };
+module.exports = { RefreshCoordinator, RefreshFeedback, initialCollectionPending, refreshResultMessage };
