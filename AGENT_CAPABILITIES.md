@@ -83,9 +83,10 @@ drained, down, reserved, powered-off, failed, or otherwise unavailable nodes.
 Do not add an `aggregate: true` partition's capacity to its constituent
 partitions: those entries can refer to the same physical nodes.
 
-Hardware specifications come from the cluster-scoped `gpu_profiles.toml`
-catalog. A missing/null catalog field is unknown, not zero. A model name on one
-cluster must not be assumed to identify the same hardware on another cluster.
+Hardware specifications come from cluster-scoped `[[profile]]` entries in
+`clusters.toml`. A missing/null profile field is unknown, not zero. A model
+name on one cluster must not be assumed to identify the same hardware on
+another cluster.
 Cluster Watcher's default compute ordering emphasizes per-device VRAM first
 and cataloged Tensor throughput second; it is a routing hint, not an application
 benchmark.

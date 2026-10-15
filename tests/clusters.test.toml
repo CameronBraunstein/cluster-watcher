@@ -1,5 +1,25 @@
-# Generic GPU catalog fixture for the test suite; tests/helpers.py selects it
-# for every test. Values are public vendor specifications.
+# Combined configuration fixture for the test suite. GPU values are public
+# vendor specifications; matching uses the cluster names below.
+
+[[machine]]
+name = "cluster_0"
+host = "cluster0.example"
+username = "tester"
+
+[[machine]]
+name = "cluster_1"
+host = "cluster1.example"
+username = "tester"
+
+[[machine]]
+name = "cluster_2"
+host = "cluster2.example"
+username = "tester"
+
+[[machine]]
+name = "cluster_3"
+host = "cluster3.example"
+username = "tester"
 
 # cluster_0 and cluster_3 both label a GPU "a100" but with different memory,
 # which exercises the per-cluster scoping of profiles.

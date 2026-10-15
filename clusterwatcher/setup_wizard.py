@@ -27,6 +27,8 @@ HEADER = """\
 # SSH keys, agent forwarding, host verification, ProxyJump, etc. remain managed
 # by your normal OpenSSH configuration.
 # Add `hidden = true` to any machine entry to skip its login, polling, and display.
+# Optional `[[profile]]` entries below describe one GPU/APU model per cluster.
+# VRAM and dense FP16/BF16 Tensor throughput are per device, not partition totals.
 """
 
 
@@ -36,8 +38,10 @@ def _toml_string(value: str) -> str:
     return f'"{escaped}"'
 
 
-def render_config(machines: list[dict[str, object]]) -> str:
-    """Serialize wizard answers as a commented ``clusters.toml`` document."""
+def render_config(
+    machines: list[dict[str, object]], profiles: list[dict[str, object]] | None = None,
+) -> str:
+    """Serialize machines and optional GPU profiles into one TOML document."""
     blocks = [HEADER]
     for machine in machines:
         lines = ["[[machine]]"]
@@ -54,6 +58,15 @@ def render_config(machines: list[dict[str, object]]) -> str:
         roots = machine.get("job_log_roots") or []
         if roots:
             lines.append(f"job_log_roots = [{', '.join(_toml_string(str(root)) for root in roots)}]")
+        blocks.append("\n".join(lines) + "\n")
+    for profile in profiles or []:
+        lines = ["[[profile]]"]
+        for key in ("cluster", "name"):
+            lines.append(f"{key} = {_toml_string(str(profile[key]))}")
+        aliases = profile["aliases"]
+        lines.append(f"aliases = [{', '.join(_toml_string(alias) for alias in aliases)}]")
+        lines.append(f"vram_gb = {profile['vram_gb']}")
+        lines.append(f"fp16_bf16_tensor_tflops = {profile['fp16_bf16_tensor_tflops']}")
         blocks.append("\n".join(lines) + "\n")
     return "\n".join(blocks)
 
@@ -114,6 +127,34 @@ def _ask_machine(prompt: Prompt, output: Output, taken: set[str], default_userna
     return machine
 
 
+def _ask_profile(prompt: Prompt, output: Output, cluster: str) -> dict[str, object]:
+    """Collect validated per-device GPU/APU specifications for one cluster."""
+    name = _ask(prompt, "GPU/APU model name")
+    while True:
+        aliases = [alias.strip() for alias in _ask(prompt, "Slurm GRES, partition, or node-name aliases (comma-separated)").split(",")]
+        if all(aliases):
+            break
+        output("Provide at least one non-empty alias; remove trailing commas.")
+    while True:
+        vram = _ask(prompt, "VRAM per GPU/APU in GB")
+        if vram.isdecimal() and int(vram) > 0:
+            break
+        output("VRAM must be a positive whole number of GB.")
+    while True:
+        throughput = _ask(prompt, "Dense FP16/BF16 Tensor TFLOPS per GPU/APU")
+        try:
+            value = float(throughput)
+        except ValueError:
+            value = 0
+        if 0 < value < float("inf"):
+            break
+        output("Throughput must be a positive finite number.")
+    return {
+        "cluster": cluster, "name": name, "aliases": aliases,
+        "vram_gb": int(vram), "fp16_bf16_tensor_tflops": value,
+    }
+
+
 def run_setup(
     path: Path,
     prompt: Prompt = input,
@@ -134,7 +175,12 @@ def run_setup(
         default_username = str(machine["username"])
         if not _confirm(prompt, "Add another machine?"):
             break
-    text = render_config(machines)
+    profiles: list[dict[str, object]] = []
+    for machine in machines:
+        cluster = str(machine["name"])
+        while _confirm(prompt, f"Add a GPU/APU profile for {cluster}?"):
+            profiles.append(_ask_profile(prompt, output, cluster))
+    text = render_config(machines, profiles)
     try:
         _write_validated(path, text)
     except ValueError as exc:

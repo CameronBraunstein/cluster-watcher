@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import tomllib
 from dataclasses import dataclass
@@ -25,46 +26,72 @@ def _normalized(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.lower())
 
 
-GPU_PROFILES_FILENAME = "gpu_profiles.toml"
-_profiles_path: Path | None = None
-
-
-def gpu_profiles_path(config_path: Path) -> Path:
-    """Return the personal GPU catalog location: beside ``clusters.toml``."""
-    return config_path.expanduser().with_name(GPU_PROFILES_FILENAME)
+_config_path: Path | None = None
 
 
 def configure_gpu_profiles(path: Path | None) -> None:
-    """Select the GPU catalog file (``None`` disables profiles) and reload it."""
-    global _profiles_path
-    _profiles_path = path
+    """Select the ``clusters.toml`` file supplying GPU profiles and reload it."""
+    global _config_path
+    _config_path = path
     gpu_profiles.cache_clear()
 
 
 @cache
 def gpu_profiles() -> tuple[GPUProfile, ...]:
-    """Load the personal, cluster-scoped GPU hardware catalog.
+    """Load optional cluster-scoped GPU hardware profiles from ``clusters.toml``.
 
-    The catalog is optional site knowledge kept beside ``clusters.toml`` (see
-    ``gpu_profiles.example.toml``). Without it no GPU model, VRAM, or
-    throughput is reported and partitions rank by GPU count alone.
+    Without ``[[profile]]`` entries, no model, VRAM, or throughput is reported
+    and partitions rank by GPU count alone.
     """
-    if _profiles_path is None or not _profiles_path.is_file():
+    if _config_path is None:
         return ()
     try:
-        with _profiles_path.open("rb") as file:
+        with _config_path.open("rb") as file:
             data = tomllib.load(file)
+    except FileNotFoundError as exc:
+        raise ValueError(f"configuration file not found: {_config_path}") from exc
     except tomllib.TOMLDecodeError as exc:
-        raise ValueError(f"invalid TOML in {_profiles_path}: {exc}") from exc
+        raise ValueError(f"invalid TOML in {_config_path}: {exc}") from exc
+    return parse_gpu_profiles(data, _config_path)
+
+
+def parse_gpu_profiles(
+    data: dict[str, object], path: Path, known_clusters: set[str] | None = None,
+) -> tuple[GPUProfile, ...]:
+    """Validate and parse ``[[profile]]`` entries in one TOML document.
+
+    ``known_clusters`` is supplied when validating the full configuration, so
+    a mistyped cluster name cannot silently hide a GPU profile.
+    """
+    raw_profiles = data.get("profile", [])
+    if not isinstance(raw_profiles, list):
+        raise ValueError(f"[[profile]] in {path} must be an array of tables")
     profiles = []
-    for index, item in enumerate(data.get("profile", []), start=1):
+    for index, item in enumerate(raw_profiles, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"GPU profile #{index} in {path} must be a table")
+        cluster = item.get("cluster")
+        name = item.get("name")
+        aliases = item.get("aliases")
+        vram = item.get("vram_gb")
+        throughput = item.get("fp16_bf16_tensor_tflops")
         try:
-            profiles.append(GPUProfile(
-                str(item["cluster"]), str(item["name"]), tuple(str(alias) for alias in item["aliases"]),
-                int(item["vram_gb"]), float(item["fp16_bf16_tensor_tflops"]),
-            ))
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(f"GPU profile #{index} in {_profiles_path} is incomplete or invalid: {exc}") from exc
+            throughput_value = float(throughput) if isinstance(throughput, (int, float)) else 0.0
+        except OverflowError:
+            throughput_value = 0.0
+        if (
+            not isinstance(cluster, str) or not cluster.strip()
+            or not isinstance(name, str) or not name.strip()
+            or not isinstance(aliases, list) or not aliases
+            or any(not isinstance(alias, str) or not alias.strip() for alias in aliases)
+            or not isinstance(vram, int) or isinstance(vram, bool) or vram < 1
+            or isinstance(throughput, bool) or not math.isfinite(throughput_value)
+            or throughput_value <= 0
+        ):
+            raise ValueError(f"GPU profile #{index} in {path} is incomplete or invalid")
+        if known_clusters is not None and cluster not in known_clusters:
+            raise ValueError(f"GPU profile #{index} in {path} refers to unknown cluster {cluster!r}")
+        profiles.append(GPUProfile(cluster, name, tuple(aliases), vram, throughput_value))
     return tuple(profiles)
 
 

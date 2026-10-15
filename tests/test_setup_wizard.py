@@ -2,9 +2,11 @@
 
 from pathlib import Path
 import tempfile
+import tomllib
 from unittest.mock import patch
 
 from clusterwatcher.cli import main
+from clusterwatcher.compute import configure_gpu_profiles, gpu_profiles, profile_for
 from clusterwatcher.config import load_config
 from clusterwatcher.setup_wizard import edit_config, find_editor, render_config, run_setup
 from helpers import TimedTestCase
@@ -30,6 +32,7 @@ class SetupWizardTests(TimedTestCase):
         prompt = scripted(
             "cluster_0", "slurm.example", "", "", "", "n", "/work/logs", "y",
             "cluster_1", "cluster_1.example", "bob", "2222", "~/.ssh/key", "y", "site_group", "", "n",
+            "n", "n",
         )
         output: list[str] = []
 
@@ -43,6 +46,24 @@ class SetupWizardTests(TimedTestCase):
         self.assertTrue(machines[1].interactive_auth)
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
 
+    def test_setup_writes_and_validates_gpu_profiles_in_same_file(self):
+        """The wizard should collect several profiles without a second file."""
+        prompt = scripted(
+            "gpu-site", "login.example", "alice", "", "", "n", "", "n",
+            "y", "NVIDIA H100", "h100, node-h", "bad", "80", "nan", "989.0",
+            "y", "NVIDIA A100", "a100", "40", "312", "n",
+        )
+        output: list[str] = []
+
+        self.assertEqual(run_setup(self.path, prompt, output.append, {}), 0)
+        self.assertFalse(self.path.with_name("gpu_profiles.toml").exists())
+        self.assertEqual(len(tomllib.loads(self.path.read_text())["profile"]), 2)
+        self.assertTrue(any("positive whole number" in line for line in output))
+        self.assertTrue(any("positive finite" in line for line in output))
+        configure_gpu_profiles(self.path)
+        self.assertEqual(len(gpu_profiles()), 2)
+        self.assertEqual(profile_for("gpu-site", ["node-h01"]).vram_gb, 80)
+
     def test_setup_rejects_duplicate_names_and_keeps_existing_file_unless_confirmed(self):
         self.path.write_text("existing")
         output: list[str] = []
@@ -50,7 +71,7 @@ class SetupWizardTests(TimedTestCase):
         self.assertEqual(run_setup(self.path, scripted("n"), output.append, {}), 1)
         self.assertEqual(self.path.read_text(), "existing")
 
-        prompt = scripted("y", "a", "a.example", "u", "", "", "n", "", "y", "a", "b", "b.example", "", "", "", "n", "", "n")
+        prompt = scripted("y", "a", "a.example", "u", "", "", "n", "", "y", "a", "b", "b.example", "", "", "", "n", "", "n", "n", "n")
         self.assertEqual(run_setup(self.path, prompt, output.append, {}), 0)
         self.assertEqual([machine.name for machine in load_config(self.path)], ["a", "b"])
         self.assertEqual(self.path.with_name("clusters.toml.bak").read_text(), "existing")

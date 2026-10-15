@@ -122,6 +122,8 @@ class ClusterWatcherTests(TimedTestCase):
         for name in ("clusters.toml", "clusters.toml.bak", "AGENTS.md"):
             self.assertIn(name, ignored)
         self.assertNotIn('fail "missing clusters.toml', installer)
+        self.assertNotIn('"${PROJECT_ROOT}/gpu_profiles.toml"', installer)
+        self.assertNotIn('Join-Path $ProjectRoot "gpu_profiles.toml"', (root / "install.ps1").read_text())
         self.assertIn("cluster-watcher setup", installer)
         self.assertEqual(
             [machine.name for machine in load_config(root / "clusters.example.toml")],
@@ -1012,35 +1014,54 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertTrue(ranked[2]["aggregate"])
         self.assertIsNone(ranked[2]["rank"])
 
-    def test_gpu_catalog_is_optional_personal_configuration(self):
-        """Read the catalog beside clusters.toml; tolerate absence, reject bad data."""
-        from clusterwatcher.compute import configure_gpu_profiles, gpu_profiles, gpu_profiles_path, profile_for
+    def test_gpu_profiles_are_optional_entries_in_clusters_config(self):
+        """Read GPU profiles from the selected config and reject bad entries."""
+        from clusterwatcher.compute import configure_gpu_profiles, gpu_profiles, profile_for
 
         root = Path(__file__).parents[1]
-        self.assertEqual(gpu_profiles_path(Path("/etc/cw/clusters.toml")), Path("/etc/cw/gpu_profiles.toml"))
         with tempfile.TemporaryDirectory() as directory:
-            catalog = Path(directory) / "gpu_profiles.toml"
-            configure_gpu_profiles(catalog)
+            config = Path(directory) / "clusters.toml"
+            config.write_text('[[machine]]\nname="c"\nhost="h"\nusername="u"\n')
+            config.with_name("gpu_profiles.toml").write_text(
+                '[[profile]]\ncluster="c"\nname="Legacy"\naliases=["a100"]\n'
+                'vram_gb=40\nfp16_bf16_tensor_tflops=312.0\n'
+            )
+            configure_gpu_profiles(config)
             self.assertEqual(gpu_profiles(), ())
             self.assertIsNone(profile_for("cluster_0", ["a100"]))
 
-            catalog.write_text('[[profile]]\ncluster = "c"\nname = "X"\n')
-            configure_gpu_profiles(catalog)
+            config.write_text(config.read_text() + '[[profile]]\ncluster = "c"\nname = "X"\n')
+            configure_gpu_profiles(config)
             with self.assertRaisesRegex(ValueError, "profile #1 .* incomplete"):
                 gpu_profiles()
 
-        configure_gpu_profiles(root / "gpu_profiles.example.toml")
-        self.assertEqual(profile_for("cluster-b", ["gpu-a100"]).vram_gb, 40)
-        self.assertEqual(profile_for("cluster-a", ["gpu-a100"]).vram_gb, 80)
+        configure_gpu_profiles(root / "clusters.example.toml")
+        self.assertEqual(profile_for("cluster-b", ["apu"]).vram_gb, 128)
+        self.assertEqual(profile_for("cluster-a", ["gpu-h100"]).vram_gb, 80)
 
-    @patch("clusterwatcher.cli.load_config", return_value=[])
-    def test_cli_reads_gpu_catalog_beside_the_selected_config(self, _load_config):
+    def test_config_rejects_gpu_profile_with_unknown_machine(self):
+        """A typo in the scoped machine name must fail before dashboard startup."""
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "clusters.toml"
+            config.write_text(
+                '[[machine]]\nname="known"\nhost="h"\nusername="u"\n'
+                '[[profile]]\ncluster="typo"\nname="NVIDIA A100"\n'
+                'aliases=["a100"]\nvram_gb=80\nfp16_bf16_tensor_tflops=312.0\n'
+            )
+            with self.assertRaisesRegex(ValueError, "unknown cluster 'typo'"):
+                load_config(config)
+
+    def test_cli_reads_gpu_profiles_from_the_selected_config(self):
         from clusterwatcher import compute
 
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(StringIO()):
             config = Path(directory) / "clusters.toml"
-            main(["--config", str(config), "list"])
-            self.assertEqual(compute._profiles_path, Path(directory) / "gpu_profiles.toml")
+            config.write_text('[[machine]]\nname="c"\nhost="h"\nusername="u"\n'
+                              '[[profile]]\ncluster="c"\nname="X"\naliases=["x"]\n'
+                              'vram_gb=16\nfp16_bf16_tensor_tflops=32.0\n')
+            self.assertEqual(main(["--config", str(config), "list"]), 0)
+            self.assertEqual(compute._config_path, config)
+            self.assertEqual(compute.profile_for("c", ["gpu-x"]).vram_gb, 16)
 
     def test_gpu_profiles_are_scoped_to_the_source_cluster(self):
         from clusterwatcher.compute import profile_for, rank_partitions

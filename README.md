@@ -201,7 +201,7 @@ non-interactive scripts.
 
 ```bash
 ./uninstall.sh                 # keeps your configuration
-./uninstall.sh --purge-config  # also backs up and removes clusters.toml and gpu_profiles.toml
+./uninstall.sh --purge-config  # backs up and removes clusters.toml (plus any legacy gpu_profiles.toml)
 ```
 
 On Windows, run `uninstall.ps1` (add `-PurgeConfig` or `-KeepPath` as
@@ -240,8 +240,10 @@ cluster-watcher setup     # alias: set-up
 
 It asks for each machine's name, host, username, port, optional identity
 file, whether it prompts for a password/OTP (and its shared credential group),
-and log directories. It validates the result and writes the config file with
-mode `0600`; an existing file is replaced only after confirmation and kept as
+and log directories. It then optionally asks for each machine's GPU/APU models,
+matching aliases, per-device VRAM, and dense FP16/BF16 Tensor throughput. It
+validates the result and writes the single config file with mode `0600`; an
+existing file is replaced only after confirmation and kept as
 `clusters.toml.bak`.
 
 To change it later, run `cluster-watcher config`. It opens the file in
@@ -881,13 +883,16 @@ timezone.
 
 ### GPU catalog and compute ranking
 
-GPU model, VRAM, and TFLOPS/s come from an optional personal catalog,
-`gpu_profiles.toml`, beside your `clusters.toml` (for an installed command,
-`~/.config/cluster-watcher/gpu_profiles.toml`). Start from
-[`gpu_profiles.example.toml`](gpu_profiles.example.toml). Without it, no GPU
-details are shown and partitions are ranked by GPU count. A malformed catalog
-is reported at startup. `install.sh` adopts a `gpu_profiles.toml` found beside
-it once, and the file is git-ignored.
+GPU model, VRAM, and TFLOPS/s come from optional `[[profile]]` entries in the
+same `clusters.toml` as your machines. See
+[`clusters.example.toml`](clusters.example.toml), or add profiles through
+`cluster-watcher setup`. Without profiles, no GPU details are shown and
+partitions are ranked by GPU count. Malformed profiles or unknown cluster names
+are reported during configuration validation. There is no second config file.
+If upgrading from an earlier version, append the `[[profile]]` sections from
+your old `gpu_profiles.toml` to `clusters.toml`; the old file is no longer read.
+Keep a backup until you verify the display. The installer no longer copies the
+old catalog.
 
 Every `[[profile]]` needs a `cluster` equal to a `[[machine]].name`, because
 partition and GRES labels are local to a cluster (an `a100` label never
@@ -1253,9 +1258,10 @@ another over HTTP.
 flowchart TB
     subgraph setup["Install and configuration"]
         Distribution["PyInstaller binary, Python package,<br/>installer/uninstaller, and VSIX"]
-        ClusterConfig["setup / config / list<br/>clusters.toml: hosts, users, MFA,<br/>log roots, and partition limits"]
-        GPUProfiles["optional gpu_profiles.toml<br/>cluster-scoped GPU/APU names,<br/>per-device VRAM, and Tensor FLOPS"]
+        ClusterConfig["setup / config / list<br/>clusters.toml: hosts, users, MFA,<br/>log roots, limits, and GPU profiles"]
+        GPUProfiles["optional [[profile]] entries<br/>cluster-scoped GPU/APU names,<br/>per-device VRAM, and Tensor FLOPS"]
         Distribution --> ClusterConfig
+        ClusterConfig --> GPUProfiles
     end
 
     subgraph transport["Authentication and shared transport"]
@@ -1497,8 +1503,8 @@ python-build-standalone interpreter (via `uv`) targeting glibc 2.17, and CI
 checks each one starts in a `manylinux2014` container; a local build inherits
 your Python's glibc requirement. The target still needs `ssh`. Passwords and
 OTPs are never embedded: a frozen build re-enters itself as the OpenSSH
-askpass client. Bundled builds read an optional `gpu_profiles.toml` beside
-`clusters.toml`.
+askpass client. Bundled builds read optional `[[profile]]` entries from the
+same `clusters.toml` used for machine connections.
 
 ### Continuous integration and releases
 

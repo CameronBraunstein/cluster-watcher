@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Sequence, cast
 
 from .commands import RemoteCommandService, SessionUnavailableError, UnknownMachineError
-from .compute import configure_gpu_profiles, gpu_profiles, gpu_profiles_path
+from .compute import configure_gpu_profiles, gpu_profiles
 from .config import DEFAULT_CONFIG, load_config, load_wait_threshold_minutes
 from .credentials import (
     CredentialPromptCancelled,
@@ -251,8 +251,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 130
     try:
         machines = load_config(args.config)
-        configure_gpu_profiles(gpu_profiles_path(args.config))
-        gpu_profiles()  # Report a malformed personal catalog now, not mid-refresh.
+        configure_gpu_profiles(args.config)
+        gpu_profiles()  # Populate the selected config's profile cache before polling.
         if args.command == "list":
             for machine in machines:
                 print(f"{machine.name}\t{machine.username}@{machine.host}\tport={machine.port}")

@@ -382,13 +382,6 @@ elif [[ ! -e "${CONFIG_PATH}" ]]; then
 else
     printf 'Preserved existing configuration: %s\n' "${CONFIG_PATH}"
 fi
-PROFILES_PATH="${CONFIG_DIR}/gpu_profiles.toml"
-if [[ ! -e "${PROFILES_PATH}" && ! -L "${PROFILES_PATH}" && -n "${PROJECT_ROOT}" && -f "${PROJECT_ROOT}/gpu_profiles.toml" ]]; then
-    # Likewise adopt a personal, git-ignored GPU catalog once.
-    install -m 0600 "${PROJECT_ROOT}/gpu_profiles.toml" "${PROFILES_PATH}"
-    printf 'Installed GPU profiles: %s\n' "${PROFILES_PATH}"
-fi
-
 if [[ "${ADD_TO_PATH}" -eq 1 ]]; then
     PATH_LINE="export PATH='${BIN_DIR}':\"\$PATH\""
     PROFILE_PATH="${requested_profile}"

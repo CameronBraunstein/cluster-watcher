@@ -25,7 +25,7 @@ Options:
   --bin-dir DIR       Read the installation from DIR (default: ${BIN_DIR}).
   --config-dir DIR    Locate clusters.toml in DIR (default: ${CONFIG_DIR}).
   --state-dir DIR     Store recovery backups in DIR (default: ${STATE_DIR}).
-  --purge-config      Also remove clusters.toml and gpu_profiles.toml (backed up, not destroyed).
+  --purge-config      Also back up and remove clusters.toml and any legacy gpu_profiles.toml.
   --keep-path         Do not remove the PATH block previously added by install.sh.
   -h, --help          Show this help and exit.
 

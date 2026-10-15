@@ -32,3 +32,20 @@ gpudev = 15
 [dashboard]
 # Pending-job waits are displayed as < 5 minutes, < 30 minutes, then as a nearest-hour estimate.
 wait_threshold_minutes = [5, 30]
+
+# Optional per-device GPU/APU profiles live in this same configuration file.
+# Aliases match Slurm GRES types, partition names, or node-name prefixes.
+# Dense FP16/BF16 Tensor throughput excludes vendor sparsity multipliers.
+[[profile]]
+cluster = "cluster-a"
+name = "NVIDIA H100 80 GB"
+aliases = ["h100"]
+vram_gb = 80
+fp16_bf16_tensor_tflops = 989.0
+
+[[profile]]
+cluster = "cluster-b"
+name = "AMD Instinct MI300A"
+aliases = ["mi300a", "apu"]
+vram_gb = 128
+fp16_bf16_tensor_tflops = 980.6

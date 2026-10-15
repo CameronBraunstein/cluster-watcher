@@ -7,9 +7,9 @@ import unittest
 
 from clusterwatcher.compute import configure_gpu_profiles
 
-# The real GPU catalog is personal configuration; every test uses this fixture.
-TEST_GPU_PROFILES = Path(__file__).with_name("gpu_profiles.test.toml")
-configure_gpu_profiles(TEST_GPU_PROFILES)
+# The real configuration is personal; every compute test uses this fixture.
+TEST_CONFIG = Path(__file__).with_name("clusters.test.toml")
+configure_gpu_profiles(TEST_CONFIG)
 
 
 class TimedTestCase(unittest.TestCase):
@@ -26,8 +26,8 @@ class TimedTestCase(unittest.TestCase):
 
     def run(self, result: unittest.TestResult | None = None) -> unittest.TestResult | None:
         """Run one test with a deadline, preserving the prior alarm handler."""
-        # CLI tests repoint the catalog at their temporary config; start each test clean.
-        configure_gpu_profiles(TEST_GPU_PROFILES)
+        # CLI tests repoint profiles at temporary configs; start each test clean.
+        configure_gpu_profiles(TEST_CONFIG)
         signal_deadline_supported = all(
             hasattr(signal, attribute)
             for attribute in ("SIGALRM", "ITIMER_REAL", "getitimer", "setitimer")

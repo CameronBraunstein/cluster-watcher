@@ -6,6 +6,7 @@ import re
 import sys
 import tomllib
 
+from .compute import parse_gpu_profiles
 from .models import Machine
 from .platforms import standalone_default_config
 from .ssh import parse_control_persist
@@ -127,6 +128,7 @@ def load_config(path: Path) -> list[Machine]:
                 f"credential group {machine.credential_group!r} must use one username "
                 f"(found {prior_username!r} and {machine.username!r})"
             )
+    parse_gpu_profiles(data, path, names)
     return machines
 
 

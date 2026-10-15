@@ -108,7 +108,6 @@ $Command = Join-Path $BinDir "cluster-watcher.exe"
 $Marker = Join-Path $BinDir ".cluster-watcher-install.json"
 $ConfigPointer = Join-Path $BinDir ".cluster-watcher-config"
 $Config = Join-Path $ConfigDir "clusters.toml"
-$Profiles = Join-Path $ConfigDir "gpu_profiles.toml"
 $Temporary = Join-Path ([IO.Path]::GetTempPath()) ("cluster-watcher-install." + [guid]::NewGuid().ToString("N"))
 
 New-Item -ItemType Directory -Force -Path $BinDir, $ConfigDir, $StateDir, $Temporary | Out-Null
@@ -191,11 +190,6 @@ try {
     } else {
         Write-Host "Preserved existing configuration: $Config"
     }
-    $checkoutProfiles = if ($ProjectRoot) { Join-Path $ProjectRoot "gpu_profiles.toml" } else { $null }
-    if (-not (Test-Path -LiteralPath $Profiles) -and $checkoutProfiles -and (Test-Path -LiteralPath $checkoutProfiles -PathType Leaf)) {
-        Copy-Item -LiteralPath $checkoutProfiles -Destination $Profiles
-    }
-
     $PathAdded = $PriorPathAdded
     if ($AddToPath) {
         $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
