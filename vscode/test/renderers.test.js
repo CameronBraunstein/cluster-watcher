@@ -54,6 +54,43 @@ test('jobs retain terminal state grouping and lifecycle visibility', () => {
   assert.match(jobKey(jobs[0]), /cluster_1/);
 });
 
+test('finished and failed cards expose one Archive icon before summary progress', () => {
+  const cases = [
+    ['running', 'RUNNING', {}, false],
+    ['pending', 'PENDING', {}, false],
+    ['dependency', 'PENDING', { reason: 'DependencyNeverSatisfied' }, true],
+    ['completed', 'COMPLETED', {}, true],
+    ['failed-early', 'FAILED', {}, true],
+    ['failed-timeout', 'TIMEOUT', {}, true],
+    ['cancelled', 'CANCELLED', {}, true],
+    ['other', 'UNKNOWN', {}, true],
+  ];
+  const jobs = cases.map(([id, state, extra]) => ({ job_id: id, name: id, cluster: 'cluster_0', state, ...extra }));
+  const archived = { job_id: 'archived', name: 'archived', cluster: 'cluster_0', state: 'COMPLETED' };
+  const html = renderJobs({ jobs, archived_jobs: [archived] });
+  const cardFor = (id) => html.match(new RegExp(`<details class="card"[^>]*data-job-ref="cluster_0/${id}"[^>]*>.*?</details>`, 's'))[0];
+
+  for (const [id, , , quickArchive] of cases) {
+    const card = cardFor(id);
+    const summary = card.match(/<summary>.*?<\/summary>/s)[0];
+    const actions = card.match(/<div class="actions">.*?<\/div>/s)[0];
+    assert.equal((card.match(/data-command="clusterWatcher\.archiveJob"/g) || []).length, 1, id);
+    if (quickArchive) {
+      assert.match(summary, /<span class="card-summary-progress"><a class="button compact-action archive-action summary-archive-action"[^>]*data-command="clusterWatcher\.archiveJob"[^>]*>.*?<\/a><span class="(?:job-progress|muted progress-message)"/s, id);
+      assert.doesNotMatch(actions, /clusterWatcher\.archiveJob/, id);
+    } else {
+      assert.doesNotMatch(summary, /clusterWatcher\.archiveJob/, id);
+      assert.match(actions, /clusterWatcher\.archiveJob/, id);
+    }
+  }
+
+  const archivedCard = cardFor('archived');
+  assert.doesNotMatch(archivedCard.match(/<summary>.*?<\/summary>/s)[0], /clusterWatcher\.(?:archiveJob|restoreJob)/);
+  assert.match(archivedCard.match(/<div class="actions">.*?<\/div>/s)[0], /clusterWatcher\.restoreJob/);
+  assert.match(html, /\.card-summary-progress>\.summary-archive-action\{[^}]*flex:0 0 auto/);
+  assert.match(html, /event\.preventDefault\(\);\s+if \(button\.closest\('summary'\)\) event\.stopPropagation\(\)/);
+});
+
 test('status shows every partition detail compactly without a card disclosure', () => {
   const partition = {
     name: 'gpu-h100', rank: 1, aggregate: false,

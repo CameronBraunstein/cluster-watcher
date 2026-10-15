@@ -105,10 +105,13 @@ back to the user rank only when global data is unavailable. If no wait estimate 
 gauge moves into the always-visible
 summary and becomes as thick as a normal progress bar. It has no directional
 arrows and is omitted when no useful comparison is possible.
-Expand a card to see details and to:
+Finished, failed, cancelled, and other non-running/non-pending cards show the
+archive-box icon on the compact card, just left of progress. Running and
+Pending cards keep Archive in their expanded actions; Archive cards keep
+Restore there. Expand a card to see details and to:
 
-- select the archive-box icon and move it into the collapsed **Archive** group
-  at the bottom, or **Restore** it later;
+- archive a running or pending job, or **Restore** a job from the collapsed
+  **Archive** group at the bottom;
 - once a job has left the pending group, select **.err** or **.out** to open
   that stream as a read-only VS Code document. Pending cards omit both actions;
   an archived pending card receives refreshed state and gains them when it

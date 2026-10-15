@@ -410,15 +410,19 @@ collapsed **Archive**. Each job is a card:
 
 - **Collapsed:** the job name and a progress bar with run/allotted time or
   `<duration> estimated wait`. Long names end in an ellipsis; hover the
-  **title** for `<cluster> <job ID> <full name>`.
+  **title** for `<cluster> <job ID> <full name>`. In every group except
+  **Running**, **Pending**, and **Archive**, an archive-box icon appears
+  immediately left of the progress bar, so you can archive a job without
+  expanding its card.
 
   <img src="docs/images/vscode-title-hover.png" alt="Hovering a collapsed card's title shows the cluster, job ID, and full job name" width="300">
 
 - **Expanded:** the job-ID badge appears to the right of the progress bar
   (click it to copy), followed by cluster, partition, and resources;
-  submit/launch/limit/end times; any dependencies; and actions: archive,
-  **.err**, **.out**, **script**, and **End** (with confirmation) for running
-  and pending jobs.
+  submit/launch/limit/end times; any dependencies; and actions: **.err**,
+  **.out**, **script**, plus **End** (with confirmation) for running and
+  pending jobs. **Running** and **Pending** retain Archive among expanded
+  actions; archived jobs have **Restore** there.
 
 Click a dependency's job ID to jump to that card. Logs open as read-only
 documents holding the newest 2,000 lines; **Load 2,000 Older Lines** in the
