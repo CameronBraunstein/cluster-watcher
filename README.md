@@ -439,7 +439,9 @@ both onto one unreadable line.
 The availability labels begin flush with the card's left edge and share one
 compact column, so both bars start at the same position. A small gap separates
 each bar from its fraction; trailing **Free** labels do not use a separate
-alignment column.
+alignment column. The bars stretch with the sidebar and give up width to longer
+fractions when needed. At very narrow widths, an abbreviated fraction reveals
+its complete value on hover.
 
 If a cluster's SSH session closes, its group shows **Log in again**, which
 runs `cluster-watcher login <cluster>` in the background and presents any

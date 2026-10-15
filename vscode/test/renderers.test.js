@@ -91,9 +91,12 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /\.availability-cell\{display:flex;align-items:center;gap:2px;white-space:nowrap\}/);
   assert.match(html, /\.partition-availability\{[^}]*gap:0/);
   assert.match(html, /\.partition-availability-label\{[^}]*flex:0 0 36px;width:36px;padding-right:2px[^}]*text-align:left/);
+  assert.match(html, /\.partition-availability>\.availability-cell\{display:grid;grid-template-columns:minmax\(0,1fr\) minmax\(0,max-content\);column-gap:2px;flex:1 1 auto;min-width:0\}/);
+  assert.match(html, /\.partition-availability \.availability-cell>\.availability\{width:100%;min-width:0\}/);
+  assert.match(html, /\.partition-availability \.availability-count\{overflow:hidden;text-overflow:ellipsis\}/);
   assert.match(html, /\.availability-count\{font-variant-numeric:tabular-nums;white-space:nowrap\}/);
-  assert.match(card, /aria-label="2 of 8 free">2\/8 Free<\/span>/);
-  assert.match(card, /aria-label="2 of 7 free">2\/7 Free<\/span>/);
+  assert.match(card, /aria-label="2 of 8 free" title="2\/8 Free">2\/8 Free<\/span>/);
+  assert.match(card, /aria-label="2 of 7 free" title="2\/7 Free">2\/7 Free<\/span>/);
   assert.ok(html.indexOf('class="available"') < html.indexOf('class="unavailable"'));
   assert.match(html, /data-availability="2 idle, 4 allocated, 1 reserved, 1 down"/);
   assert.match(html, /data-fast-tooltip="2 idle, 4 allocated, 1 reserved, 1 down"/);
@@ -109,6 +112,17 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.equal(waitCell(partition, 1), '5m');
   assert.equal(waitCell(partition, 2), 'DENY');
   assert.equal(waitCell(partition, 16), '—');
+});
+
+test('long availability fractions keep their complete value available on hover', () => {
+  const partition = {
+    name: 'large', gpus: { total: 12345, schedulable_idle: 1234 },
+    node_states: { IDLE: 1234, ALLOCATED: 11111 },
+  };
+  const html = renderStatus({ clusters: [{ name: 'large-cluster', reachable: true, partitions: [partition] }] });
+
+  assert.match(html, /aria-label="1234 of 12345 free" title="1234\/12345 Free">1234\/12345 Free<\/span>/);
+  assert.equal((html.match(/1234\/12345 Free<\/span>/g) || []).length, 2);
 });
 
 test('server status shows background ownership and per-machine login actions', () => {
