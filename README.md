@@ -385,9 +385,11 @@ own.
 switch to collapsed, compact offline placeholders. Expand either heading for a
 short notice; the startup controls are not duplicated there. Immediately below
 the off switch in **Server Status**, **Start Server** tells you that the switch
-starts the service. **Edit configuration** and **Settings** appear below it;
-**Run setup wizard** appears there only when the selected `clusters.toml` does
-not exist. The wizard is always available from the Server Status title menu.
+starts the service. **Run setup wizard** appears below it only when the selected
+`clusters.toml` does not exist. The **configure clusters...** link below the
+cluster cards opens that file; configuration and settings commands remain
+available from VS Code's Command Palette. The wizard is always available from
+the Server Status title menu.
 The placeholders disappear when the service responds, and the live job and
 cluster views return. The service starts as an extension-owned background process with
 `serve --jobs-api`; password and OTP requests appear as masked VS Code input

@@ -7,11 +7,13 @@ configuration, SSH, MFA, Slurm queries, and refresh scheduling.
 
 When no backend service is found, **My Jobs** and **Cluster Status** become
 collapsed offline placeholders. Their expanded content contains only a short
-notice. The off switch in **Server Status** is labeled **Start Server**;
-**Edit configuration** and **Settings** appear beneath it. **Run setup wizard**
-appears there only if the selected `clusters.toml` is missing, but remains in
-the Server Status title menu at all times. Successful backend responses restore
-the live views. You can still expand an offline placeholder manually.
+notice. The off switch in **Server Status** is labeled **Start Server**.
+**Run setup wizard** appears beneath it only if the selected `clusters.toml`
+is missing, but remains in the Server Status title menu at all times. The
+**configure clusters...** link beneath the cluster cards opens the
+configuration file; configuration and settings commands remain in the Command
+Palette. Successful backend responses restore the live views. You can still
+expand an offline placeholder manually.
 
 ## Requirements
 

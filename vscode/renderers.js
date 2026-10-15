@@ -523,10 +523,8 @@ function renderServerStatus(payload = {}, freshness = {}) {
   const summaryLabel = serviceOn ? (labels[state] || '') : 'Start Server';
   const summaryText = `${summaryLabel ? `<strong>${escapeHtml(summaryLabel)}</strong>` : ''}${linkedUrl}`;
   const serviceSummary = `<div class="service-summary">${toggle}${summaryText}</div>`;
-  const setupActions = ['offline', 'error'].includes(state)
-    ? `<div class="service-setup-actions">${payload.configExists === false ? `<a class="button secondary" role="button" ${commandAttributes('clusterWatcher.runSetup')}>Run setup wizard</a>` : ''}`
-      + `<a class="button secondary" role="button" ${commandAttributes('clusterWatcher.editConfig')}>Edit configuration</a>`
-      + `<a class="button secondary" role="button" ${commandAttributes('clusterWatcher.openSettings')}>Settings</a></div>`
+  const setupActions = ['offline', 'error'].includes(state) && payload.configExists === false
+    ? `<div class="service-setup-actions"><a class="button secondary" role="button" ${commandAttributes('clusterWatcher.runSetup')}>Run setup wizard</a></div>`
     : '';
 
   const machines = (payload.sessions?.machines || []).map((machine) => {

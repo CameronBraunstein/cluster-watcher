@@ -216,15 +216,13 @@ test('server status shows background ownership and per-machine login actions', (
   const setup = stopped.match(/<div class="service-summary">.*?<\/div><div class="service-setup-actions">.*?<\/div>/s)[0];
   const setupButtons = setup.slice(setup.indexOf('<div class="service-setup-actions">'));
   assert.ok(setup.indexOf('class="service-summary"') < setup.indexOf('class="service-setup-actions"'));
-  for (const command of ['runSetup', 'editConfig', 'openSettings']) {
-    assert.match(setup, new RegExp(`data-command="clusterWatcher\\.${command}"`));
-  }
-  assert.doesNotMatch(setupButtons, /Start service &amp; SSH sessions|data-command="clusterWatcher\.startService"/);
+  assert.match(setupButtons, /data-command="clusterWatcher\.runSetup"/);
+  assert.doesNotMatch(setupButtons, /Start service &amp; SSH sessions|data-command="clusterWatcher\.(startService|editConfig|openSettings)"/);
+  assert.equal((setupButtons.match(/data-command=/g) || []).length, 1);
   assert.match(setup, /Run setup wizard/);
-  assert.match(setup, /Edit configuration/);
-  assert.match(setup, />Settings</);
-  assert.doesNotMatch(renderServerStatus({ service: { state: 'offline' }, configExists: true }), /data-command="clusterWatcher\.runSetup"/);
-  assert.doesNotMatch(renderServerStatus({ service: { state: 'offline' } }), /data-command="clusterWatcher\.runSetup"/);
+  assert.match(stopped, /class="configure-clusters"[^>]*data-command="clusterWatcher\.editConfig"/);
+  assert.doesNotMatch(renderServerStatus({ service: { state: 'offline' }, configExists: true }), /class="service-setup-actions"/);
+  assert.doesNotMatch(renderServerStatus({ service: { state: 'offline' } }), /class="service-setup-actions"/);
   assert.doesNotMatch(renderServerStatus({ service: { state: 'starting' } }), /class="service-setup-actions"/);
   assert.match(renderServerStatus({ service: { state: 'error' }, configExists: false }), /class="service-setup-actions"/);
   assert.match(renderServerStatus({ service: { state: 'error' } }), /<strong>Start Server<\/strong>/);
