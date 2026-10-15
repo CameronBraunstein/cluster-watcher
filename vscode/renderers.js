@@ -298,26 +298,32 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 button.button{border:0;font:inherit;cursor:pointer}
 .service-summary{display:flex;align-items:center;gap:4px;margin:3px 0 5px;min-width:0;white-space:nowrap;font-size:.78em}.service-summary>strong{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}.service-url{box-sizing:border-box;display:block;flex:0 0 auto;max-width:calc(100% - 26px);min-width:0;margin:0;padding:0;overflow:hidden;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;text-decoration:underline;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 22px;width:22px;height:12px;margin:0;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:12px}.service-toggle:disabled{cursor:wait;opacity:.65}.session-list{display:grid;gap:3px;margin-top:5px}.session-row{min-width:0;border:1px solid var(--vscode-panel-border);border-radius:4px;padding:4px 5px}.session-row-head{display:flex;align-items:center;justify-content:space-between;gap:4px;min-width:0}.session-name{font-weight:600;font-size:.85em;min-width:0;overflow:hidden;text-overflow:ellipsis}.session-state{font-size:.68em;white-space:nowrap}.session-state.open{color:var(--vscode-testing-iconPassed)}.session-state.closed{color:var(--vscode-errorForeground)}.session-target{margin-top:1px;font-size:.68em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.session-actions{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}.session-actions>.compact-action{box-sizing:border-box;max-width:100%;padding:2px 4px;font-size:.68em;line-height:1.3;white-space:normal;overflow-wrap:anywhere;text-align:left}.service-output{max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.72em}.server-details{margin-top:10px}.server-details>summary{cursor:pointer}
 .service-setup-actions{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 8px}.service-setup-actions>.button{box-sizing:border-box;max-width:100%;padding:3px 5px;font-size:.78em;white-space:normal;text-align:left}
-.configure-clusters{display:inline-block;margin-top:6px;color:var(--vscode-textLink-foreground);font-size:.78em;text-decoration:none}.configure-clusters:hover{text-decoration:underline}
+.configure-clusters{display:inline-block;margin-top:6px;padding:0;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;font-size:.78em;text-align:left;text-decoration:none;cursor:pointer}.configure-clusters:hover{text-decoration:underline}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
   const savedViewport = api.getState() || {};
   const savedScrollY = Number(savedViewport.scrollY) || 0;
+  const statusAnchor = document.querySelector('[data-scroll-anchor="configure-clusters"]');
+  let restoringScroll = true;
   const visibleJobCards = () => [...document.querySelectorAll('[data-job-ref]')]
     .filter((card) => card.getClientRects().length);
   const rememberScroll = (excludedCard) => {
-    const anchor = visibleJobCards()
+    const jobAnchor = visibleJobCards()
       .filter((card) => card !== excludedCard)
       .map((card) => ({ card, top: card.getBoundingClientRect().top }))
       .sort((left, right) => Math.abs(left.top) - Math.abs(right.top))[0];
     api.setState({
       ...(api.getState() || {}), scrollY: window.scrollY,
-      anchorRef: anchor?.card.dataset.jobRef, anchorTop: anchor?.top,
+      anchorRef: jobAnchor?.card.dataset.jobRef,
+      anchorKey: statusAnchor?.dataset.scrollAnchor,
+      anchorTop: jobAnchor?.top ?? statusAnchor?.getBoundingClientRect().top,
     });
   };
   const restoreScroll = () => {
-    const anchor = visibleJobCards().find((card) => card.dataset.jobRef === savedViewport.anchorRef);
+    const anchor = statusAnchor?.dataset.scrollAnchor === savedViewport.anchorKey
+      ? statusAnchor
+      : visibleJobCards().find((card) => card.dataset.jobRef === savedViewport.anchorRef);
     const anchorTop = Number(savedViewport.anchorTop);
     if (anchor && Number.isFinite(anchorTop)) {
       window.scrollBy(0, anchor.getBoundingClientRect().top - anchorTop);
@@ -326,11 +332,18 @@ button.button{border:0;font:inherit;cursor:pointer}
     }
   };
   // A replaced webview document may settle over more than one layout frame.
-  requestAnimationFrame(() => { restoreScroll(); requestAnimationFrame(restoreScroll); });
-  window.addEventListener('load', restoreScroll, { once: true });
+  requestAnimationFrame(() => {
+    restoreScroll();
+    requestAnimationFrame(() => { restoreScroll(); restoringScroll = false; });
+  });
+  window.addEventListener('load', () => {
+    restoringScroll = true;
+    restoreScroll();
+    requestAnimationFrame(() => { restoringScroll = false; });
+  }, { once: true });
   let scrollFrame;
   window.addEventListener('scroll', () => {
-    if (scrollFrame) return;
+    if (restoringScroll || scrollFrame) return;
     scrollFrame = requestAnimationFrame(() => { scrollFrame = undefined; rememberScroll(); });
   }, { passive: true });
   const FAST_HOVER_DELAY_MS = 100;
@@ -559,7 +572,7 @@ function renderServerStatus(payload = {}, freshness = {}) {
     + (service.activity ? `<p class="muted">${escapeHtml(service.activity)}</p>` : '')
     + error + sessionError
     + `<div class="session-list">${machines || '<p class="muted">No session inventory is available yet.</p>'}</div>`
-    + `<a class="configure-clusters" role="button" ${commandAttributes('clusterWatcher.editConfig')}>configure clusters...</a>${diagnostics}`;
+    + `<button class="configure-clusters" data-scroll-anchor="configure-clusters" ${commandButtonAttributes('clusterWatcher.editConfig')}>configure clusters...</button>${diagnostics}`;
   return document('Server Status', body, freshness);
 }
 

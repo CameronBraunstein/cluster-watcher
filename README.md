@@ -495,8 +495,8 @@ card also has **Log into all machines on `<group>`**; individual login uses the
 new `cluster-watcher login MACHINE --only` mode. There is no separate global
 login control because the machine cards provide the relevant scoped actions.
 Below the machine cards, **configure clusters...** opens the selected
-`clusters.toml` in an editor; if it does not exist, the extension offers the
-setup wizard instead.
+`clusters.toml` in an editor without moving the Server Status scroll position;
+if the file does not exist, the extension offers the setup wizard instead.
 Stopping an attached service
 requires confirmation and warns that other connected clients will be
 disconnected. The managed process stops with the extension host; its OpenSSH

@@ -194,7 +194,11 @@ test('server status shows background ownership and per-machine login actions', (
   assert.match(html, /<div class="service-summary"><button class="service-toggle on"[^>]*><\/button><button class="service-url"[^>]*data-command="clusterWatcher\.openDashboard"/);
   assert.doesNotMatch(html, /class="service-setup-actions"/);
   assert.ok(html.indexOf('class="configure-clusters"') > html.indexOf('class="session-list"'));
-  assert.match(html, /class="configure-clusters"[^>]*data-command="clusterWatcher\.editConfig"[^>]*>configure clusters\.\.\.<\/a>/);
+  assert.match(html, /<button class="configure-clusters" data-scroll-anchor="configure-clusters" type="button" data-command="clusterWatcher\.editConfig" data-args="\[\]">configure clusters\.\.\.<\/button>/);
+  assert.doesNotMatch(html, /<a class="configure-clusters"|class="configure-clusters"[^>]*href="#"/);
+  assert.match(html, /const statusAnchor = document\.querySelector\('\[data-scroll-anchor="configure-clusters"\]'\)/);
+  assert.match(html, /anchorKey: statusAnchor\?\.dataset\.scrollAnchor/);
+  assert.match(html, /if \(restoringScroll \|\| scrollFrame\) return/);
   assert.doesNotMatch(html, /class="service-url"[^>]*href="#"/);
   assert.match(html, /class="muted session-target">alice@a\.example/);
   assert.doesNotMatch(html, />Log in closed sessions<\/button>/);
@@ -484,7 +488,7 @@ test('webview buttons post allow-listed commands instead of using command URIs',
   assert.match(html, /type: 'command', command: button\.dataset\.command/);
   assert.match(html, /const savedViewport = api\.getState\(\) \|\| \{\}/);
   assert.match(html, /visibleJobCards\(\)\.find\(\(card\) => card\.dataset\.jobRef === savedViewport\.anchorRef\)/);
-  assert.match(html, /requestAnimationFrame\(\(\) => \{ restoreScroll\(\); requestAnimationFrame\(restoreScroll\); \}\)/);
+  assert.match(html, /requestAnimationFrame\(\(\) => \{\s+restoreScroll\(\);\s+requestAnimationFrame\(\(\) => \{ restoreScroll\(\); restoringScroll = false; \}\);\s+\}\)/);
   assert.match(html, /const movesJob = \['clusterWatcher\.archiveJob', 'clusterWatcher\.restoreJob'\]\.includes\(button\.dataset\.command\)/);
   assert.match(html, /rememberScroll\(movesJob \? button\.closest\('\[data-job-ref\]'\) : undefined\);\s+let args/);
 });

@@ -274,7 +274,8 @@ password for all closed group members. Stopping an attached local service asks
 for confirmation, warns that other connected clients will be disconnected,
 and then requests a graceful shutdown from the backend.
 **configure clusters...** appears below the machine cards and opens the
-selected `clusters.toml` (or offers setup if it does not exist).
+selected `clusters.toml` without moving the Server Status scroll position (or
+offers setup if the file does not exist).
 An extension-owned process stops when the extension host shuts down or reloads;
 the OpenSSH masters may remain available for their configured persistence
 period. Start the service separately when it must outlive VS Code.

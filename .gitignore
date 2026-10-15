@@ -11,7 +11,6 @@ vscode/backend-manifest.json
 # Personal files kept locally, never published.
 clusters.toml
 clusters.toml.bak
-gpu_profiles.toml
 AGENTS.md
 PUBLISHING_INSTRUCTIONS.md
 
