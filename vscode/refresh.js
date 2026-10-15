@@ -22,6 +22,7 @@ class RefreshCoordinator {
    * @param {(error: unknown) => boolean} options.jobsApiDisabled Detect an intentionally disabled jobs API.
    * @param {() => number} options.refreshSeconds Return the current polling interval in seconds.
    * @param {() => Promise<object>} [options.refreshServer] Refresh local service/session state.
+   * @param {() => void} [options.onServiceAvailable] Reveal live views on a successful API response.
    * @param {(callback: Function, delay: number) => unknown} [options.setTimeout] Schedule a first-load retry.
    * @param {(handle: unknown) => void} [options.clearTimeout] Cancel a first-load retry.
    */
@@ -33,6 +34,7 @@ class RefreshCoordinator {
     this.isJobsApiDisabled = options.jobsApiDisabled;
     this.refreshSeconds = options.refreshSeconds;
     this.serverRefresh = options.refreshServer;
+    this.onServiceAvailable = options.onServiceAvailable || (() => {});
     this.setTimeout = options.setTimeout || setTimeout;
     this.clearTimeout = options.clearTimeout || clearTimeout;
     /** ETags of the last data rendered per endpoint, for conditional polling. */
@@ -120,6 +122,7 @@ class RefreshCoordinator {
     try {
       const result = await this.client.poll('/api/v1/jobs', this.etags.jobs);
       const checkedAt = Date.now();
+      this.onServiceAvailable();
       if (result.notModified) {
         this.monitor.checked(checkedAt);
         this.jobsProvider.checked(checkedAt);
@@ -132,7 +135,9 @@ class RefreshCoordinator {
       return { outcome: 'updated', checkedAt };
     } catch (error) {
       this.etags.jobs = undefined;
-      if (initialCollectionPending(error) || generation !== this.serviceGeneration) {
+      const collecting = initialCollectionPending(error);
+      if (collecting || generation !== this.serviceGeneration) {
+        if (collecting) this.onServiceAvailable();
         this.monitor.loading();
         this.jobsProvider.loading();
         this.retryFirstCollection('jobs');
@@ -155,6 +160,7 @@ class RefreshCoordinator {
     try {
       const result = await this.client.poll('/api/v1/snapshot', this.etags.status);
       const checkedAt = Date.now();
+      this.onServiceAvailable();
       if (result.notModified) {
         this.statusProvider.checked(checkedAt);
         return { outcome: 'unchanged', checkedAt };
@@ -164,7 +170,9 @@ class RefreshCoordinator {
       return { outcome: 'updated', checkedAt };
     } catch (error) {
       this.etags.status = undefined;
-      if (initialCollectionPending(error) || generation !== this.serviceGeneration) {
+      const collecting = initialCollectionPending(error);
+      if (collecting || generation !== this.serviceGeneration) {
+        if (collecting) this.onServiceAvailable();
         this.statusProvider.loading();
         this.retryFirstCollection('status');
         return { outcome: 'loading', checkedAt: Date.now() };

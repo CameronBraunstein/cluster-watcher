@@ -87,6 +87,14 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
     manifest.contributes.configuration.properties['clusterWatcher.executable'].default,
     'cluster-watcher',
   );
+  const views = new Map(manifest.contributes.views.clusterWatcher.map((view) => [view.id, view]));
+  for (const kind of ['jobs', 'status']) {
+    assert.equal(views.get(`clusterWatcher.${kind}`).when, 'clusterWatcher.serviceAvailable');
+    assert.deepEqual(
+      { when: views.get(`clusterWatcher.${kind}Offline`).when, visibility: views.get(`clusterWatcher.${kind}Offline`).visibility },
+      { when: '!clusterWatcher.serviceAvailable', visibility: 'collapsed' },
+    );
+  }
   // viewContainer/title is a proposed API that published extensions cannot use.
   assert.equal(manifest.contributes.menus['viewContainer/title'], undefined);
   assert.deepEqual(manifest.contributes.menus['view/title'], [
@@ -117,10 +125,14 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   assert.match(extensionSource, /this\.view\.description = undefined/);
   assert.match(extensionSource, /renderStatus\(this\.payload, this\.disclosures, this\.freshness\(\)\)/);
   assert.match(extensionSource, /renderServerStatus/);
+  assert.match(extensionSource, /registerWebviewViewProvider\('clusterWatcher\.jobsOffline', offlineJobsProvider\)/);
+  assert.match(extensionSource, /registerWebviewViewProvider\('clusterWatcher\.statusOffline', offlineStatusProvider\)/);
+  assert.match(extensionSource, /setContext', 'clusterWatcher\.serviceAvailable', available/);
+  assert.match(extensionSource, /view\.onDidDispose\(\(\) => \{ if \(this\.view === view\) this\.view = undefined; \}\)/);
   assert.match(extensionSource, /coordinator\.refreshJobs\(\)/);
   assert.match(extensionSource, /coordinator\.refreshStatus\(\)/);
   assert.match(extensionSource, /if \(!wasReachable && \['running', 'attached'\]\.includes\(this\.lifecycle\.state\)\) this\.onReachable\(\)/);
-  assert.match(extensionSource, /serverProvider, \(\) => coordinator\.serviceReachable\(\)/);
+  assert.match(extensionSource, /serverProvider,\s*\(\) => coordinator\.serviceReachable\(\), setServiceAvailable/);
   assert.match(extensionSource, /client\.post\('\/api\/v1\/shutdown', \{\}, 5000\)/);
   assert.match(extensionSource, /this\.client\.serviceInfo\(\)/);
   assert.match(extensionSource, /serviceInfo\.started_at/);

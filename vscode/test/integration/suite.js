@@ -2,8 +2,8 @@
 
 /**
  * Integration checks executed inside a real VS Code extension host: the
- * extension activates, registers its commands, and its webview views open
- * without a running Cluster Watcher service.
+ * extension activates, registers its commands, and the offline placeholders
+ * and Server Status view open without a running Cluster Watcher service.
  */
 const assert = require('node:assert/strict');
 const vscode = require('vscode');
@@ -34,7 +34,7 @@ async function run() {
   const commands = new Set(await vscode.commands.getCommands(true));
   for (const command of EXPECTED_COMMANDS) assert.ok(commands.has(command), `${command} is registered`);
 
-  // Opening the container resolves all three webview providers; this must not throw offline.
+  // Opening the container reveals collapsed offline placeholders and Server Status.
   await vscode.commands.executeCommand('workbench.view.extension.clusterWatcher');
   await vscode.commands.executeCommand('clusterWatcher.refreshJobs');
   await vscode.commands.executeCommand('clusterWatcher.refreshStatus');

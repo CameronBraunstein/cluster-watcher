@@ -5,6 +5,13 @@ to the Activity Bar. It is a thin client for the loopback APIs provided by
 `cluster-watcher serve`; the Python application remains responsible for
 configuration, SSH, MFA, Slurm queries, and refresh scheduling.
 
+When no backend service is found, **My Jobs** and **Cluster Status** become
+collapsed offline placeholders. Their expanded content contains only a short
+notice; the **Start service & SSH sessions**, **Run setup wizard**, **Edit
+configuration**, and **Settings** buttons appear directly below the service
+switch in **Server Status**. Successful backend responses restore the live
+views. You can still expand an offline placeholder manually.
+
 ## Requirements
 
 - On first use, the extension looks for an existing **`cluster-watcher`**

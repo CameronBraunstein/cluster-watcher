@@ -59,12 +59,14 @@ test('the initial-collection 503 is loading and retries promptly without an offl
   const retryCallbacks = [];
   const delays = [];
   const requests = [];
+  const available = [];
   const pending = Object.assign(new Error('The first cluster status collection has not completed'), { status: 503 });
   const state = harness(async (path) => {
     requests.push(path);
     if (requests.length <= 2) throw pending;
     return { payload: { source: path }, etag: path };
   }, undefined, {
+    onServiceAvailable: () => available.push(true),
     setTimeout: (callback, delay) => { retryCallbacks.push(callback); delays.push(delay); return retryCallbacks.length; },
     clearTimeout: () => {},
   });
@@ -72,6 +74,7 @@ test('the initial-collection 503 is loading and retries promptly without an offl
   const first = await state.coordinator.refresh();
   assert.deepEqual(first.map((result) => result.outcome), ['loading', 'loading']);
   assert.deepEqual(delays, [1000, 1000]);
+  assert.deepEqual(available, [true, true]);
   assert.equal(state.monitor.loadings, 1);
   assert.equal(state.jobsProvider.loadings, 1);
   assert.equal(state.statusProvider.loadings, 1);
@@ -188,6 +191,22 @@ test('combined refresh continues to poll both endpoints', async () => {
   assert.deepEqual(calls.sort(), ['/api/v1/jobs', '/api/v1/snapshot']);
   assert.equal(state.jobsProvider.updates.length, 1);
   assert.equal(state.statusProvider.updates.length, 1);
+});
+
+test('a successful API poll reveals live views before server inventory completes', async () => {
+  const available = [];
+  let finishServer;
+  const state = harness(
+    async (path) => ({ payload: { source: path }, etag: path }),
+    () => new Promise((resolve) => { finishServer = resolve; }),
+    { onServiceAvailable: () => available.push(true) },
+  );
+
+  const combined = state.coordinator.refresh();
+  await Promise.all([state.coordinator.refreshJobs(), state.coordinator.refreshStatus()]);
+  assert.deepEqual(available, [true, true]);
+  finishServer({ outcome: 'updated', checkedAt: Date.now() });
+  await combined;
 });
 
 test('combined and server-only refreshes include the local service inventory', async () => {

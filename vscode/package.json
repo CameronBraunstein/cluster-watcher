@@ -127,12 +127,28 @@
         {
           "id": "clusterWatcher.jobs",
           "name": "My Jobs",
-          "type": "webview"
+          "type": "webview",
+          "when": "clusterWatcher.serviceAvailable"
         },
         {
           "id": "clusterWatcher.status",
           "name": "Cluster Status",
-          "type": "webview"
+          "type": "webview",
+          "when": "clusterWatcher.serviceAvailable"
+        },
+        {
+          "id": "clusterWatcher.jobsOffline",
+          "name": "My Jobs",
+          "type": "webview",
+          "when": "!clusterWatcher.serviceAvailable",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "clusterWatcher.statusOffline",
+          "name": "Cluster Status",
+          "type": "webview",
+          "when": "!clusterWatcher.serviceAvailable",
+          "visibility": "collapsed"
         },
         {
           "id": "clusterWatcher.server",

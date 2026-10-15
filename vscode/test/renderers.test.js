@@ -192,6 +192,7 @@ test('server status shows background ownership and per-machine login actions', (
   assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;closed&quot;,true\]">Log into all machines on shared-site<\/button>/);
   assert.match(html, /class="service-toggle on"[^>]*data-command="clusterWatcher\.stopService"[^>]*aria-label="Stop service"/);
   assert.match(html, /<div class="service-summary"><button class="service-toggle on"[^>]*><\/button><button class="service-url"[^>]*data-command="clusterWatcher\.openDashboard"/);
+  assert.doesNotMatch(html, /class="service-setup-actions"/);
   assert.doesNotMatch(html, /class="service-url"[^>]*href="#"/);
   assert.match(html, /class="muted session-target">alice@a\.example/);
   assert.doesNotMatch(html, />Log in closed sessions<\/button>/);
@@ -209,6 +210,17 @@ test('server status shows background ownership and per-machine login actions', (
 
   const stopped = renderServerStatus({ service: { state: 'offline', owned: false }, sessions: { machines: [] } });
   assert.match(stopped, /class="service-toggle off"[^>]*data-command="clusterWatcher\.startService"[^>]*data-fast-tooltip="Start service"/);
+  const setup = stopped.match(/<div class="service-summary">.*?<\/div><div class="service-setup-actions">.*?<\/div>/s)[0];
+  assert.ok(setup.indexOf('class="service-summary"') < setup.indexOf('class="service-setup-actions"'));
+  for (const command of ['startService', 'runSetup', 'editConfig', 'openSettings']) {
+    assert.match(setup, new RegExp(`data-command="clusterWatcher\\.${command}"`));
+  }
+  assert.match(setup, /Start service &amp; SSH sessions/);
+  assert.match(setup, /Run setup wizard/);
+  assert.match(setup, /Edit configuration/);
+  assert.match(setup, />Settings</);
+  assert.doesNotMatch(renderServerStatus({ service: { state: 'starting' } }), /class="service-setup-actions"/);
+  assert.match(renderServerStatus({ service: { state: 'error' } }), /class="service-setup-actions"/);
   assert.match(stopped, /\.service-summary\{[^}]*white-space:nowrap/);
   assert.match(stopped, /\.service-summary\{[^}]*font-size:\.78em/);
   assert.match(stopped, /\.service-url\{[^}]*max-width:calc\(100% - 26px\)/);
@@ -472,12 +484,12 @@ test('webview buttons post allow-listed commands instead of using command URIs',
   assert.match(html, /rememberScroll\(movesJob \? button\.closest\('\[data-job-ref\]'\) : undefined\);\s+let args/);
 });
 
-test('welcome view offers start, setup, config, and settings with escaped detail', () => {
+test('offline job and status views point to Server Status without duplicate controls', () => {
   const html = renderWelcome('My Jobs', 'connect ECONNREFUSED <127.0.0.1>');
-  for (const command of ['startService', 'runSetup', 'editConfig', 'openSettings']) {
-    assert.match(html, new RegExp(`data-command="clusterWatcher\\.${command}"`));
-  }
+  assert.match(html, /No service found\. Use Server Status to start it\./);
+  assert.doesNotMatch(html, /data-command="clusterWatcher\.(?:startService|runSetup|editConfig|openSettings)"/);
   assert.match(html, /ECONNREFUSED &lt;127\.0\.0\.1&gt;/);
+  assert.doesNotMatch(renderWelcome('Cluster Status', ''), /Connection details/);
 });
 
 test('every card offers a compact script action for its job', () => {

@@ -381,9 +381,13 @@ The extension adds a Cluster Watcher icon to the Activity Bar with three views.
 It is a thin client for the service above and has no SSH or Slurm code of its
 own.
 
-**Getting started.** If no service is running, the sidebar offers **Start
-service & SSH sessions**, **Run setup wizard**, **Edit configuration**, and
-**Settings**. The service starts as an extension-owned background process with
+**Getting started.** If no service is found, **My Jobs** and **Cluster Status**
+switch to collapsed, compact offline placeholders. Expand either heading for a
+short notice; the startup controls are not duplicated there. Immediately below
+the switch in **Server Status**, you can choose **Start service & SSH
+sessions**, **Run setup wizard**, **Edit configuration**, or **Settings**.
+The placeholders disappear when the service responds, and the live job and
+cluster views return. The service starts as an extension-owned background process with
 `serve --jobs-api`; password and OTP requests appear as masked VS Code input
 boxes, without opening a terminal. Secrets travel only over the child process's
 private stdin and are never placed in arguments, environment variables, logs,

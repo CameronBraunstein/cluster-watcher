@@ -133,12 +133,13 @@ class BackendClient {
 
 /** Own a background service while allowing attachment to a separately run service. */
 class ServiceController {
-  constructor(client, refresh, manager, provider, onReachable = () => {}) {
+  constructor(client, refresh, manager, provider, onReachable = () => {}, onAvailabilityChange = () => {}) {
     this.client = client;
     this.refresh = refresh;
     this.manager = manager;
     this.provider = provider;
     this.onReachable = onReachable;
+    this.onAvailabilityChange = onAvailabilityChange;
     this.process = undefined;
     this.loginProcess = undefined;
     this.stopping = false;
@@ -155,6 +156,8 @@ class ServiceController {
   publish(changes = {}) {
     const wasReachable = ['running', 'attached'].includes(this.lifecycle.state);
     this.lifecycle = { ...this.lifecycle, ...changes, url: configuration().backendUrl };
+    // Stopping still has a reachable service until the shutdown finishes.
+    this.onAvailabilityChange(['running', 'attached', 'stopping'].includes(this.lifecycle.state));
     if (!wasReachable && ['running', 'attached'].includes(this.lifecycle.state)) this.onReachable();
     this.provider.updateServer(this.lifecycle, this.sessions, this.sessionsError);
   }
@@ -355,6 +358,7 @@ class ServiceController {
       runCli(settings, ['sessions', '--json', '--timeout', '2'], 60000),
     ]);
     const reachable = serviceResult.status === 'fulfilled';
+    this.onAvailabilityChange(reachable);
     const serviceInfo = reachable && serviceResult.value && typeof serviceResult.value === 'object'
       ? serviceResult.value : {};
     if (inventoryResult.status === 'rejected') {
@@ -426,6 +430,7 @@ class SidebarProvider {
 
   resolveWebviewView(view) {
     this.view = view;
+    view.onDidDispose(() => { if (this.view === view) this.view = undefined; });
     // Freshness is rendered below the native heading, not beside its title.
     this.view.description = undefined;
     // Command URIs stay disabled: buttons post a message and receive() enforces WEBVIEW_COMMANDS.
@@ -532,6 +537,14 @@ class SidebarProvider {
   }
 }
 
+/** Keep native My Jobs and Cluster Status headings compact while offline. */
+class OfflineSidebarProvider extends SidebarProvider {
+  constructor(kind) {
+    super(kind);
+    this.errorState = { kind: 'offline', detail: '' };
+  }
+}
+
 /** Render service ownership and reusable SSH masters in its own sidebar view. */
 class ServerSidebarProvider extends SidebarProvider {
   constructor() {
@@ -547,6 +560,7 @@ class ServerSidebarProvider extends SidebarProvider {
 
   resolveWebviewView(view) {
     this.view = view;
+    view.onDidDispose(() => { if (this.view === view) this.view = undefined; });
     this.view.description = undefined;
     view.webview.options = { enableScripts: true };
     view.webview.onDidReceiveMessage((message) => this.receive(message));
@@ -886,15 +900,25 @@ function reportError(error) {
 /** Activate the Cluster Watcher sidebar and service commands. */
 function activate(context) {
   setDateFormat(configuration().dateFormat);
+  let serviceAvailable;
+  const setServiceAvailable = (available) => {
+    if (serviceAvailable === available) return;
+    serviceAvailable = available;
+    void vscode.commands.executeCommand('setContext', 'clusterWatcher.serviceAvailable', available);
+  };
+  setServiceAvailable(false);
   const client = new BackendClient();
   const jobsProvider = new JobsSidebarProvider(context.globalState);
   const statusProvider = new SidebarProvider('status');
+  const offlineJobsProvider = new OfflineSidebarProvider('jobs');
+  const offlineStatusProvider = new OfflineSidebarProvider('status');
   const serverProvider = new ServerSidebarProvider();
   const monitor = new JobMonitor();
   let controller;
   const coordinator = new RefreshCoordinator(client, jobsProvider, statusProvider, monitor, {
     jobsApiDisabled,
     refreshSeconds: () => configuration().refreshSeconds,
+    onServiceAvailable: () => setServiceAvailable(true),
     refreshServer: () => controller
       ? controller.refreshStatus()
       : Promise.resolve({ outcome: 'unchanged', checkedAt: Date.now() }),
@@ -922,13 +946,18 @@ function activate(context) {
   backendManager = new BackendManager(vscode, context, extensionManifest.version, {
     onWillChange: () => controller?.stopForBackendChange(),
   });
-  controller = new ServiceController(client, () => coordinator.refresh(), backendManager, serverProvider, () => coordinator.serviceReachable());
+  controller = new ServiceController(
+    client, () => coordinator.refresh(), backendManager, serverProvider,
+    () => coordinator.serviceReachable(), setServiceAvailable,
+  );
   const logProvider = new JobLogDocumentProvider(client);
   const scriptProvider = new JobScriptDocumentProvider(client);
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('clusterWatcher.jobs', jobsProvider, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.window.registerWebviewViewProvider('clusterWatcher.status', statusProvider, { webviewOptions: { retainContextWhenHidden: true } }),
+    vscode.window.registerWebviewViewProvider('clusterWatcher.jobsOffline', offlineJobsProvider),
+    vscode.window.registerWebviewViewProvider('clusterWatcher.statusOffline', offlineStatusProvider),
     vscode.window.registerWebviewViewProvider('clusterWatcher.server', serverProvider, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.workspace.registerTextDocumentContentProvider('cluster-watcher-log', logProvider),
     vscode.workspace.registerTextDocumentContentProvider('cluster-watcher-script', scriptProvider),
