@@ -384,8 +384,10 @@ own.
 **Getting started.** If no service is found, **My Jobs** and **Cluster Status**
 switch to collapsed, compact offline placeholders. Expand either heading for a
 short notice; the startup controls are not duplicated there. Immediately below
-the switch in **Server Status**, you can choose **Start service & SSH
-sessions**, **Run setup wizard**, **Edit configuration**, or **Settings**.
+the off switch in **Server Status**, **Start Server** tells you that the switch
+starts the service. **Edit configuration** and **Settings** appear below it;
+**Run setup wizard** appears there only when the selected `clusters.toml` does
+not exist. The wizard is always available from the Server Status title menu.
 The placeholders disappear when the service responds, and the live job and
 cluster views return. The service starts as an extension-owned background process with
 `serve --jobs-api`; password and OTP requests appear as masked VS Code input
@@ -477,7 +479,8 @@ without a redundant status label. The URL opens the dashboard through a button
 styled as a link, avoiding a second `#` link-target tooltip; its single hover
 text gives the service process ID and start time. The
 green/on toggle says **Stop service** on hover, and the gray/off toggle says
-**Start service**. The view also includes a bounded recent diagnostic tail and
+**Start service** and has **Start Server** beside it. The view also includes a
+bounded recent diagnostic tail and
 every configured machine's reusable SSH-session state and approximate remaining
 idle lifetime. Machine cards use compact spacing and truncate the smaller SSH
 login address when necessary, so their status and login controls remain within
@@ -487,6 +490,9 @@ machine has **Log in** on its card. If it belongs to a `credential_group`, the
 card also has **Log into all machines on `<group>`**; individual login uses the
 new `cluster-watcher login MACHINE --only` mode. There is no separate global
 login control because the machine cards provide the relevant scoped actions.
+Below the machine cards, **configure clusters...** opens the selected
+`clusters.toml` in an editor; if it does not exist, the extension offers the
+setup wizard instead.
 Stopping an attached service
 requires confirmation and warns that other connected clients will be
 disconnected. The managed process stops with the extension host; its OpenSSH

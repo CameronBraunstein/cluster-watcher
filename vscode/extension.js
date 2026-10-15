@@ -12,7 +12,7 @@ const { RefreshCoordinator, RefreshFeedback, refreshResultMessage } = require('.
 const { isFailureGroup, jobRef, localTime, setDateFormat, renderJobs, renderJobsApiDisabled, renderLoading, renderServerStatus, renderStatus, renderWelcome, stateGroup } = require('./renderers');
 const {
   ExecutableValidationError, backgroundLoginArguments, backgroundServiceArguments, cliArguments,
-  jobsApiDisabled, responseError, cliTerminalOptions, configurationError, resolveConfigPath,
+  jobsApiDisabled, responseError, cliTerminalOptions, configurationError, configFileExists, resolveConfigPath,
   runCli, serviceCommand, validateBackgroundCredentialSupport, validateExecutable,
 } = require('./service');
 
@@ -552,6 +552,10 @@ class ServerSidebarProvider extends SidebarProvider {
     this.service = { state: 'offline', owned: false, recentLines: [] };
     this.sessions = undefined;
     this.sessionsError = undefined;
+    this.configExists = undefined;
+    this.configCheckKey = undefined;
+    this.configCheckedAt = 0;
+    this.configCheckInFlight = undefined;
   }
 
   title() {
@@ -574,6 +578,32 @@ class ServerSidebarProvider extends SidebarProvider {
     this.updatedAt = sessions?.generated_at || new Date(checkedAt).toISOString();
     this.checkedAt = checkedAt;
     this.render();
+    void this.checkConfigFile();
+  }
+
+  /** Refresh TOML existence without delaying status; an inspection error stays unknown. */
+  checkConfigFile(force = false) {
+    if (this.configCheckInFlight) {
+      return force ? this.configCheckInFlight.then(() => this.checkConfigFile(true)) : this.configCheckInFlight;
+    }
+    const settings = configuration();
+    const key = `${settings.executable}\0${settings.configPath}`;
+    if (!force && key === this.configCheckKey && Date.now() - this.configCheckedAt < 15000) return Promise.resolve();
+    this.configCheckKey = key;
+    this.configCheckedAt = Date.now();
+    const check = configFileExists(settings)
+      .catch(() => undefined)
+      .then((exists) => {
+        const current = configuration();
+        if (`${current.executable}\0${current.configPath}` !== key) return;
+        if (this.configExists !== exists) {
+          this.configExists = exists;
+          this.render();
+        }
+      })
+      .finally(() => { if (this.configCheckInFlight === check) this.configCheckInFlight = undefined; });
+    this.configCheckInFlight = check;
+    return check;
   }
 
   render() {
@@ -583,6 +613,7 @@ class ServerSidebarProvider extends SidebarProvider {
       service: this.service,
       sessions: this.sessions,
       sessionsError: this.sessionsError,
+      configExists: this.configExists,
     }, this.freshness());
   }
 }
@@ -986,9 +1017,20 @@ function activate(context) {
       (machine, includeCredentialGroup) => controller.login(machine, includeCredentialGroup).catch(reportError),
     ),
     vscode.commands.registerCommand('clusterWatcher.editConfig', () => editConfig().catch(reportError)),
-    vscode.commands.registerCommand('clusterWatcher.manageBackend', () => backendManager.manage().catch(reportError)),
+    vscode.commands.registerCommand('clusterWatcher.manageBackend', async () => {
+      try {
+        await backendManager.manage();
+        await serverProvider.checkConfigFile(true);
+      } catch (error) { reportError(error); }
+    }),
     vscode.commands.registerCommand('clusterWatcher.openSettings', () => vscode.commands.executeCommand('workbench.action.openSettings', CONFIGURATION_SECTION)),
-    vscode.workspace.onDidSaveTextDocument((document) => void validateSavedConfig(document)),
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      void validateSavedConfig(document);
+      if (document.uri.scheme === 'file' && document.fileName.endsWith('.toml')) void serverProvider.checkConfigFile(true);
+    }),
+    vscode.window.onDidCloseTerminal((terminal) => {
+      if (terminal.name === 'Cluster Watcher Setup') void serverProvider.checkConfigFile(true);
+    }),
     vscode.commands.registerCommand('clusterWatcher.cancelJob', async (cluster, jobId, name) => {
       try { await cancelJob(client, jobsProvider, coordinator, String(cluster), String(jobId), String(name || '')); }
       catch (error) { vscode.window.showErrorMessage(`Could not end job ${jobId}: ${error instanceof Error ? error.message : String(error)}`); }
@@ -1026,6 +1068,7 @@ function activate(context) {
   coordinator.schedule();
   void coordinator.refresh();
   const initialization = backendManager.initialize();
+  void initialization.then(() => serverProvider.checkConfigFile(true)).catch(() => {});
   if (configuration().autoStart) {
     void initialization.then(() => controller.start()).catch(reportStartError);
   } else {
@@ -1034,6 +1077,7 @@ function activate(context) {
       if (await client.isClusterWatcherService()) return;
       const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
       await backendManager.offerFirstUse(configured);
+      await serverProvider.checkConfigFile(true);
     }).catch(reportError);
   }
 }

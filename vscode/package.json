@@ -202,6 +202,11 @@
           "command": "clusterWatcher.refreshServerBusy",
           "when": "view == clusterWatcher.server && clusterWatcher.refreshingServer",
           "group": "navigation@1"
+        },
+        {
+          "command": "clusterWatcher.runSetup",
+          "when": "view == clusterWatcher.server",
+          "group": "2_configuration@1"
         }
       ],
       "editor/title": [

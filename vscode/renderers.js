@@ -298,6 +298,7 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 button.button{border:0;font:inherit;cursor:pointer}
 .service-summary{display:flex;align-items:center;gap:4px;margin:3px 0 5px;min-width:0;white-space:nowrap;font-size:.78em}.service-summary>strong{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}.service-url{box-sizing:border-box;display:block;flex:0 0 auto;max-width:calc(100% - 26px);min-width:0;margin:0;padding:0;overflow:hidden;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;text-decoration:underline;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 22px;width:22px;height:12px;margin:0;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:12px}.service-toggle:disabled{cursor:wait;opacity:.65}.session-list{display:grid;gap:3px;margin-top:5px}.session-row{min-width:0;border:1px solid var(--vscode-panel-border);border-radius:4px;padding:4px 5px}.session-row-head{display:flex;align-items:center;justify-content:space-between;gap:4px;min-width:0}.session-name{font-weight:600;font-size:.85em;min-width:0;overflow:hidden;text-overflow:ellipsis}.session-state{font-size:.68em;white-space:nowrap}.session-state.open{color:var(--vscode-testing-iconPassed)}.session-state.closed{color:var(--vscode-errorForeground)}.session-target{margin-top:1px;font-size:.68em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.session-actions{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}.session-actions>.compact-action{box-sizing:border-box;max-width:100%;padding:2px 4px;font-size:.68em;line-height:1.3;white-space:normal;overflow-wrap:anywhere;text-align:left}.service-output{max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.72em}.server-details{margin-top:10px}.server-details>summary{cursor:pointer}
 .service-setup-actions{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 8px}.service-setup-actions>.button{box-sizing:border-box;max-width:100%;padding:3px 5px;font-size:.78em;white-space:normal;text-align:left}
+.configure-clusters{display:inline-block;margin-top:6px;color:var(--vscode-textLink-foreground);font-size:.78em;text-decoration:none}.configure-clusters:hover{text-decoration:underline}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
@@ -484,7 +485,7 @@ function renderJobsApiDisabled(title, command, freshness = {}) {
     + `<p>Stop that service (Ctrl-C in its terminal), then start it with:</p><pre class="command-line">${escapeHtml(command)}</pre>`
     + `<p class="actions"><a class="button" role="button" ${commandAttributes('clusterWatcher.copyServiceCommand')}>Copy restart command</a>`
     + `<a class="button secondary" role="button" ${commandAttributes('clusterWatcher.refresh')}>Retry</a></p>`
-    + `<p class="muted">Or close it and use <b>Start service &amp; SSH sessions</b>, which always enables the jobs API.</p></div>`;
+    + `<p class="muted">Or close it and use the <b>Server Status</b> toggle, which starts the service with the jobs API enabled.</p></div>`;
   return document(title, body, freshness);
 }
 
@@ -500,13 +501,12 @@ function renderWelcome(title, detail, freshness = {}) {
   return document(title, body, freshness);
 }
 
-/** Render the extension-owned process and reusable SSH-session inventory. */
+/** Render service/session status plus configuration actions below the toggle and cards. */
 function renderServerStatus(payload = {}, freshness = {}) {
   const service = payload.service || {};
   const state = String(service.state || 'offline').toLowerCase();
   const labels = {
-    offline: 'Stopped', starting: 'Starting', authenticating: 'Waiting for credentials',
-    stopping: 'Stopping', error: 'Error',
+    starting: 'Starting', authenticating: 'Waiting for credentials', stopping: 'Stopping',
   };
   const serviceOn = ['running', 'attached', 'starting', 'authenticating', 'stopping'].includes(state);
   const serviceTransitioning = ['starting', 'authenticating', 'stopping'].includes(state);
@@ -520,12 +520,11 @@ function renderServerStatus(payload = {}, freshness = {}) {
   const linkedUrl = service.url && ['running', 'attached'].includes(state)
     ? `<button class="service-url" ${commandButtonAttributes('clusterWatcher.openDashboard')} aria-label="${escapeHtml(`${service.url}. `)}${serviceDetailsAttribute}" data-fast-tooltip="${serviceDetailsAttribute}">${escapeHtml(service.url)}</button>`
     : '';
-  const summaryLabel = labels[state] || '';
+  const summaryLabel = serviceOn ? (labels[state] || '') : 'Start Server';
   const summaryText = `${summaryLabel ? `<strong>${escapeHtml(summaryLabel)}</strong>` : ''}${linkedUrl}`;
   const serviceSummary = `<div class="service-summary">${toggle}${summaryText}</div>`;
   const setupActions = ['offline', 'error'].includes(state)
-    ? `<div class="service-setup-actions"><a class="button" role="button" ${commandAttributes('clusterWatcher.startService')}>Start service &amp; SSH sessions</a>`
-      + `<a class="button secondary" role="button" ${commandAttributes('clusterWatcher.runSetup')}>Run setup wizard</a>`
+    ? `<div class="service-setup-actions">${payload.configExists === false ? `<a class="button secondary" role="button" ${commandAttributes('clusterWatcher.runSetup')}>Run setup wizard</a>` : ''}`
       + `<a class="button secondary" role="button" ${commandAttributes('clusterWatcher.editConfig')}>Edit configuration</a>`
       + `<a class="button secondary" role="button" ${commandAttributes('clusterWatcher.openSettings')}>Settings</a></div>`
     : '';
@@ -561,7 +560,8 @@ function renderServerStatus(payload = {}, freshness = {}) {
   const body = serviceSummary + setupActions
     + (service.activity ? `<p class="muted">${escapeHtml(service.activity)}</p>` : '')
     + error + sessionError
-    + `<div class="session-list">${machines || '<p class="muted">No session inventory is available yet.</p>'}</div>${diagnostics}`;
+    + `<div class="session-list">${machines || '<p class="muted">No session inventory is available yet.</p>'}</div>`
+    + `<a class="configure-clusters" role="button" ${commandAttributes('clusterWatcher.editConfig')}>configure clusters...</a>${diagnostics}`;
   return document('Server Status', body, freshness);
 }
 

@@ -193,6 +193,8 @@ test('server status shows background ownership and per-machine login actions', (
   assert.match(html, /class="service-toggle on"[^>]*data-command="clusterWatcher\.stopService"[^>]*aria-label="Stop service"/);
   assert.match(html, /<div class="service-summary"><button class="service-toggle on"[^>]*><\/button><button class="service-url"[^>]*data-command="clusterWatcher\.openDashboard"/);
   assert.doesNotMatch(html, /class="service-setup-actions"/);
+  assert.ok(html.indexOf('class="configure-clusters"') > html.indexOf('class="session-list"'));
+  assert.match(html, /class="configure-clusters"[^>]*data-command="clusterWatcher\.editConfig"[^>]*>configure clusters\.\.\.<\/a>/);
   assert.doesNotMatch(html, /class="service-url"[^>]*href="#"/);
   assert.match(html, /class="muted session-target">alice@a\.example/);
   assert.doesNotMatch(html, />Log in closed sessions<\/button>/);
@@ -208,19 +210,24 @@ test('server status shows background ownership and per-machine login actions', (
   assert.match(attached, /data-command="clusterWatcher\.stopService"[^>]*data-fast-tooltip="Stop service"/);
   assert.doesNotMatch(attached, /<dt>URL<\/dt>|Open dashboard/);
 
-  const stopped = renderServerStatus({ service: { state: 'offline', owned: false }, sessions: { machines: [] } });
+  const stopped = renderServerStatus({ service: { state: 'offline', owned: false }, configExists: false, sessions: { machines: [] } });
   assert.match(stopped, /class="service-toggle off"[^>]*data-command="clusterWatcher\.startService"[^>]*data-fast-tooltip="Start service"/);
+  assert.match(stopped, /<div class="service-summary"><button class="service-toggle off"[^>]*><\/button><strong>Start Server<\/strong><\/div>/);
   const setup = stopped.match(/<div class="service-summary">.*?<\/div><div class="service-setup-actions">.*?<\/div>/s)[0];
+  const setupButtons = setup.slice(setup.indexOf('<div class="service-setup-actions">'));
   assert.ok(setup.indexOf('class="service-summary"') < setup.indexOf('class="service-setup-actions"'));
-  for (const command of ['startService', 'runSetup', 'editConfig', 'openSettings']) {
+  for (const command of ['runSetup', 'editConfig', 'openSettings']) {
     assert.match(setup, new RegExp(`data-command="clusterWatcher\\.${command}"`));
   }
-  assert.match(setup, /Start service &amp; SSH sessions/);
+  assert.doesNotMatch(setupButtons, /Start service &amp; SSH sessions|data-command="clusterWatcher\.startService"/);
   assert.match(setup, /Run setup wizard/);
   assert.match(setup, /Edit configuration/);
   assert.match(setup, />Settings</);
+  assert.doesNotMatch(renderServerStatus({ service: { state: 'offline' }, configExists: true }), /data-command="clusterWatcher\.runSetup"/);
+  assert.doesNotMatch(renderServerStatus({ service: { state: 'offline' } }), /data-command="clusterWatcher\.runSetup"/);
   assert.doesNotMatch(renderServerStatus({ service: { state: 'starting' } }), /class="service-setup-actions"/);
-  assert.match(renderServerStatus({ service: { state: 'error' } }), /class="service-setup-actions"/);
+  assert.match(renderServerStatus({ service: { state: 'error' }, configExists: false }), /class="service-setup-actions"/);
+  assert.match(renderServerStatus({ service: { state: 'error' } }), /<strong>Start Server<\/strong>/);
   assert.match(stopped, /\.service-summary\{[^}]*white-space:nowrap/);
   assert.match(stopped, /\.service-summary\{[^}]*font-size:\.78em/);
   assert.match(stopped, /\.service-url\{[^}]*max-width:calc\(100% - 26px\)/);

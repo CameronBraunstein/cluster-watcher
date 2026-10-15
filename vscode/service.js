@@ -1,6 +1,7 @@
 'use strict';
 
 const { execFile, spawn } = require('node:child_process');
+const { stat } = require('node:fs/promises');
 
 /** Identify an executable-setting failure so the UI can offer focused help. */
 class ExecutableValidationError extends Error {
@@ -168,6 +169,18 @@ async function resolveConfigPath(settings) {
   return resolved;
 }
 
+/** Check the selected TOML path without mistaking permission or CLI errors for a missing file. */
+async function configFileExists(settings, resolver = resolveConfigPath, statFile = stat) {
+  const selected = String(settings.configPath || '').trim();
+  const path = selected || await resolver(settings);
+  try {
+    return (await statFile(path)).isFile();
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 /** Validate the configuration by listing machines; resolve to an error message or null. */
 async function configurationError(settings) {
   const result = await runCli(settings, ['list']);
@@ -211,6 +224,6 @@ function serviceCommand(settings) {
 module.exports = {
   ExecutableValidationError, ServiceResponseError, backgroundLoginArguments, backgroundServiceArguments,
   cliArguments, jobsApiDisabled, responseError, cliCommand, cliTerminalOptions, configurationError,
-  resolveConfigPath, runCli, serviceArguments, serviceCommand, shellQuote,
+  configFileExists, resolveConfigPath, runCli, serviceArguments, serviceCommand, shellQuote,
   validateBackgroundCredentialSupport, validateExecutable,
 };

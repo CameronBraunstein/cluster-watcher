@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const {
   ServiceResponseError, backgroundLoginArguments, backgroundServiceArguments, cliArguments, cliCommand,
-  cliTerminalOptions, jobsApiDisabled, responseError, serviceArguments, serviceCommand,
+  cliTerminalOptions, configFileExists, jobsApiDisabled, responseError, serviceArguments, serviceCommand,
   shellQuote, validateBackgroundCredentialSupport, validateExecutable,
 } = require('../service');
 const manifest = require('../package.json');
@@ -39,6 +39,30 @@ test('service command refuses a non-loopback or TLS endpoint', () => {
   };
   assert.throws(() => serviceCommand({ ...settings, backendUrl: 'http://dashboard.example:8080/' }), /loopback/);
   assert.throws(() => serviceCommand({ ...settings, backendUrl: 'https://127.0.0.1:8080/' }), /loopback/);
+});
+
+test('setup visibility uses the selected TOML and never treats inspection errors as missing', async () => {
+  const calls = [];
+  const resolve = async () => { calls.push('resolve'); return '/default/clusters.toml'; };
+  const file = { isFile: () => true };
+  assert.equal(await configFileExists({ configPath: '/chosen/clusters.toml' }, resolve, async (path) => {
+    calls.push(path);
+    return file;
+  }), true);
+  assert.deepEqual(calls, ['/chosen/clusters.toml']);
+
+  assert.equal(await configFileExists({ configPath: '' }, resolve, async (path) => {
+    assert.equal(path, '/default/clusters.toml');
+    throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+  }), false);
+  assert.deepEqual(calls, ['/chosen/clusters.toml', 'resolve']);
+  await assert.rejects(
+    configFileExists({ configPath: '/private/clusters.toml' }, resolve, async () => {
+      throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    }),
+    /denied/,
+  );
+  assert.equal(await configFileExists({ configPath: '/directory' }, resolve, async () => ({ isFile: () => false })), false);
 });
 
 test('background service and login opt into stdin credentials without a shell command', () => {
@@ -104,6 +128,7 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
     { command: 'clusterWatcher.refreshStatusBusy', when: 'view == clusterWatcher.status && clusterWatcher.refreshingStatus', group: 'navigation@1' },
     { command: 'clusterWatcher.refreshServer', when: 'view == clusterWatcher.server && !clusterWatcher.refreshingServer', group: 'navigation@1' },
     { command: 'clusterWatcher.refreshServerBusy', when: 'view == clusterWatcher.server && clusterWatcher.refreshingServer', group: 'navigation@1' },
+    { command: 'clusterWatcher.runSetup', when: 'view == clusterWatcher.server', group: '2_configuration@1' },
   ]);
   assert.deepEqual(manifest.contributes.menus.commandPalette, [
     { command: 'clusterWatcher.refreshJobsBusy', when: 'false' },

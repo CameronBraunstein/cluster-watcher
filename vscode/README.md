@@ -7,10 +7,11 @@ configuration, SSH, MFA, Slurm queries, and refresh scheduling.
 
 When no backend service is found, **My Jobs** and **Cluster Status** become
 collapsed offline placeholders. Their expanded content contains only a short
-notice; the **Start service & SSH sessions**, **Run setup wizard**, **Edit
-configuration**, and **Settings** buttons appear directly below the service
-switch in **Server Status**. Successful backend responses restore the live
-views. You can still expand an offline placeholder manually.
+notice. The off switch in **Server Status** is labeled **Start Server**;
+**Edit configuration** and **Settings** appear beneath it. **Run setup wizard**
+appears there only if the selected `clusters.toml` is missing, but remains in
+the Server Status title menu at all times. Successful backend responses restore
+the live views. You can still expand an offline placeholder manually.
 
 ## Requirements
 
@@ -164,12 +165,12 @@ Log documents initially contain the newest 2,000 lines. If more output exists,
 use the upward-arrow **Load 2,000 Older Lines** editor-title action; each click
 prepends one more bounded page until the complete remote file is loaded.
 
-When the service is not reachable, the jobs and cluster views show a welcome screen with
-buttons to **Start service & SSH sessions**, **Run setup wizard** (runs
-`cluster-watcher setup` in a terminal), **Edit configuration** (opens the file
-reported by `cluster-watcher config --path` in an editor tab), and **Settings**.
-The same actions are in the Command Palette and the view's toolbar/overflow
-menu. Saving the configuration from VS Code validates it immediately (via
+When the service is not reachable, the collapsed jobs and cluster placeholders
+contain no startup buttons. **Run setup wizard** runs `cluster-watcher setup`
+in a terminal, and the Server Status title menu keeps that action available
+even when a TOML already exists. **Edit configuration** opens the file reported
+by `cluster-watcher config --path` in an editor tab; if missing, it offers the
+wizard. Saving the configuration from VS Code validates it immediately (via
 `cluster-watcher list`) and reports any error; restart the service to apply it.
 
 The extension-managed backend is installed per user on the extension host:
@@ -255,7 +256,8 @@ as a link, so its process/start tooltip is not accompanied by a dummy `#`
 target. A smaller toggle appears to the left of smaller text, preserving the
 standard local URL at minimum sidebar width; it is green when on and gray when
 off, and its hover says
-**Stop service** or **Start service**. A running extension-owned service shows
+**Stop service** or **Start service**. When off, **Start Server** appears next
+to the toggle; there is no duplicate start button. A running extension-owned service shows
 the URL without the redundant “Running in the background” label. Hover the URL
 for the backend process ID and start time. The view also shows bounded recent
 diagnostic output and an
@@ -269,6 +271,8 @@ first action targets only that machine, while the second reuses the shared
 password for all closed group members. Stopping an attached local service asks
 for confirmation, warns that other connected clients will be disconnected,
 and then requests a graceful shutdown from the backend.
+**configure clusters...** appears below the machine cards and opens the
+selected `clusters.toml` (or offers setup if it does not exist).
 An extension-owned process stops when the extension host shuts down or reloads;
 the OpenSSH masters may remain available for their configured persistence
 period. Start the service separately when it must outlive VS Code.
