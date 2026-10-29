@@ -163,6 +163,61 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.equal(waitCell(partition, 16), '—');
 });
 
+test('fair share appears on explicitly matched partition cards, never by account name', () => {
+  const html = renderStatus({ clusters: [
+    { name: 'viper', reachable: true, fair_share: {
+      associations: [
+        { account: 'gpu_a100_bs_default', partition: 'gpu_a100', factor: 0.725, rank: 1302, total: 4728 },
+        { account: 'unscoped', partition: null, factor: 0.5, rank: 9, total: 20 },
+      ],
+    }, partitions: [
+      { name: 'gpu_a100', gpus: { total: 0 }, fair_share: [{ account: 'gpu_a100_bs_default', partition: 'gpu_a100', factor: 0.725, rank: 1302, total: 4728 }] },
+      { name: 'apu', gpus: { total: 0 }, fair_share: [] },
+    ] },
+    { name: 'raven', reachable: true, fair_share: {
+      associations: [], error: 'sshare unavailable',
+    }, partitions: [{ name: 'gpu', gpus: { total: 0 } }] },
+  ] });
+
+  const cards = [...html.matchAll(/<article class="card partition-card"[^>]*>.*?<\/article>/gs)].map((match) => match[0]);
+  const gpuCard = cards.find((card) => card.includes('>gpu_a100</span>'));
+  const apuCard = cards.find((card) => card.includes('>apu</span>'));
+  assert.match(gpuCard, /gpu_a100_bs_default<\/span><span>Visible rank 1302\/4728<\/span><span>Factor 0\.725000<\/span>/);
+  assert.doesNotMatch(apuCard, /gpu_a100_bs_default|unscoped/);
+  assert.match(apuCard, /No confirmed account match for this partition/);
+  assert.match(html, /Other fair-share associations.*?unscoped.*?No partition specified/s);
+  assert.match(html, /Account names alone do not establish one/);
+  assert.ok(html.indexOf('sshare unavailable') < html.indexOf('>gpu</span>'));
+  assert.equal((html.match(/class="card fair-share-card"/g) || []).length, 2);
+});
+
+test('cluster summary disappears when all fair-share associations have partition matches', () => {
+  const entry = { account: 'lab', partition: 'gpu', factor: 0.8, rank: 4, total: 100 };
+  const html = renderStatus({ clusters: [{ name: 'inf', reachable: true,
+    fair_share: { associations: [entry] },
+    partitions: [{ name: 'gpu', gpus: { total: 0 }, fair_share: [entry] }],
+  }] });
+
+  assert.doesNotMatch(html, /class="card fair-share-card"/);
+  assert.match(html, /lab<\/span><span>Visible rank 4\/100<\/span><span>Factor 0\.800000<\/span>/);
+});
+
+test('unscoped accounts matched through access rules appear on the partition card', () => {
+  const entry = {
+    account: 'gpu_v100_bs_default', partition: null, factor: 0.998557,
+    rank: 3, total: 4728, matched_partitions: ['gpu-v100'], mapping_source: 'account_qos',
+  };
+  const html = renderStatus({ clusters: [{
+    name: 'inf', reachable: true,
+    fair_share: { associations: [entry] },
+    partitions: [{ name: 'gpu-v100', gpus: { total: 6 }, fair_share: [entry] }],
+  }] });
+
+  assert.doesNotMatch(html, /class="card fair-share-card"/);
+  assert.match(html, /gpu_v100_bs_default<\/span><span class="muted">via account\/QOS<\/span><span>Visible rank 3\/4728<\/span><span>Factor 0\.998557<\/span>/);
+  assert.match(html, /Unscoped accounts are matched through cached partition account\/QOS rules/);
+});
+
 test('long availability fractions keep their complete value available on hover', () => {
   const partition = {
     name: 'large', gpus: { total: 12345, schedulable_idle: 1234 },

@@ -47,6 +47,8 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .refresh-clock-hand { stroke:#2563eb; stroke-width:2; stroke-linecap:round; transform-origin:12px 12px; transition:transform .25s linear; }
 .refresh-clock-center { fill:#2563eb; }
 .cluster { border:1px solid #8885; border-radius:.5rem; margin:1rem 0; padding:1rem; }
+.fair-share-card { border:1px solid #8885; border-radius:.4rem; padding:.65rem; margin:.75rem 0 1rem; overflow-wrap:anywhere; } .fair-share-card h3 { margin:0 0 .35rem; font-size:1rem; } .fair-share-entry { display:flex; flex-wrap:wrap; gap:.3rem 1rem; margin:.3rem 0; } .fair-share-note { margin:.4rem 0 0; color:#666; font-size:.78rem; }
+.partition-fair-share { margin:.35rem 0; font-size:.78rem; color:#666; } .partition-fair-share b { color:CanvasText; }
 .key { border:1px solid #8885; border-radius:.5rem; margin:1rem 0; padding:1rem; }
 .key h2 { margin-top:0; } .key-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:.5rem 1.5rem; }
 .key-grid p { margin:.35rem 0; }
@@ -712,7 +714,7 @@ function compactGpuName(value) {
   return withoutBrand.split(/\\s+/).slice(0, 2).join(' ');
 }
 
-function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, estimates, estimatesUpdatedAt) {
+function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, estimates, estimatesUpdatedAt, fairShare) {
   const availability = availabilityDescription(nodes);
   const status = [...nodes].sort((left, right) => statePriority(left) - statePriority(right) || String(left.name).localeCompare(String(right.name))).map(node => `<i class="node-state-block ${summaryStateClass(node)}"></i>`).join('');
   const summary = compute.get(name);
@@ -724,16 +726,40 @@ function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, es
   const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}</h3>${launchability}<div class="partition-status" data-availability="${escapeHtml(availability)}" aria-label="${escapeHtml(availability)}">${status}</div>${badges ? `<div class="job-badges">${badges}</div>` : ''}</div>`;
   const body = `<div class="partition-compute">${details}</div><div class="node-grid">${nodesByAvailableGpu(nodes).map(nodeCard).join('')}</div>`;
   const disclosureKey = JSON.stringify([clusterName, name]);
-  return `<details class="partition-section${summary?.aggregate ? ' aggregate-partition' : ''}" data-partition-key="${escapeHtml(disclosureKey)}"${partitionDisclosure.get(disclosureKey) ? ' open' : ''}><summary>${heading}</summary>${body}</details>`;
+  return `<details class="partition-section${summary?.aggregate ? ' aggregate-partition' : ''}" data-partition-key="${escapeHtml(disclosureKey)}"${partitionDisclosure.get(disclosureKey) ? ' open' : ''}><summary>${heading}${partitionFairShareView(fairShare, name)}</summary>${body}</details>`;
+}
+
+function fairShareEntry(entry, showPartition = false) {
+  const factor = Number(entry.factor), rank = Number(entry.rank), total = Number(entry.total);
+  if (entry.factor == null || !Number.isFinite(factor) || !Number.isInteger(rank) || !Number.isInteger(total) || rank < 1 || total < rank) return '';
+  const scope = showPartition ? ` · ${escapeHtml(entry.partition || 'No partition specified')}` : '';
+  const basis = entry.mapping_source === 'account_qos' ? ' · via account/QOS' : '';
+  return `<div class="fair-share-entry"><b>${escapeHtml(entry.account)}</b>${scope}${basis} · Visible rank ${rank}/${total} · Factor ${factor.toFixed(6)}</div>`;
+}
+
+function partitionFairShareView(share, partition) {
+  const associations = Array.isArray(share?.associations) ? share.associations : [];
+  const rows = associations.filter(entry => (entry.matched_partitions || [entry.partition]).includes(partition)).map(entry => fairShareEntry(entry)).join('');
+  const help = 'Rank among all visible Slurm associations. Unscoped accounts are matched through cached partition account/QOS rules. Higher factors favor jobs, but do not determine start time.';
+  return `<div class="partition-fair-share"><span class="fast-hover" data-fast-tooltip="${escapeHtml(help)}" aria-label="${escapeHtml(help)}">Fair share:</span> ${rows || (share?.error ? 'Fair-share data unavailable.' : 'No confirmed account match for this partition.')}</div>`;
+}
+
+function fairShareView(cluster) {
+  const share = cluster.fair_share || {};
+  const entries = Array.isArray(share.associations) ? share.associations : [];
+  const names = new Set(partitionGroups(cluster.nodes || [], new Map()).map(([name]) => name));
+  const rows = entries.filter(entry => !(entry.matched_partitions || [entry.partition]).some(name => names.has(name))).map(entry => fairShareEntry(entry, true)).join('');
+  if (!rows && !share.error && entries.length) return '';
+  return `<article class="fair-share-card"><h3>Other fair-share associations</h3>${rows || `<p>${escapeHtml(share.error || 'Fair-share data not yet available.')}</p>`}${share.mapping_error ? `<p class="fair-share-note">Access-rule mapping unavailable: ${escapeHtml(share.mapping_error)}</p>` : ''}<p class="fair-share-note">No confirmed match to a displayed partition. Account names alone do not establish one. Ranks cover visible associations, not queue positions.</p></article>`;
 }
 
 function clusterView(cluster, waitThresholds) {
   let content;
   if (cluster.error) content = `<p class="error">${escapeHtml(cluster.error)}</p>` + (cluster.login_required ? `<p>The SSH session has closed. Log in again with <code>cluster-watcher login ${escapeHtml(cluster.name)}</code>.</p>` : '');
   else if (!cluster.nodes || !cluster.nodes.length) content = '<p>No individual node information was returned by scontrol.</p>';
-  else { const compute = new Map((cluster.partition_compute || []).map(summary => [summary.name, summary])); content = partitionGroups(cluster.nodes, compute).map(group => partitionView(cluster.name, group, compute, cluster.user_jobs, waitThresholds || [5, 30, 60, 120], cluster.wait_estimates, cluster.wait_estimates_updated_at)).join(''); }
+  else { const compute = new Map((cluster.partition_compute || []).map(summary => [summary.name, summary])); content = partitionGroups(cluster.nodes, compute).map(group => partitionView(cluster.name, group, compute, cluster.user_jobs, waitThresholds || [5, 30, 60, 120], cluster.wait_estimates, cluster.wait_estimates_updated_at, cluster.fair_share)).join(''); }
   if (cluster.jobs) content += `<p><b>Jobs:</b> ${Object.entries(cluster.jobs).map(([state, count]) => `${escapeHtml(state)}=${count}`).join(', ') || 'none'}</p>`;
-  return `<section class="cluster"><h2>${escapeHtml(cluster.name)} <small>${escapeHtml(cluster.username)}@${escapeHtml(cluster.host)}</small></h2>${content}</section>`;
+  return `<section class="cluster"><h2>${escapeHtml(cluster.name)} <small>${escapeHtml(cluster.username)}@${escapeHtml(cluster.host)}</small></h2>${fairShareView(cluster)}${content}</section>`;
 }
 
 let refreshTimer, refreshDeadline = 0, refreshPeriodMs = 1;
@@ -943,6 +969,7 @@ class StatusStore:
             clusters = [asdict(status) for status in self._statuses]
             for cluster in clusters:
                 cluster.pop("accounting", None)  # Server-internal sacct cache.
+                cluster.pop("fair_share_rules", None)  # Includes other users' account hierarchy.
             return {"clusters": clusters, "updated_at": self._updated_at, "refresh_seconds": self.refresh_seconds, "wait_threshold_minutes": self.wait_threshold_minutes, "jobs_api_enabled": self.jobs_api_enabled, "command_api_enabled": self.command_api_enabled}
 
     def statuses(self) -> list[ClusterStatus]:

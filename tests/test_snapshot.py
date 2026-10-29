@@ -5,7 +5,7 @@ from email.message import Message
 import json
 from unittest.mock import Mock, patch
 
-from clusterwatcher.dashboard import StatusStore, make_handler
+from clusterwatcher.dashboard import PAGE, StatusStore, make_handler
 from clusterwatcher.commands import SessionUnavailableError
 from clusterwatcher.jobs import JobLogNotFound
 from clusterwatcher.models import ClusterStatus, Machine
@@ -160,6 +160,52 @@ class SnapshotTests(TimedTestCase):
             snapshot["clusters"][0]["partitions"][0]["wait_estimates"][0]["walltime_seconds"],
             900,
         )
+
+    def test_snapshot_exposes_only_the_users_fair_share_summary(self):
+        status = example_status()
+        status.fair_share = {
+            "associations": [
+                {"account": "lab", "partition": "gpu-a100", "factor": 0.75, "rank": 3, "total": 20},
+                {"account": "general", "partition": None, "factor": 0.5, "rank": 10, "total": 20},
+            ],
+            "visible_associations": 20, "error": None,
+        }
+        status.fair_share_updated_at = "2026-09-22T10:00:00+00:00"
+
+        cluster = build_snapshot([status], status.fair_share_updated_at, 15)["clusters"][0]
+
+        self.assertEqual(cluster["fair_share"], status.fair_share)
+        self.assertEqual(cluster["fair_share_updated_at"], status.fair_share_updated_at)
+        self.assertEqual(cluster["partitions"][0]["fair_share"], [status.fair_share["associations"][0]])
+
+    def test_snapshot_includes_access_rule_matches_without_leaking_rule_tree(self):
+        status = example_status()
+        status.fair_share = {
+            "associations": [{
+                "account": "gpu_a100_bs_default", "partition": None, "factor": 0.7,
+                "rank": 10, "total": 100, "matched_partitions": ["gpu-a100"],
+                "mapping_source": "account_qos",
+            }],
+            "visible_associations": 100, "error": None,
+        }
+        status.fair_share_rules = {"accounts": {"other_users": "private"}}
+        store = StatusStore([Machine("cluster_0", "slurm.example", "alice")], 5, False, 15)
+        store._statuses = [status]
+
+        snapshot = build_snapshot([status], "2026-09-22T10:00:00+00:00", 15)
+        dashboard = store.payload()
+
+        self.assertEqual(snapshot["clusters"][0]["partitions"][0]["fair_share"][0]["account"], "gpu_a100_bs_default")
+        self.assertNotIn("fair_share_rules", snapshot["clusters"][0])
+        self.assertNotIn("fair_share_rules", dashboard["clusters"][0])
+        self.assertEqual(dashboard["clusters"][0]["fair_share"]["associations"][0]["matched_partitions"], ["gpu-a100"])
+
+    def test_browser_summary_precedes_partition_details(self):
+        """The browser uses the same fair-share data ahead of node details."""
+        self.assertIn("function fairShareView(cluster)", PAGE)
+        self.assertIn("${fairShareView(cluster)}${content}", PAGE)
+        self.assertIn("${partitionFairShareView(fairShare, name)}", PAGE)
+        self.assertIn("entry.matched_partitions || [entry.partition]", PAGE)
 
     def test_snapshot_endpoint_returns_json_contract(self):
         store = StatusStore([Machine("cluster_0", "slurm.example", "alice")], 5, False, 15)

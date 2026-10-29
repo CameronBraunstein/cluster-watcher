@@ -12,6 +12,11 @@ import time
 
 from .models import AccountingSnapshot, ClusterStatus, Machine
 from .compute import rank_partitions
+from .fair_share import (
+    ACCOUNT_RULES_COMMAND, FAIR_SHARE_REFRESH_SECONDS, PARTITION_RULES_COMMAND,
+    SSHARE_COMMAND, annotate_partition_access, parse_account_rules,
+    parse_fair_share, parse_partition_rules,
+)
 from .remote_batch import Section, run_batch
 from .ssh import run_remote
 
@@ -245,8 +250,9 @@ def annotate_global_priority_ranks(
 
 
 def parse_scheduling_config(output: str) -> dict[str, object]:
-    """Extract scheduler and priority settings relevant to partition priority."""
+    """Extract Slurm identity, scheduler, and priority configuration."""
     fields = {
+        "ClusterName": "cluster_name",
         "SchedulerType": "scheduler_type",
         "PriorityType": "priority_type",
         "PriorityWeightPartition": "priority_weight_partition",
@@ -534,6 +540,20 @@ def collect_status(
             commands["releases"] = SQUEUE_RUNNING_END_COMMAND
     if include_jobs and capacity:
         commands["queue"] = SQUEUE_COMMAND
+    fair_share_due = include_personal_details and (
+        previous is None or previous.fair_share_updated_at is None
+    )
+    rules_due = include_personal_details and (
+        previous is None or previous.fair_share_rules_collected_at is None
+    )
+    if include_personal_details and not fair_share_due:
+        try:
+            last_fair_share = datetime.fromisoformat(previous.fair_share_updated_at)
+            fair_share_due = (
+                datetime.now(timezone.utc) - last_fair_share
+            ).total_seconds() >= FAIR_SHARE_REFRESH_SECONDS
+        except (TypeError, ValueError):
+            fair_share_due = True
     previous_accounting = previous.accounting if previous else None
     if include_accounting:
         force = previous_accounting is None or (
@@ -542,8 +562,37 @@ def collect_status(
         commands["accounting"] = accounting_gate_command(
             machine, previous_accounting.fingerprint if previous_accounting else None, force,
         )
+    # Keep this optional controller query last so a slow/failing sshare does
+    # not prevent the primary capacity and personal-job sections from running.
+    if fair_share_due:
+        commands["fair_share"] = SSHARE_COMMAND
+    if rules_due:
+        commands["partition_rules"] = PARTITION_RULES_COMMAND
+        commands["account_rules"] = ACCOUNT_RULES_COMMAND
     try:
         sections = run_batch(machine, timeout, commands)
+        if fair_share_due:
+            section = sections.get("fair_share")
+            fair_share_error = (
+                "sshare result unavailable" if section is None else
+                section.stderr.strip() or (
+                    "sshare timed out after 5 seconds" if section.returncode == 124
+                    else f"sshare exited with status {section.returncode}"
+                )
+            )
+            status.fair_share = (
+                parse_fair_share(section.stdout, machine.username)
+                if section is not None and section.returncode == 0
+                else {"associations": [], "visible_associations": 0,
+                      "error": fair_share_error}
+            )
+            status.fair_share_updated_at = datetime.now(timezone.utc).isoformat()
+        elif previous is not None:
+            status.fair_share = deepcopy(previous.fair_share)
+            status.fair_share_updated_at = previous.fair_share_updated_at
+        if not rules_due and previous is not None:
+            status.fair_share_rules = deepcopy(previous.fair_share_rules)
+            status.fair_share_rules_collected_at = previous.fair_share_rules_collected_at
         if capacity:
             status.partitions = []
             for line in sections["sinfo"].output().splitlines():
@@ -610,6 +659,43 @@ def collect_status(
             status.user_jobs_fingerprint, status.accounting = _accounting_from_section(
                 sections["accounting"], previous_accounting,
             )
+        if rules_due:
+            partition_section = sections.get("partition_rules")
+            account_section = sections.get("account_rules")
+            cluster_name = (status.scheduling or {}).get("cluster_name")
+            errors = [
+                section.stderr.strip() or f"{name} exited with status {section.returncode}"
+                for name, section in (("partition rules", partition_section), ("account rules", account_section))
+                if section is not None and section.returncode
+            ]
+            if partition_section is None or account_section is None:
+                errors.append("access-rule query result unavailable")
+            if not cluster_name:
+                errors.append("Slurm ClusterName unavailable")
+            if errors:
+                status.fair_share_rules = {"error": "; ".join(errors)}
+            else:
+                partition_rules = parse_partition_rules(partition_section.stdout)
+                account_rules = parse_account_rules(
+                    account_section.stdout, str(cluster_name), machine.username,
+                )
+                missing = []
+                if not partition_rules:
+                    missing.append("partition access rules unavailable")
+                if not account_rules["user_associations"]:
+                    missing.append("your Slurm associations unavailable")
+                if not account_rules["parents"] and any(
+                    rule["allow_accounts"] not in (None, ["ALL"])
+                    for rule in partition_rules.values()
+                ):
+                    missing.append("account ancestry unavailable")
+                status.fair_share_rules = {
+                    "partitions": partition_rules,
+                    "accounts": account_rules,
+                    **({"error": "; ".join(missing)} if missing else {}),
+                }
+            status.fair_share_rules_collected_at = datetime.now(timezone.utc).isoformat()
+        status.fair_share = annotate_partition_access(status.fair_share, status.fair_share_rules)
     except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
         status.error = str(exc)
     return status

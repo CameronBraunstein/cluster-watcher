@@ -8,6 +8,7 @@ from typing import Any
 
 from .compute import GPUProfile, profile_for
 from .config import DEFAULT_WAIT_THRESHOLD_MINUTES
+from .fair_share import partition_associations
 from .models import ClusterStatus
 from .wait_probes import WAIT_PROBE_REFRESH_SECONDS, classify_wait_error
 
@@ -203,6 +204,7 @@ def _partition_snapshot(status: ClusterStatus, name: str, generated_at: str | No
     )
     return {
         "name": name,
+        "fair_share": partition_associations(status.fair_share, name),
         "rank": compute.get("rank"),
         "aggregate": bool(compute.get("aggregate", False)),
         "available": partition_available,
@@ -294,6 +296,8 @@ def build_snapshot(
                 "resource_error": status.resource_error,
                 "wait_estimates_updated_at": status.wait_estimates_updated_at,
                 "scheduling": status.scheduling or {},
+                "fair_share": status.fair_share,
+                "fair_share_updated_at": status.fair_share_updated_at,
                 "resources": _cluster_resources(status),
                 "partitions": [
                     _partition_snapshot(status, name, generated_at)

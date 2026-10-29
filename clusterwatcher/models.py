@@ -68,6 +68,12 @@ class ClusterStatus:
     wait_estimates_updated_at: str | None = None
     user_jobs: list[dict[str, object]] | None = None
     scheduling: dict[str, object] | None = None
+    fair_share: dict[str, object] | None = None
+    fair_share_updated_at: str | None = None
+    # Internal, mostly static association/partition access data. Collected once
+    # per successful service connection and omitted from public API payloads.
+    fair_share_rules: dict[str, object] | None = None
+    fair_share_rules_collected_at: str | None = None
     jobs: dict[str, int] | None = None
     resource_error: str | None = None
     error: str | None = None

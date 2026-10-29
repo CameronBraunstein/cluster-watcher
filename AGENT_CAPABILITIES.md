@@ -73,8 +73,17 @@ The snapshot includes:
   FP16/BF16 Tensor/Matrix TFLOPS.
 - Aggregate-partition markers and advisory queue-wait probes for representative
   GPU counts, node shapes, memory requests, and walltimes.
+- The logged-in user's association-specific fair-share factors and global
+  visible-association ranks. `partitions[].fair_share` contains entries with an
+  explicit Slurm partition or a match inferred from cached account ancestry,
+  partition `AllowAccounts`, and intersecting QOS permissions. A
+  `mapping_source` of `account_qos` distinguishes the latter. The full
+  `clusters[].fair_share` summary retains unmatched entries and mapping
+  errors. Account names alone must not be used to infer a partition. These
+  ranks are not queue positions or start-time estimates.
 
-It deliberately excludes login usernames and personal jobs. Use the separately
+It deliberately excludes login usernames and personal jobs, but the fair-share
+summary does reveal the user's account names and relative standing. Use the separately
 gated jobs and session APIs only when those data are required.
 
 Use `gpus.schedulable_idle`, not raw `gpus.idle`, when deciding whether a new

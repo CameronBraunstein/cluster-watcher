@@ -99,7 +99,9 @@ class CapacityCadenceTests(TimedTestCase):
 
         status = collect_status(MACHINE, 5, True, previous=previous, refresh_capacity=False)
 
-        self.assertEqual(list(run_batch.call_args.args[2]), ["running", "pending", "priority_counts"])
+        self.assertEqual(list(run_batch.call_args.args[2]), [
+            "running", "pending", "priority_counts", "fair_share", "partition_rules", "account_rules",
+        ])
         self.assertEqual(status.partitions, previous.partitions)
         self.assertEqual(status.jobs, {"RUNNING": 3})
         self.assertEqual(status.scheduling, previous.scheduling)
@@ -119,8 +121,63 @@ class CapacityCadenceTests(TimedTestCase):
 
         self.assertEqual(
             list(run_batch.call_args.args[2]),
-            ["sinfo", "nodes", "scheduler", "running", "pending", "priority_counts", "releases", "queue"],
+            ["sinfo", "nodes", "scheduler", "running", "pending", "priority_counts", "releases", "queue", "fair_share", "partition_rules", "account_rules"],
         )
+
+    @patch("clusterwatcher.slurm.run_batch")
+    def test_access_rules_are_collected_once_and_map_live_factors(self, run_batch):
+        """Cache INF-style hierarchy and partition policy across fast polls."""
+        run_batch.return_value = {
+            name: Section("", "", 0)
+            for name in ("sinfo", "nodes", "scheduler", "running", "pending",
+                         "priority_counts", "releases", "partition_rules", "account_rules")
+        }
+        run_batch.return_value["sinfo"] = Section("gpu-v100|up|3|0/96/0/96|idle\n", "", 0)
+        run_batch.return_value["scheduler"] = Section("ClusterName = infcluster\n", "", 0)
+        run_batch.return_value["fair_share"] = Section(
+            "gpu_v100_bs_default|alice||0.998557\n"
+            "gpu_v100_other_default|alice||0.983505\n", "", 0,
+        )
+        run_batch.return_value["partition_rules"] = Section(
+            "PartitionName=gpu-v100 AllowGroups=ALL AllowAccounts=gpu_v100 "
+            "AllowQos=interactive,gpu_v100 RootOnly=NO\n", "", 0,
+        )
+        run_batch.return_value["account_rules"] = Section(
+            "infcluster|gpu_v100|||root|\n"
+            "infcluster|gpu_v100_bs|||gpu_v100|\n"
+            "infcluster|gpu_v100_bs_default|||gpu_v100_bs|\n"
+            "infcluster|gpu_v100_bs_default|alice|||gpu_v100,interactive\n"
+            "infcluster|gpu_v100_other_default|||gpu_v100|\n"
+            "infcluster|gpu_v100_other_default|alice|||gpu_v100,interactive\n", "", 0,
+        )
+
+        first = collect_status(MACHINE, 5, False)
+
+        self.assertIsNone(first.error)
+        self.assertIsNone(first.fair_share_rules.get("error"))
+        self.assertEqual(
+            {entry["account"] for entry in first.fair_share["associations"]
+             if "gpu-v100" in entry["matched_partitions"]},
+            {"gpu_v100_bs_default", "gpu_v100_other_default"},
+        )
+        self.assertIn("account_rules", run_batch.call_args.args[2])
+
+        second = collect_status(MACHINE, 5, False, previous=first, refresh_capacity=False)
+        self.assertNotIn("account_rules", run_batch.call_args.args[2])
+        self.assertNotIn("partition_rules", run_batch.call_args.args[2])
+        self.assertEqual(second.fair_share_rules_collected_at, first.fair_share_rules_collected_at)
+        self.assertIsNot(second.fair_share_rules, first.fair_share_rules)
+        self.assertEqual(second.fair_share["associations"], first.fair_share["associations"])
+
+        second.fair_share_updated_at = "2020-01-01T00:00:00+00:00"
+        run_batch.return_value["fair_share"] = Section(
+            "gpu_v100_bs_default|alice||0.500000\n", "", 0,
+        )
+        third = collect_status(MACHINE, 5, False, previous=second, refresh_capacity=False)
+        self.assertIn("fair_share", run_batch.call_args.args[2])
+        self.assertNotIn("account_rules", run_batch.call_args.args[2])
+        self.assertEqual(third.fair_share["associations"][0]["factor"], 0.5)
+        self.assertEqual(third.fair_share["associations"][0]["matched_partitions"], ["gpu-v100"])
 
     @patch("clusterwatcher.slurm.run_batch")
     def test_unavailable_scheduler_details_do_not_hide_other_status(self, run_batch):
@@ -138,7 +195,61 @@ class CapacityCadenceTests(TimedTestCase):
         self.assertIsNone(status.resource_error)
         self.assertEqual(status.partitions[0]["partition"], "gpu")
         self.assertEqual(status.scheduling, {})
+        self.assertIn("Slurm ClusterName unavailable", status.fair_share_rules["error"])
         self.assertFalse(any("global_priority_rank" in job for job in status.user_jobs))
+
+    @patch("clusterwatcher.slurm.run_batch")
+    def test_account_rule_failure_is_visible_without_hiding_partitions(self, run_batch):
+        """A failed one-time accounting query does not break status polling."""
+        run_batch.return_value = {
+            name: Section("", "", 0)
+            for name in ("sinfo", "nodes", "scheduler", "running", "pending", "priority_counts", "releases")
+        }
+        run_batch.return_value["sinfo"] = Section("gpu-v100|up|3|0/96/0/96|idle\n", "", 0)
+        run_batch.return_value["scheduler"] = Section("ClusterName = infcluster\n", "", 0)
+        run_batch.return_value["fair_share"] = Section("gpu_v100_bs_default|alice||0.9\n", "", 0)
+        run_batch.return_value["partition_rules"] = Section(
+            "PartitionName=gpu-v100 AllowGroups=ALL AllowAccounts=gpu_v100 AllowQos=gpu_v100\n", "", 0,
+        )
+        run_batch.return_value["account_rules"] = Section("", "access denied", 1)
+
+        status = collect_status(MACHINE, 5, False)
+
+        self.assertIsNone(status.error)
+        self.assertEqual(status.partitions[0]["partition"], "gpu-v100")
+        self.assertIn("access denied", status.fair_share["mapping_error"])
+        self.assertEqual(status.fair_share["associations"][0]["matched_partitions"], [])
+
+    @patch("clusterwatcher.slurm.run_batch")
+    def test_fair_share_is_optional_and_reused_until_its_own_cadence(self, run_batch):
+        """A slow or unsupported sshare must not hide capacity or run every poll."""
+        run_batch.return_value = {
+            name: Section("", "", 0)
+            for name in ("sinfo", "nodes", "scheduler", "running", "pending", "priority_counts", "releases", "queue")
+        }
+        run_batch.return_value["fair_share"] = Section("lab|alice|0.8\nlab|bob|0.4\n", "", 0)
+
+        first = collect_status(MACHINE, 5, True)
+        self.assertEqual(first.fair_share["associations"][0]["rank"], 1)
+        self.assertIn("fair_share", run_batch.call_args.args[2])
+
+        second = collect_status(MACHINE, 5, True, previous=first, refresh_capacity=False)
+        self.assertNotIn("fair_share", run_batch.call_args.args[2])
+        self.assertEqual(second.fair_share, first.fair_share)
+        self.assertIsNot(second.fair_share, first.fair_share)
+
+        second.fair_share_updated_at = "2020-01-01T00:00:00+00:00"
+        run_batch.return_value["fair_share"] = Section("", "sshare unavailable", 1)
+        third = collect_status(MACHINE, 5, True, previous=second, refresh_capacity=False)
+        self.assertIn("fair_share", run_batch.call_args.args[2])
+        self.assertEqual(third.fair_share["error"], "sshare unavailable")
+        self.assertIsNone(third.error)
+
+        third.fair_share_updated_at = "2020-01-01T00:00:00+00:00"
+        run_batch.return_value["fair_share"] = Section("", "", 124)
+        timed_out = collect_status(MACHINE, 5, True, previous=third, refresh_capacity=False)
+        self.assertEqual(timed_out.fair_share["error"], "sshare timed out after 5 seconds")
+        self.assertIsNone(timed_out.error)
 
     @patch("clusterwatcher.dashboard.collect_status")
     def test_status_store_refreshes_capacity_at_most_every_minute(self, collect):

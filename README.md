@@ -5,6 +5,8 @@ the VS Code sidebar, a browser tab, or the terminal. Cluster Watcher reuses one
 authenticated SSH session per cluster, so you type your password and one-time
 code once instead of on every query.
 
+If your infrastructure as a local SLURM system only, I also recommend trying my collegue Dmitrios Duka's extension: https://marketplace.visualstudio.com/items?itemName=DhimitriosDuka.slurm-cluster-manager
+
 <p align="center">
   <img src="docs/images/vscode-my-jobs.png" alt="My Jobs view: running, pending, completed, and failed job cards with progress bars; one expanded card shows its job ID, resources, lifecycle times, and actions" width="300">
   &nbsp;
@@ -446,7 +448,30 @@ unchanged job card rather than jumping to the top of **My Jobs**.
 #### Cluster Status
 
 Each cluster is a collapsible group of permanently expanded, compact partition
-cards ordered by compute rank. A card shows the partition name and
+cards ordered by compute rank. Each partition card shows the fair-share factor
+of every user/account association that Slurm explicitly ties to the partition
+*or* whose account and QOS pass that partition's access rules. The card labels
+the latter **via account/QOS**. It shows the account, fair-share factor (0–1;
+higher is more favorable), and rank among *all visible associations on that
+cluster*. Rank 1 has the highest factor; ties share a rank. This is not a rank
+within that partition's pending queue or a start-time promise: age, QOS,
+reservations, resource fit, and site submission policy also affect scheduling.
+
+On the first successful connection after the server starts, Cluster Watcher
+collects `scontrol show partition` access rules and `sacctmgr show assoc`
+account ancestry/QOS once per cluster and caches them until the service
+restarts. Inherited account access is resolved through Slurm's parent-account
+tree, never by matching an account-name prefix. For example, an unscoped
+`gpu_v100_bs_default` association may appear on `gpu-v100` when that account
+descends from its `AllowAccounts=gpu_v100` parent and its QOS is allowed there.
+The matching is conservative: unknown ancestry/QOS or restricted Unix groups
+leave the association unmatched. Those entries and access-rule errors remain
+in **Other fair-share associations**. If an administrator changes access rules,
+restart the service to recollect them. Fair-share *factors* change over time,
+so `sshare` is still queried at most once every ten minutes (five-second
+limit). The browser dashboard follows the same rule.
+
+A partition card shows the partition name and
 [launchability strip](#estimated-queue-waits), followed by the best GPU's model,
 VRAM, TFLOPS/s, CPU-thread total, and aligned **GPUs:** and **Nodes:**
 availability bars whose fractions end in **Free**. Hover a launch block for its exact estimate, the GPU model for its full
