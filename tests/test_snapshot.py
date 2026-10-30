@@ -3,6 +3,9 @@
 from io import BytesIO
 from email.message import Message
 import json
+import shutil
+import subprocess
+import unittest
 from unittest.mock import Mock, patch
 
 from clusterwatcher.dashboard import PAGE, StatusStore, make_handler
@@ -201,11 +204,25 @@ class SnapshotTests(TimedTestCase):
         self.assertEqual(dashboard["clusters"][0]["fair_share"]["associations"][0]["matched_partitions"], ["gpu-a100"])
 
     def test_browser_summary_precedes_partition_details(self):
-        """The browser uses the same fair-share data ahead of node details."""
-        self.assertIn("function fairShareView(cluster)", PAGE)
-        self.assertIn("${fairShareView(cluster)}${content}", PAGE)
+        """The browser puts matched factor bars on partitions, with no other card."""
+        self.assertNotIn("Other fair-share associations", PAGE)
+        self.assertNotIn("function fairShareView(cluster)", PAGE)
+        self.assertIn("function fairShareFactorBar(entry)", PAGE)
         self.assertIn("${partitionFairShareView(fairShare, name)}", PAGE)
+        self.assertIn("Factor: ${factor.toFixed(6)}", PAGE)
+        self.assertIn('role="progressbar"', PAGE)
+        self.assertIn("Account: ${entry.account}", PAGE)
         self.assertIn("entry.matched_partitions || [entry.partition]", PAGE)
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is needed to parse browser JavaScript")
+    def test_browser_script_has_valid_javascript(self):
+        """Catch Python string escapes that break embedded dashboard JavaScript."""
+        script = PAGE.split("<script>", 1)[1].split("</script>", 1)[0]
+        result = subprocess.run(
+            ["node", "--check"], input=script, text=True, capture_output=True,
+            check=False, timeout=5,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_snapshot_endpoint_returns_json_contract(self):
         store = StatusStore([Machine("cluster_0", "slurm.example", "alice")], 5, False, 15)

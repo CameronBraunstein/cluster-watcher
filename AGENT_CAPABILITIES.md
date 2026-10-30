@@ -81,7 +81,8 @@ The snapshot includes:
   partition `AllowAccounts`, and intersecting QOS permissions. A
   `mapping_source` of `account_qos` distinguishes the latter. The full
   `clusters[].fair_share` summary retains unmatched entries and mapping
-  errors. Account names alone must not be used to infer a partition. These
+  errors even though the human dashboards omit the separate unmatched card.
+  Account names alone must not be used to infer a partition. These
   ranks are not queue positions or start-time estimates.
 
 It deliberately excludes login usernames and personal jobs, but the fair-share

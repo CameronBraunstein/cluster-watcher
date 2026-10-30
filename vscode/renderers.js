@@ -299,7 +299,7 @@ button.button{border:0;font:inherit;cursor:pointer}
 .service-summary{display:flex;align-items:center;gap:4px;margin:3px 0 5px;min-width:0;white-space:nowrap;font-size:.78em}.service-summary>strong{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}.service-url{box-sizing:border-box;display:block;flex:0 0 auto;max-width:calc(100% - 26px);min-width:0;margin:0;padding:0;overflow:hidden;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;text-decoration:underline;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 22px;width:22px;height:12px;margin:0;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:12px}.service-toggle:disabled{cursor:wait;opacity:.65}.session-list{display:grid;gap:3px;margin-top:5px}.session-row{min-width:0;border:1px solid var(--vscode-panel-border);border-radius:4px;padding:4px 5px}.session-row-head{display:flex;align-items:center;justify-content:space-between;gap:4px;min-width:0}.session-name{font-weight:600;font-size:.85em;min-width:0;overflow:hidden;text-overflow:ellipsis}.session-state{font-size:.68em;white-space:nowrap}.session-state.open{color:var(--vscode-testing-iconPassed)}.session-state.closed{color:var(--vscode-errorForeground)}.session-target{margin-top:1px;font-size:.68em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.session-actions{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}.session-actions>.compact-action{box-sizing:border-box;max-width:100%;padding:2px 4px;font-size:.68em;line-height:1.3;white-space:normal;overflow-wrap:anywhere;text-align:left}.service-output{max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.72em}.server-details{margin-top:10px}.server-details>summary{cursor:pointer}
 .service-setup-actions{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 8px}.service-setup-actions>.button{box-sizing:border-box;max-width:100%;padding:3px 5px;font-size:.78em;white-space:normal;text-align:left}
 .configure-clusters{display:inline-block;margin-top:6px;padding:0;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;font-size:.78em;text-align:left;text-decoration:none;cursor:pointer}.configure-clusters:hover{text-decoration:underline}
-.fair-share-card{padding:6px;overflow-wrap:anywhere}.fair-share-title{font-weight:600;font-size:.85em}.fair-share-entry{display:flex;flex-wrap:wrap;gap:2px 7px;margin-top:4px;font-size:.8em}.fair-share-entry .account{font-weight:600}.fair-share-note{margin:5px 0 0;font-size:.72em;line-height:1.25}.partition-fair-share{margin-top:5px;border-top:1px solid var(--vscode-panel-border);padding-top:4px}.partition-fair-share .fair-share-title{font-size:.75em}.partition-fair-share .fair-share-entry{font-size:.72em}.partition-fair-share>.muted{font-size:.72em}
+.partition-fair-share{margin-top:5px}.fair-share-title{display:block;margin-bottom:2px;color:var(--vscode-descriptionForeground);font-size:.72em}.fair-share-bars{display:grid;gap:2px}.fair-share-track{box-sizing:border-box;position:relative;display:flex;align-items:center;width:100%;height:16px;overflow:hidden;border-radius:3px;background:color-mix(in srgb,var(--vscode-foreground) 16%,transparent);cursor:help}.fair-share-fill{position:absolute;inset:0 auto 0 0;height:100%;background:var(--vscode-testing-iconPassed)}.fair-share-label{position:relative;margin-left:2px;padding:0 3px;border-radius:2px;background:var(--vscode-sideBar-background);color:var(--vscode-foreground);font-size:.7em;line-height:13px;white-space:nowrap}.fair-share-track.unavailable{background:color-mix(in srgb,var(--vscode-foreground) 10%,transparent)}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
@@ -925,40 +925,33 @@ function partitionCard(partition, pending, asOf, thresholds, shareError = null) 
   const idleGpus = Math.min(gpuTotal, Math.max(0, Number(partition.gpus?.schedulable_idle) || 0));
   const nodeCounts = nodeAvailabilityCounts(partition);
   const countWidth = Math.max(`${idleGpus}/${gpuTotal} Free`.length, `${nodeCounts.idle}/${nodeCounts.total} Free`.length);
-  return `<article class="card partition-card${partition.aggregate ? ' aggregate' : ''}" style="--availability-count-width:${countWidth}ch"><div class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${launchability}</div><div class="muted partition-specs">${partitionSpecs(partition, profile)}</div><div class="partition-availability"><span class="partition-availability-label">GPUs:</span>${availabilityBar(idleGpus, gpuTotal, gpuAvailabilityTitle(partition))}</div><div class="partition-availability"><span class="partition-availability-label">Nodes:</span>${availabilityBar(nodeCounts.idle, nodeCounts.total, availabilityTitle(partition))}</div>${partitionFairShare(partition.fair_share, shareError)}</article>`;
+  return `<article class="card partition-card${partition.aggregate ? ' aggregate' : ''}" style="--availability-count-width:${countWidth}ch"><div class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${launchability}</div><div class="muted partition-specs">${partitionSpecs(partition, profile)}</div>${partitionFairShare(partition.fair_share, shareError)}<div class="partition-availability"><span class="partition-availability-label">GPUs:</span>${availabilityBar(idleGpus, gpuTotal, gpuAvailabilityTitle(partition))}</div><div class="partition-availability"><span class="partition-availability-label">Nodes:</span>${availabilityBar(nodeCounts.idle, nodeCounts.total, availabilityTitle(partition))}</div></article>`;
 }
 
-/** Render one account's factor and its rank among all visible associations. */
-function fairShareEntry(entry, showPartition = false) {
+/** Render one association's 0–1 factor bar with rank and account on hover. */
+function fairShareBar(entry) {
   const factor = Number(entry.factor);
   const rank = Number(entry.rank), total = Number(entry.total);
-  if (entry.factor == null || !Number.isFinite(factor) || !Number.isInteger(rank) || !Number.isInteger(total) || rank < 1 || total < rank) return '';
-  const scope = showPartition ? `<span>${escapeHtml(entry.partition || 'No partition specified')}</span>` : '';
-  const basis = entry.mapping_source === 'account_qos' ? '<span class="muted">via account/QOS</span>' : '';
-  return `<div class="fair-share-entry"><span class="account">${escapeHtml(entry.account)}</span>${scope}${basis}<span>Visible rank ${rank}/${total}</span><span>Factor ${factor.toFixed(6)}</span></div>`;
+  if (entry.factor == null || !Number.isFinite(factor) || factor < 0 || factor > 1
+      || !Number.isInteger(rank) || !Number.isInteger(total) || rank < 1 || total < rank) return '';
+  const label = `Factor: ${factor.toFixed(6)}`;
+  const details = [
+    `Account: ${entry.account}`,
+    `Visible rank: ${rank}/${total}`,
+    `Slurm partition: ${entry.partition || 'not specified'}`,
+    `Matched by: ${entry.mapping_source === 'account_qos' ? 'account hierarchy and QOS' : 'explicit association partition'}`,
+    'Higher factors favor jobs; they do not predict start time.',
+  ].join('\n');
+  const tooltip = escapeHtml(details).replace(/\n/g, '&#10;');
+  return `<div class="fair-share-track" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${factor}" aria-label="${tooltip}" data-fast-tooltip="${tooltip}"><span class="fair-share-fill" style="width:${(factor * 100).toFixed(2)}%"></span><span class="fair-share-label">${label}</span></div>`;
 }
 
-/** Show a partition's explicitly scoped associations without guessing from names. */
+/** Put each matched factor above the GPU and node availability bars. */
 function partitionFairShare(entries, error = null) {
-  const rows = (Array.isArray(entries) ? entries : []).map((entry) => fairShareEntry(entry)).join('');
-  const help = 'Rank among all visible Slurm associations. Unscoped accounts are matched through cached partition account/QOS rules. Higher factors favor jobs, but do not determine start time.';
-  return `<div class="partition-fair-share"><span class="fair-share-title" data-fast-tooltip="${escapeHtml(help)}" aria-label="${escapeHtml(help)}">Fair share</span>${rows || `<div class="muted">${error ? 'Fair-share data unavailable.' : 'No confirmed account match for this partition.'}</div>`}</div>`;
-}
-
-/** Retain unscoped or unmatched associations at cluster level, never guessing. */
-function fairShareCard(cluster) {
-  const share = cluster.fair_share || {};
-  const entries = Array.isArray(share.associations) ? share.associations : [];
-  const names = new Set((cluster.partitions || []).map((partition) => partition.name));
-  const rows = entries.filter((entry) => {
-    const matches = entry.matched_partitions || (entry.partition && names.has(entry.partition) ? [entry.partition] : []);
-    return !matches.some((name) => names.has(name));
-  })
-    .map((entry) => fairShareEntry(entry, true)).join('');
-  if (!rows && !share.error && entries.length) return '';
-  const unavailable = share.error || 'Fair-share data not yet available.';
-  const mappingError = share.mapping_error ? `<p class="muted fair-share-note">Access-rule mapping unavailable: ${escapeHtml(share.mapping_error)}</p>` : '';
-  return `<article class="card fair-share-card"><div class="fair-share-title">Other fair-share associations</div>${rows || `<div class="muted">${escapeHtml(unavailable)}</div>`}${mappingError}<p class="muted fair-share-note">No confirmed match to a displayed partition. Account names alone do not establish one. Ranks cover visible associations across the cluster, not queue positions.</p></article>`;
+  const bars = (Array.isArray(entries) ? entries : []).map(fairShareBar).filter(Boolean).join('');
+  const explanation = escapeHtml(error || 'No confirmed association match for this partition.').replace(/\n/g, '&#10;');
+  const unavailable = `<div class="fair-share-track unavailable" aria-label="${explanation}" data-fast-tooltip="${explanation}"><span class="fair-share-label">Factor: —</span></div>`;
+  return `<div class="partition-fair-share"><span class="fair-share-title">FairShare:</span><div class="fair-share-bars">${bars || unavailable}</div></div>`;
 }
 
 /**
@@ -976,14 +969,14 @@ function renderStatus(payload, disclosures = {}, freshness = {}) {
     const disclosureKey = escapeHtml(rawKey);
     const open = openAttribute(disclosures, rawKey, true);
     if (!cluster.reachable) {
-      clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary>${fairShareCard(cluster)}<p class="error">${escapeHtml(cluster.error || 'Cluster is unreachable')}</p>${loginPrompt(cluster)}</details>`);
+      clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary><p class="error">${escapeHtml(cluster.error || 'Cluster is unreachable')}</p>${loginPrompt(cluster)}</details>`);
       continue;
     }
     // No probe round has finished for this cluster yet (they start with the service).
     const pending = !cluster.wait_estimates_updated_at;
     const partitions = [...(cluster.partitions || [])].sort((left, right) => (Number(left.rank) || 9999) - (Number(right.rank) || 9999) || String(left.name).localeCompare(String(right.name)));
-    const cards = partitions.map((partition) => partitionCard(partition, pending, asOf, thresholds, cluster.fair_share?.error)).join('');
-    clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary>${fairShareCard(cluster)}${cluster.resource_error ? `<p class="error">${escapeHtml(cluster.resource_error)}</p>` : ''}${cards}</details>`);
+    const cards = partitions.map((partition) => partitionCard(partition, pending, asOf, thresholds, cluster.fair_share?.mapping_error || cluster.fair_share?.error)).join('');
+    clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(cluster.resource_error)}</p>` : ''}${cards}</details>`);
   }
   return document('Cluster Status', clusters.join('') || '<p>No clusters returned.</p>', freshness);
 }

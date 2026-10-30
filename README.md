@@ -468,10 +468,13 @@ unchanged job card rather than jumping to the top of **My Jobs**.
 Each cluster is a collapsible group of permanently expanded, compact partition
 cards ordered by compute rank. Each partition card shows the fair-share factor
 of every user/account association that Slurm explicitly ties to the partition
-*or* whose account and QOS pass that partition's access rules. The card labels
-the latter **via account/QOS**. It shows the account, fair-share factor (0–1;
-higher is more favorable), and rank among *all visible associations on that
-cluster*. Rank 1 has the highest factor; ties share a rank. This is not a rank
+*or* whose account and QOS pass that partition's access rules. **FairShare**
+appears as a factor bar above the **GPUs:** and **Nodes:** availability bars;
+the fill spans 0–1, and `Factor: N` appears inside it. Each matched
+association gets its own bar. Hover a bar to see its account, rank among
+*all visible associations on that cluster*, Slurm partition scope, and how
+the association was matched. Higher factors are more favorable; rank 1 has
+the highest factor and ties share a rank. This is not a rank
 within that partition's pending queue or a start-time promise: age, QOS,
 reservations, resource fit, and site submission policy also affect scheduling.
 
@@ -486,8 +489,9 @@ account-name prefix. For example, an unscoped
 `gpu_v100_bs_default` association may appear on `gpu-v100` when that account
 descends from its `AllowAccounts=gpu_v100` parent and its QOS is allowed there.
 The matching is conservative: unknown ancestry/QOS or restricted Unix groups
-leave the association unmatched. Those entries and access-rule errors remain
-in **Other fair-share associations**. If an administrator changes access rules,
+leave the association unmatched. The interface omits unmatched associations;
+they remain in the snapshot API. A partition without a confirmed match shows
+`Factor: —`, with any mapping error on hover. If an administrator changes access rules,
 restart the service to recollect them. Fair-share *factors* change over time,
 so `sshare` is still queried at most once every ten minutes (five-second
 limit). The browser dashboard follows the same rule.
