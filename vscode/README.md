@@ -250,19 +250,19 @@ runtime in its hover text.
 The main README explains the scheduling semantics; unavailable data is simply
 omitted.
 
-**Server Status** sits below Cluster Status. It reports the managed process as
-starting, waiting for credentials, running, stopping, or stopped. Both a
-compatible service started elsewhere and an extension-owned service show only
+**Server Status** sits below Cluster Status. It reports the service as
+starting, running, stopping, or stopped. Both a
+compatible service started elsewhere and a tmux service show only
 the clickable dashboard URL, with no status prefix. The URL is a button styled
 as a link, so its process/start tooltip is not accompanied by a dummy `#`
 target. A smaller toggle appears to the left of smaller text, preserving the
 standard local URL at minimum sidebar width; it is green when on and gray when
 off, and its hover says
 **Stop service** or **Start service**. When off, **Start Server** appears next
-to the toggle; there is no duplicate start button. A running extension-owned service shows
+to the toggle; there is no duplicate start button. A running tmux service shows
 the URL without the redundant “Running in the background” label. Hover the URL
 for the backend process ID and start time. The view also shows bounded recent
-diagnostic output and an
+login diagnostic output and an
 Open/Closed card for every reusable SSH session with its approximate remaining
 idle lifetime. These cards use tighter spacing and a smaller, truncatable SSH
 login address at minimum width. Open cards display only **Open**; hovering it
@@ -276,9 +276,11 @@ and then requests a graceful shutdown from the backend.
 **configure clusters...** appears below the machine cards and opens the
 selected `clusters.toml` without moving the Server Status scroll position (or
 offers setup if the file does not exist).
-An extension-owned process stops when the extension host shuts down or reloads;
-the OpenSSH masters may remain available for their configured persistence
-period. Start the service separately when it must outlive VS Code.
+The extension starts the service in a detached `tmux` session on its host, so
+closing or reloading VS Code does not stop it. `tmux` must be installed there.
+The OpenSSH masters may remain reusable until their own connection or idle
+limit ends. A host reboot ends both the tmux service and SSH sessions; a host
+policy that kills user processes at logout can also end them.
 
 Two settings control background feedback:
 
@@ -304,13 +306,18 @@ logs/scripts/dashboard, end job, start/stop/refresh the service, setup, edit
 configuration, settings, backend management, and login).
 
 Use **Cluster Watcher: Start Service & SSH Sessions** from the Command Palette
-or Server Status. The service runs directly as a managed background child
-process. Password and OTP requests use masked, focus-retaining VS Code input
-boxes; responses pass over the child's private stdin and never appear in its
+or Server Status. The extension launches `serve --jobs-api --skip-login` in a
+detached tmux session, then opens closed SSH sessions with a separate login
+helper. Password and OTP requests use masked, focus-retaining VS Code input
+boxes; responses pass over the helper's private stdin and never appear in its
 arguments, environment, configuration, or retained diagnostic output. If a
 compatible service is already listening at
 `clusterWatcher.backendUrl`, the extension attaches without starting another
 process.
+
+The tmux session name starts with `cluster-watcher-`. Inspect it with
+`tmux list-sessions` and `tmux attach -t <session-name>` on the extension host;
+detach using **Ctrl+B**, then **D**. **Stop service** shuts the backend down.
 
 If a cluster's SSH session closes later, its **Cluster Status** card says so
 and shows **Log in again**. The button runs `cluster-watcher login <cluster>`

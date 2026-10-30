@@ -5,9 +5,9 @@ const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const {
-  ServiceResponseError, backgroundLoginArguments, backgroundServiceArguments, cliArguments, cliCommand,
-  cliTerminalOptions, configFileExists, jobsApiDisabled, responseError, serviceArguments, serviceCommand,
-  shellQuote, validateBackgroundCredentialSupport, validateExecutable,
+  ServiceResponseError, backgroundLoginArguments, cliArguments, cliCommand,
+  cliTerminalOptions, configFileExists, jobsApiDisabled, persistentServiceCommand, responseError, serviceArguments, serviceCommand,
+  shellQuote, validateBackgroundCredentialSupport, validateExecutable, validatePersistentServiceSupport,
 } = require('../service');
 const manifest = require('../package.json');
 
@@ -31,6 +31,19 @@ test('service command enables jobs API and preserves paths containing spaces', (
     'serve', '--host', '127.0.0.1', '--port', '8123', '--timeout', '20',
     '--refresh', '30', '--jobs-api', '--no-browser',
   ]);
+});
+
+test('persistent service starts without SSH prompts while retaining the jobs API', () => {
+  const command = persistentServiceCommand({
+    executable: '/opt/Cluster Watcher/cluster-watcher',
+    configPath: '/home/alice/My Clusters.toml',
+    backendUrl: 'http://127.0.0.1:8123/',
+    sshTimeoutSeconds: 20,
+    refreshSeconds: 30,
+  });
+  assert.match(command, /'--jobs-api' '--no-browser' '--skip-login'$/);
+  assert.match(command, /'--config' '\/home\/alice\/My Clusters.toml'/);
+  assert.doesNotMatch(command, /credential-stdin-json/);
 });
 
 test('service command refuses a non-loopback or TLS endpoint', () => {
@@ -65,12 +78,11 @@ test('setup visibility uses the selected TOML and never treats inspection errors
   assert.equal(await configFileExists({ configPath: '/directory' }, resolve, async () => ({ isFile: () => false })), false);
 });
 
-test('background service and login opt into stdin credentials without a shell command', () => {
+test('background login opts into stdin credentials without a shell command', () => {
   const settings = {
     executable: 'cluster-watcher', configPath: '/home/alice/clusters.toml',
     backendUrl: 'http://127.0.0.1:8080/', sshTimeoutSeconds: 15, refreshSeconds: 15,
   };
-  assert.equal(backgroundServiceArguments(settings).at(-1), '--credential-stdin-json');
   assert.deepEqual(backgroundLoginArguments(settings, 'viper'), [
     'login', 'viper', '--only', '--timeout', '15', '--credential-stdin-json',
   ]);
@@ -97,6 +109,21 @@ test('background authentication rejects a legacy executable before login starts'
       && error.message.includes('too old')
       && error.message.includes('./install.sh --from-source --add-to-path')
       && error.message.includes('Manage Backend Installation'),
+  );
+});
+
+test('persistent startup checks both backend capabilities before opening tmux', async () => {
+  const settings = { executable: '/opt/cluster-watcher', configPath: '' };
+  await validatePersistentServiceSupport(settings, 5000, async () => ({
+    code: 0,
+    stdout: '{"schema_version":1,"capabilities":["credential-stdin-json","serve-skip-login"]}\n',
+    stderr: '',
+  }));
+  await assert.rejects(
+    validatePersistentServiceSupport(settings, 5000, async () => ({
+      code: 0, stdout: '{"schema_version":1,"capabilities":["credential-stdin-json"]}', stderr: '',
+    })),
+    /too old for persistent tmux startup/,
   );
 });
 
@@ -162,11 +189,11 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   assert.match(extensionSource, /this\.client\.serviceInfo\(\)/);
   assert.match(extensionSource, /serviceInfo\.started_at/);
   assert.match(extensionSource, /Other dashboards and clients using it will be disconnected/);
-  assert.equal(
-    (extensionSource.match(/await validateBackgroundCredentialSupport\(settings\);/g) || []).length,
-    2,
-    'both service startup and explicit login must reject a legacy backend',
-  );
+  assert.match(extensionSource, /await startServiceSession\(sessionName, persistentServiceCommand\(settings\)\)/);
+  assert.match(extensionSource, /await this\.login\(undefined, false\)/);
+  assert.match(extensionSource, /this\.disposed = true;\s*this\.loginProcess\?\.stop\(\);\s*}/);
+  assert.match(extensionSource, /await validatePersistentServiceSupport\(settings\);/);
+  assert.match(extensionSource, /await validateBackgroundCredentialSupport\(settings\);/);
 });
 
 test('executable validation accepts a program and explains a missing setting', async () => {

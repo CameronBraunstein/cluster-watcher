@@ -92,12 +92,8 @@ function validateExecutable(executable, timeoutMilliseconds = 5000) {
   });
 }
 
-/**
- * Require the private stdin credential protocol before starting a process that
- * has no terminal. A legacy executable can pass ``--help`` validation but
- * cannot safely answer password or OTP prompts in the extension host.
- */
-async function validateBackgroundCredentialSupport(settings, timeoutMilliseconds = 5000, runner = runCli) {
+/** Read the backend's versioned capability list without loading cluster config. */
+async function executableCapabilities(settings, timeoutMilliseconds = 5000, runner = runCli) {
   let result;
   try {
     result = await runner(settings, ['capabilities'], timeoutMilliseconds);
@@ -107,11 +103,29 @@ async function validateBackgroundCredentialSupport(settings, timeoutMilliseconds
   }
   let payload;
   try { payload = JSON.parse(result.stdout); } catch (_error) { payload = undefined; }
-  if (result.code === 0 && payload?.schema_version === 1
-      && Array.isArray(payload.capabilities)
-      && payload.capabilities.includes('credential-stdin-json')) return;
+  if (result.code === 0 && payload?.schema_version === 1 && Array.isArray(payload.capabilities)) {
+    return payload.capabilities;
+  }
+  return [];
+}
+
+/** Reject a backend that cannot receive masked SSH prompts from VS Code. */
+async function validateBackgroundCredentialSupport(settings, timeoutMilliseconds = 5000, runner = runCli) {
+  const capabilities = await executableCapabilities(settings, timeoutMilliseconds, runner);
+  if (capabilities.includes('credential-stdin-json')) return;
   throw new ExecutableValidationError(
     `The configured Cluster Watcher executable "${settings.executable}" is too old for secure background SSH login. `
+    + 'Update or reinstall the backend that matches this extension, then retry. In a source checkout, run '
+    + '`./install.sh --from-source --add-to-path`; otherwise use “Cluster Watcher: Manage Backend Installation”.',
+  );
+}
+
+/** Require the backend flags used by the detached tmux service and login helper. */
+async function validatePersistentServiceSupport(settings, timeoutMilliseconds = 5000, runner = runCli) {
+  const capabilities = await executableCapabilities(settings, timeoutMilliseconds, runner);
+  if (capabilities.includes('credential-stdin-json') && capabilities.includes('serve-skip-login')) return;
+  throw new ExecutableValidationError(
+    `The configured Cluster Watcher executable "${settings.executable}" is too old for persistent tmux startup. `
     + 'Update or reinstall the backend that matches this extension, then retry. In a source checkout, run '
     + '`./install.sh --from-source --add-to-path`; otherwise use “Cluster Watcher: Manage Backend Installation”.',
   );
@@ -203,11 +217,6 @@ function serviceArguments(settings) {
   ];
 }
 
-/** Add the private stdin credential protocol used by the background extension host. */
-function backgroundServiceArguments(settings) {
-  return [...serviceArguments(settings), '--credential-stdin-json'];
-}
-
 /** Build a background login argument vector for all or one configured machine. */
 function backgroundLoginArguments(settings, machine, includeCredentialGroup = false) {
   return [
@@ -221,9 +230,14 @@ function serviceCommand(settings) {
   return cliCommand(settings, serviceArguments(settings));
 }
 
+/** Build the persistent tmux command; sidebar login handles SSH prompts. */
+function persistentServiceCommand(settings) {
+  return cliCommand(settings, [...serviceArguments(settings), '--skip-login']);
+}
+
 module.exports = {
-  ExecutableValidationError, ServiceResponseError, backgroundLoginArguments, backgroundServiceArguments,
+  ExecutableValidationError, ServiceResponseError, backgroundLoginArguments,
   cliArguments, jobsApiDisabled, responseError, cliCommand, cliTerminalOptions, configurationError,
-  configFileExists, resolveConfigPath, runCli, serviceArguments, serviceCommand, shellQuote,
-  validateBackgroundCredentialSupport, validateExecutable,
+  configFileExists, persistentServiceCommand, resolveConfigPath, runCli, serviceArguments, serviceCommand, shellQuote,
+  validateBackgroundCredentialSupport, validateExecutable, validatePersistentServiceSupport,
 };

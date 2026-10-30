@@ -374,6 +374,7 @@ cluster-watcher serve --jobs-api
 | --- | --- |
 | *(none)* | Capacity snapshot, web dashboard at `http://127.0.0.1:8080/`, and the snapshot API. |
 | `--jobs-api` | Adds your jobs (last 24 hours), log tails, batch scripts, cancellation, and the jobs API. Required by the VS Code **My Jobs** view. |
+| `--skip-login` | Start the dashboard without interactive SSH prompts; open closed sessions with `cluster-watcher login` or the VS Code **Log in** buttons. Useful for detached startup. |
 | `--command-api` | Adds the SSH session and remote-command API. Allows arbitrary remote code execution; enable deliberately. |
 | `--port N`, `--no-browser` | Change the port or skip opening a browser (useful on a headless login node). |
 | `--refresh SECONDS` | Refresh interval for your jobs and the page (default 15 s). Avoid lowering it much: `sinfo` loads the Slurm controller. |
@@ -395,11 +396,14 @@ cluster cards opens that file; configuration and settings commands remain
 available from VS Code's Command Palette. The wizard is always available from
 the Server Status title menu.
 The placeholders disappear when the service responds, and the live job and
-cluster views return. The service starts as an extension-owned background process with
-`serve --jobs-api`; password and OTP requests appear as masked VS Code input
-boxes, without opening a terminal. Secrets travel only over the child process's
-private stdin and are never placed in arguments, environment variables, logs,
-or configuration. If a service is already listening at
+cluster views return. On Linux and macOS, **Start Server** launches
+`serve --jobs-api --skip-login --no-browser` in a detached `tmux` session on
+the VS Code extension host. The service keeps running when that VS Code window
+closes or reloads. The extension then offers masked password and OTP prompts
+for closed SSH sessions, without opening a terminal. Secrets travel only over
+the login helper's private stdin and are never placed in arguments,
+environment variables, logs, or configuration. `tmux` must be installed on the
+extension host. If a service is already listening at
 `clusterWatcher.backendUrl` (default
 `http://127.0.0.1:8080/`), the extension attaches to it instead of starting
 another. On first use without a `cluster-watcher` command, it offers **Install
@@ -413,6 +417,20 @@ While the backend performs its first cluster collection, the sidebar retries
 its temporary HTTP 503 responses every second instead of waiting for the
 normal refresh interval. The job and cluster views show data independently as
 soon as each endpoint is ready.
+
+The tmux session is named `cluster-watcher-<12-character hash>` for the local
+service URL. To inspect it, run `tmux list-sessions` and then
+`tmux attach -t <session-name>` on the extension host; detach with
+**Ctrl+B**, then **D**. **Stop service** asks the backend to shut down and
+closes the tmux session. Closing VS Code does not stop the tmux session;
+rebooting the host does. A host policy that kills user processes at logout
+can also end tmux. SSH sessions can still close independently because
+of network loss, remote policy, or their configured `control_persist` idle
+limit. Use **Log in** to reopen one without restarting the service.
+
+For a terminal-only setup, run `tmux new -s cluster-watcher`, then run
+`cluster-watcher serve --jobs-api --no-browser` inside that session and
+detach with **Ctrl+B**, then **D**. VS Code will attach to it when opened.
 
 #### My Jobs
 
@@ -499,17 +517,17 @@ password/OTP requests as masked VS Code input boxes.
 
 #### Server Status
 
-The third view shows whether the service is starting, waiting for credentials,
-attached to an independently started process, or stopped. Its compact first
+The third view shows whether the service is starting, attached to a running
+process, or stopped. Its compact first
 line puts a small start/stop toggle on the left. Both the control and text are
 sized to preserve the complete local dashboard URL at the sidebar's minimum
-width. Both extension-owned and attached services show only the dashboard URL,
+width. Both tmux and independently started services show only the dashboard URL,
 without a redundant status label. The URL opens the dashboard through a button
 styled as a link, avoiding a second `#` link-target tooltip; its single hover
 text gives the service process ID and start time. The
 green/on toggle says **Stop service** on hover, and the gray/off toggle says
 **Start service** and has **Start Server** beside it. The view also includes a
-bounded recent diagnostic tail and
+bounded recent login diagnostic tail and
 every configured machine's reusable SSH-session state and approximate remaining
 idle lifetime. Machine cards use compact spacing and truncate the smaller SSH
 login address when necessary, so their status and login controls remain within
@@ -1449,8 +1467,9 @@ Development Host. There:
    remove one, rather than the extension's managed-backend uninstall action.
 2. Open the Cluster Watcher view and run **Start Service & SSH Sessions**;
    complete MFA in the masked VS Code prompts and check that all three views
-   refresh. Confirm **Server Status** reports the background process and SSH
-   sessions without opening a terminal.
+   refresh. Confirm **Server Status** reports the persistent tmux service and
+   SSH sessions without opening a terminal. Install `tmux` on the extension
+   host first.
    The extension checks `cluster-watcher capabilities` before starting a
    terminal-free login. If it reports that the executable is too old, rebuild
    and install the backend from the same checkout with

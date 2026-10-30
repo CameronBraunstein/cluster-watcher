@@ -257,7 +257,7 @@
         "clusterWatcher.autoStart": {
           "type": "boolean",
           "default": false,
-          "description": "Start Cluster Watcher as a managed background process when no existing service is found. Password and OTP prompts use secure VS Code input boxes."
+          "description": "Start Cluster Watcher in a persistent tmux session when no existing service is found. Password and OTP prompts use secure VS Code input boxes. tmux must be installed on the extension host."
         },
         "clusterWatcher.notifications": {
           "type": "string",

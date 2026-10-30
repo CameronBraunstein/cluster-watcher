@@ -1362,12 +1362,14 @@ def serve(
     jobs_api_enabled: bool = False,
     command_api_enabled: bool = False,
     credential_prompt: SecretPrompt | None = None,
+    skip_login: bool = False,
 ) -> int:
-    """Start the dashboard and its background collectors."""
+    """Start the dashboard and its collectors, optionally deferring SSH login."""
     if (jobs_api_enabled or command_api_enabled) and not is_loopback_host(host):
         raise ValueError("--jobs-api and --command-api require a loopback --host (127.0.0.1, ::1, or localhost)")
-    for machine, error in establish_interactive_sessions(machines, timeout, credential_prompt):
-        print(f"Could not establish reusable SSH session for {machine.name}: {error}", file=sys.stderr)
+    if not skip_login:
+        for machine, error in establish_interactive_sessions(machines, timeout, credential_prompt):
+            print(f"Could not establish reusable SSH session for {machine.name}: {error}", file=sys.stderr)
     store = StatusStore(
         machines, timeout, include_jobs, refresh_seconds, wait_threshold_minutes,
         jobs_api_enabled, command_api_enabled,

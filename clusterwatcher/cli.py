@@ -201,6 +201,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     serve_parser.add_argument("--jobs-api", action="store_true", help="enable loopback-only personal job and log APIs")
     serve_parser.add_argument("--command-api", action="store_true", help="enable loopback-only SSH session and command APIs")
     serve_parser.add_argument("--no-browser", action="store_true", help="do not open the dashboard in a browser")
+    serve_parser.add_argument(
+        "--skip-login", action="store_true",
+        help="start the dashboard without interactive SSH login; open sessions separately with cluster-watcher login",
+    )
     serve_parser.add_argument("--credential-stdin-json", action="store_true", help=argparse.SUPPRESS)
     login_parser = subparsers.add_parser(
         "login",
@@ -237,7 +241,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "capabilities":
         print(json.dumps({
             "schema_version": 1,
-            "capabilities": ["credential-stdin-json"],
+            "capabilities": ["credential-stdin-json", "serve-skip-login"],
         }))
         return 0
     if args.command == "config" and args.path:
@@ -289,6 +293,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 machines, args.host, args.port, args.timeout, args.jobs, args.refresh,
                 not args.no_browser, load_wait_threshold_minutes(args.config), args.jobs_api,
                 args.command_api, JsonLineCredentialPrompt() if args.credential_stdin_json else None,
+                args.skip_login,
             )
         if args.command == "login":
             if args.timeout < 1:

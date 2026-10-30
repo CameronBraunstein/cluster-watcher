@@ -9,11 +9,13 @@ const { LOG_TAIL_LINES, logDocumentContent, logRequestPath, prependLogPage, virt
 const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = require('./events');
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
 const { RefreshCoordinator, RefreshFeedback, refreshResultMessage } = require('./refresh');
+const { hasServiceSession, serviceSessionName, startServiceSession } = require('./tmux');
 const { isFailureGroup, jobRef, localTime, setDateFormat, renderJobs, renderJobsApiDisabled, renderLoading, renderServerStatus, renderStatus, renderWelcome, stateGroup } = require('./renderers');
 const {
-  ExecutableValidationError, backgroundLoginArguments, backgroundServiceArguments, cliArguments,
+  ExecutableValidationError, backgroundLoginArguments, cliArguments,
   jobsApiDisabled, responseError, cliTerminalOptions, configurationError, configFileExists, resolveConfigPath,
-  runCli, serviceCommand, validateBackgroundCredentialSupport, validateExecutable,
+  persistentServiceCommand, runCli, serviceCommand, validateBackgroundCredentialSupport, validateExecutable,
+  validatePersistentServiceSupport,
 } = require('./service');
 
 const CONFIGURATION_SECTION = 'clusterWatcher';
@@ -131,7 +133,7 @@ class BackendClient {
   }
 }
 
-/** Own a background service while allowing attachment to a separately run service. */
+/** Start a persistent tmux service and attach to any reachable local service. */
 class ServiceController {
   constructor(client, refresh, manager, provider, onReachable = () => {}, onAvailabilityChange = () => {}) {
     this.client = client;
@@ -140,10 +142,10 @@ class ServiceController {
     this.provider = provider;
     this.onReachable = onReachable;
     this.onAvailabilityChange = onAvailabilityChange;
-    this.process = undefined;
+    this.starting = false;
+    this.startedSessionName = undefined;
+    this.disposed = false;
     this.loginProcess = undefined;
-    this.stopping = false;
-    this.authenticationCancelled = false;
     this.lifecycle = {
       state: 'offline', owned: false, url: configuration().backendUrl,
       pid: undefined, startedAt: undefined, activity: undefined, error: undefined, recentLines: [],
@@ -163,11 +165,8 @@ class ServiceController {
   }
 
   /** Ask VS Code for one secret; cancellation is returned to the child explicitly. */
-  async requestCredential(request, serviceStartup = false) {
-    this.publish({
-      ...(serviceStartup ? { state: 'authenticating' } : {}),
-      activity: request.prompt,
-    });
+  async requestCredential(request) {
+    this.publish({ activity: request.prompt });
     const value = await vscode.window.showInputBox({
       title: request.kind === 'otp' ? 'Cluster Watcher one-time code' : 'Cluster Watcher password',
       prompt: request.prompt,
@@ -176,9 +175,7 @@ class ServiceController {
       placeHolder: request.kind === 'otp' ? 'Enter the current one-time code' : 'Enter the SSH password',
       validateInput: (candidate) => candidate ? undefined : 'A value is required',
     });
-    if (serviceStartup && value === undefined) this.authenticationCancelled = true;
     this.publish({
-      ...(serviceStartup && value !== undefined ? { state: 'starting' } : {}),
       activity: value === undefined ? 'Authentication cancelled' : 'Continuing authentication…',
     });
     return value;
@@ -207,111 +204,92 @@ class ServiceController {
       await this.refresh();
       return;
     }
-    if (this.process) {
-      vscode.window.showInformationMessage('Cluster Watcher is already starting in the background.');
+    if (this.starting) {
+      vscode.window.showInformationMessage('Cluster Watcher is already starting in tmux.');
       return;
     }
     const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
     await this.manager.ensureAvailable(configured);
     const settings = configuration();
     await validateExecutable(settings.executable);
-    await validateBackgroundCredentialSupport(settings);
-    this.stopping = false;
-    this.authenticationCancelled = false;
+    await validatePersistentServiceSupport(settings);
+    this.starting = true;
+    const sessionName = serviceSessionName(settings.backendUrl);
     this.publish({
-      state: 'starting', owned: true, pid: undefined, startedAt: new Date().toISOString(),
-      activity: 'Starting the service and checking reusable SSH sessions…', error: undefined, recentLines: [],
+      state: 'starting', owned: false, pid: undefined, startedAt: undefined,
+      activity: 'Starting a persistent tmux service…', error: undefined, recentLines: [],
     });
-    const owned = new BackgroundCliProcess(
-      settings.executable,
-      cliArguments(settings, backgroundServiceArguments(settings)),
-      {
-        onStart: (pid) => this.publish({ pid }),
-        onCredential: (request) => this.requestCredential(request, true),
-        onOutput: (line, recentLines) => this.processOutput(line, recentLines),
-        onProtocolError: (error) => this.publish({ state: 'error', error: error.message }),
-        onExit: (result) => this.serviceExited(owned, result),
-      },
-    );
-    this.process = owned;
-    owned.start();
-    void this.waitUntilReady(owned);
-  }
-
-  /** Poll cheaply while authentication is in progress, then refresh all views. */
-  async waitUntilReady(owned) {
-    while (this.process === owned && !owned.settled) {
-      if (await this.client.isClusterWatcherService()) {
-        this.publish({ state: 'running', owned: true, activity: undefined, error: undefined });
-        await this.refresh();
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      await startServiceSession(sessionName, persistentServiceCommand(settings));
+      this.startedSessionName = sessionName;
+      await this.waitUntilReady(sessionName);
+      if (this.disposed) return;
+      // The CLI skips already-open masters, so login can begin before the
+      // potentially slow first server/session inventory has finished.
+      await this.login(undefined, false);
+    } catch (error) {
+      if (!this.disposed) this.publish({ state: 'error', activity: undefined, error: error.message });
+      throw error;
+    } finally {
+      this.starting = false;
     }
   }
 
-  /** Record an owned service's exit without treating an intentional stop as failure. */
-  serviceExited(owned, result) {
-    if (this.process !== owned) return;
-    this.process = undefined;
-    const expected = this.stopping || (result.code === 130 && this.authenticationCancelled);
-    this.stopping = false;
-    this.authenticationCancelled = false;
-    const diagnostic = result.error?.message
-      || this.lifecycle.error
-      || [...result.recentLines].reverse().find((line) => line.stream === 'stderr')?.text
-      || (result.code != null ? `Process exited with status ${result.code}` : `Process ended with ${result.signal || 'an unknown signal'}`);
-    this.publish(expected
-      ? { state: 'offline', owned: false, pid: undefined, startedAt: undefined, activity: undefined, error: undefined }
-      : { state: 'error', owned: false, pid: undefined, startedAt: undefined, activity: undefined, error: diagnostic });
-    void this.refresh();
+  /** Wait for the tmux service to bind, or report an early exit. */
+  async waitUntilReady(sessionName) {
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline && !this.disposed) {
+      if (await this.client.isClusterWatcherService()) {
+        this.publish({ state: 'attached', owned: false, activity: undefined, error: undefined });
+        void this.refresh().catch(reportError);
+        return;
+      }
+      if (!await hasServiceSession(sessionName)) {
+        throw new Error(`The tmux service exited before it became reachable. Run cluster-watcher serve in a terminal to inspect its startup error.`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(500, deadline - Date.now())));
+    }
+    if (!this.disposed) throw new Error(`The tmux service did not become reachable within 30 seconds. Inspect it with: tmux attach -t ${sessionName}`);
   }
 
   async stop() {
-    if (!this.process) {
-      if (this.lifecycle.state !== 'attached') {
-        vscode.window.showInformationMessage('The Cluster Watcher service is not running.');
-        return;
-      }
+    if (!['running', 'attached'].includes(this.lifecycle.state)) {
+      vscode.window.showInformationMessage('The Cluster Watcher service is not running.');
+      return;
+    }
+    if (!this.startedSessionName) {
       const choice = await vscode.window.showWarningMessage(
         'Stop the existing Cluster Watcher service? Other dashboards and clients using it will be disconnected.',
         { modal: true },
         'Stop service',
       );
       if (choice !== 'Stop service') return;
-      this.publish({ state: 'stopping', activity: 'Stopping the existing service…', error: undefined });
-      try {
-        await this.client.post('/api/v1/shutdown', {}, 5000);
-      } catch (error) {
-        this.publish({ state: 'attached', activity: undefined, error: error instanceof Error ? error.message : String(error) });
-        throw error;
-      }
-      this.publish({ state: 'offline', owned: false, pid: undefined, startedAt: undefined, activity: undefined, error: undefined });
-      vscode.window.showInformationMessage('Cluster Watcher service stopped.');
-      await this.refresh();
-      return;
     }
-    this.stopping = true;
-    this.publish({ state: 'stopping', activity: 'Stopping the background service…' });
-    this.process.stop();
+    this.publish({ state: 'stopping', activity: 'Stopping the service…', error: undefined });
+    try {
+      await this.client.post('/api/v1/shutdown', {}, 5000);
+    } catch (error) {
+      this.publish({ state: 'attached', activity: undefined, error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+    this.startedSessionName = undefined;
+    this.publish({ state: 'offline', owned: false, pid: undefined, startedAt: undefined, activity: undefined, error: undefined });
+    vscode.window.showInformationMessage('Cluster Watcher service stopped.');
+    await this.refresh();
   }
 
-  /** Stop only a service owned by the extension before replacing its executable. */
+  /** Stop only a tmux service started by this extension host before replacing its executable. */
   async stopForBackendChange() {
-    if (!this.process) return;
-    const completion = this.process.completion;
-    await this.stop();
-    await Promise.race([completion, new Promise((resolve) => setTimeout(resolve, 2000))]);
+    if (!this.startedSessionName || !['running', 'attached'].includes(this.lifecycle.state)) return;
+    await this.client.post('/api/v1/shutdown', {}, 5000);
+    this.startedSessionName = undefined;
+    this.publish({ state: 'offline', owned: false, pid: undefined, startedAt: undefined, activity: undefined });
   }
 
   /** Re-open one or all closed sessions through the same background secret protocol. */
   async login(machine, includeCredentialGroup = false) {
     if (this.loginProcess) {
       vscode.window.showInformationMessage('A Cluster Watcher login is already in progress.');
-      return;
-    }
-    if (this.process && ['starting', 'authenticating'].includes(this.lifecycle.state)) {
-      vscode.window.showInformationMessage('The background service is already authenticating SSH sessions.');
       return;
     }
     const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
@@ -331,7 +309,7 @@ class ServiceController {
         settings, typeof machine === 'string' ? machine : undefined, Boolean(includeCredentialGroup),
       )),
       {
-        onCredential: (request) => this.requestCredential(request, false),
+        onCredential: (request) => this.requestCredential(request),
         onOutput: (line, recentLines) => this.processOutput(line, recentLines),
         onProtocolError: (error) => this.publish({ error: error.message }),
       },
@@ -343,7 +321,9 @@ class ServiceController {
     const diagnostic = result.error?.message
       || [...result.recentLines].reverse().find((line) => line.stream === 'stderr')?.text;
     this.publish({ activity: undefined, ...(result.code && result.code !== 130 ? { error: diagnostic || `Login exited with status ${result.code}` } : {}) });
-    if (result.code === 0) vscode.window.showInformationMessage('Cluster Watcher SSH sessions are open.');
+    if (result.code === 0 && result.recentLines.some((line) => line.stream === 'stdout' && line.text.endsWith('session open'))) {
+      vscode.window.showInformationMessage('Cluster Watcher SSH sessions are open.');
+    }
     else if (result.code === 130) vscode.window.showInformationMessage('Cluster Watcher login was cancelled.');
     else vscode.window.showErrorMessage(`Cluster Watcher login failed: ${diagnostic || `exit status ${result.code}`}`);
     await this.refresh();
@@ -379,12 +359,12 @@ class ServiceController {
     }
     if (reachable) {
       this.publish({
-        state: this.process ? 'running' : 'attached', owned: Boolean(this.process),
-        pid: serviceInfo.pid ?? (this.process ? this.lifecycle.pid : undefined),
-        startedAt: serviceInfo.started_at ?? (this.process ? this.lifecycle.startedAt : undefined),
+        state: 'attached', owned: false,
+        pid: serviceInfo.pid,
+        startedAt: serviceInfo.started_at,
         activity: this.loginProcess ? this.lifecycle.activity : undefined, error: undefined,
       });
-    } else if (!this.process && this.lifecycle.state !== 'error') {
+    } else if (!this.starting && this.lifecycle.state !== 'error') {
       this.publish({ state: 'offline', owned: false, pid: undefined, startedAt: undefined, activity: undefined });
     } else {
       this.provider.updateServer(this.lifecycle, this.sessions, this.sessionsError, checkedAt);
@@ -393,8 +373,8 @@ class ServiceController {
   }
 
   dispose() {
+    this.disposed = true;
     this.loginProcess?.stop();
-    this.process?.stop();
   }
 }
 

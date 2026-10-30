@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 from clusterwatcher.config import load_config, load_wait_threshold_minutes
 from clusterwatcher.cli import main
-from clusterwatcher.dashboard import PAGE, StatusStore
+from clusterwatcher.dashboard import PAGE, StatusStore, serve as serve_dashboard
 from clusterwatcher.models import ClusterStatus, Machine
 from clusterwatcher.slurm import collect_status
 from clusterwatcher.ssh import ssh_command, start_interactive_session
@@ -75,7 +75,7 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertEqual(result, 0)
         self.assertEqual(json.loads(output.getvalue()), {
             "schema_version": 1,
-            "capabilities": ["credential-stdin-json"],
+            "capabilities": ["credential-stdin-json", "serve-skip-login"],
         })
         load_config.assert_not_called()
 
@@ -561,6 +561,26 @@ class ClusterWatcherTests(TimedTestCase):
         prompt = prompt_type.return_value
         self.assertEqual(main(["--config", str(TEST_CONFIG), "serve", "--credential-stdin-json", "--no-browser"]), 0)
         self.assertIs(serve.call_args.args[10], prompt)
+
+    @patch("clusterwatcher.cli.load_wait_threshold_minutes", return_value=(5, 30))
+    @patch("clusterwatcher.cli.load_config", return_value=[Machine("a", "host", "user")])
+    @patch("clusterwatcher.cli.serve", return_value=0)
+    def test_serve_skip_login_flag_is_forwarded(self, serve, _load_config, _thresholds):
+        """Let tmux start the web service before graphical SSH authentication."""
+        self.assertEqual(main(["--config", str(TEST_CONFIG), "serve", "--skip-login", "--jobs-api"]), 0)
+        self.assertTrue(serve.call_args.args[11])
+        self.assertTrue(serve.call_args.args[8])
+
+    @patch("clusterwatcher.dashboard.ThreadingHTTPServer", side_effect=OSError("port unavailable"))
+    @patch("clusterwatcher.dashboard.threading.Thread")
+    @patch("clusterwatcher.dashboard.StatusStore")
+    @patch("clusterwatcher.dashboard.establish_interactive_sessions")
+    def test_serve_skip_login_avoids_terminal_prompts(self, authenticate, _store, _thread, _server):
+        """A detached tmux dashboard must never block on an invisible OTP prompt."""
+        with redirect_stderr(StringIO()):
+            result = serve_dashboard([], "127.0.0.1", 8080, 15, False, 15, False, skip_login=True)
+        self.assertEqual(result, 1)
+        authenticate.assert_not_called()
 
     def test_load_and_build_ssh_command(self):
         with tempfile.TemporaryDirectory() as directory:
