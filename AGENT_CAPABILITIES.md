@@ -76,7 +76,8 @@ The snapshot includes:
   GPU counts, node shapes, memory requests, and walltimes.
 - The logged-in user's association-specific fair-share factors and global
   visible-association ranks. `partitions[].fair_share` contains entries with an
-  explicit Slurm partition or a match inferred from cached account ancestry,
+  explicit Slurm partition or a match inferred from cached account ancestry
+  (including the user-visible `sshare` tree when `sacctmgr` hides account rows),
   partition `AllowAccounts`, and intersecting QOS permissions. A
   `mapping_source` of `account_qos` distinguishes the latter. The full
   `clusters[].fair_share` summary retains unmatched entries and mapping

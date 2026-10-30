@@ -476,10 +476,13 @@ within that partition's pending queue or a start-time promise: age, QOS,
 reservations, resource fit, and site submission policy also affect scheduling.
 
 On the first successful connection after the server starts, Cluster Watcher
-collects `scontrol show partition` access rules and `sacctmgr show assoc`
-account ancestry/QOS once per cluster and caches them until the service
-restarts. Inherited account access is resolved through Slurm's parent-account
-tree, never by matching an account-name prefix. For example, an unscoped
+collects `scontrol show partition` access rules, `sacctmgr show assoc` user
+QOS, and account ancestry once per cluster and caches them until the service
+restarts. Failed rule queries are retried after ten minutes. Some sites hide
+account rows from `sacctmgr`; in that case, a
+user-scoped `sshare --users` query supplies the indented parent-account tree.
+Inherited access is resolved through that tree, never by matching an
+account-name prefix. For example, an unscoped
 `gpu_v100_bs_default` association may appear on `gpu-v100` when that account
 descends from its `AllowAccounts=gpu_v100` parent and its QOS is allowed there.
 The matching is conservative: unknown ancestry/QOS or restricted Unix groups

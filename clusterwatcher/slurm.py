@@ -14,8 +14,9 @@ from .models import AccountingSnapshot, ClusterStatus, Machine
 from .compute import rank_partitions
 from .fair_share import (
     ACCOUNT_RULES_COMMAND, FAIR_SHARE_REFRESH_SECONDS, PARTITION_RULES_COMMAND,
-    SSHARE_COMMAND, annotate_partition_access, parse_account_rules,
-    parse_fair_share, parse_partition_rules,
+    SSHARE_COMMAND, account_tree_command, annotate_partition_access,
+    parse_account_rules, parse_account_tree, parse_fair_share,
+    parse_partition_rules,
 )
 from .remote_batch import Section, run_batch
 from .ssh import run_remote
@@ -546,6 +547,14 @@ def collect_status(
     rules_due = include_personal_details and (
         previous is None or previous.fair_share_rules_collected_at is None
     )
+    if include_personal_details and not rules_due and (previous.fair_share_rules or {}).get("error"):
+        try:
+            last_rules_attempt = datetime.fromisoformat(previous.fair_share_rules_collected_at)
+            rules_due = (
+                datetime.now(timezone.utc) - last_rules_attempt
+            ).total_seconds() >= FAIR_SHARE_REFRESH_SECONDS
+        except (TypeError, ValueError):
+            rules_due = True
     if include_personal_details and not fair_share_due:
         try:
             last_fair_share = datetime.fromisoformat(previous.fair_share_updated_at)
@@ -569,6 +578,7 @@ def collect_status(
     if rules_due:
         commands["partition_rules"] = PARTITION_RULES_COMMAND
         commands["account_rules"] = ACCOUNT_RULES_COMMAND
+        commands["account_tree"] = account_tree_command(machine.username)
     try:
         sections = run_batch(machine, timeout, commands)
         if fair_share_due:
@@ -662,6 +672,7 @@ def collect_status(
         if rules_due:
             partition_section = sections.get("partition_rules")
             account_section = sections.get("account_rules")
+            tree_section = sections.get("account_tree")
             cluster_name = (status.scheduling or {}).get("cluster_name")
             errors = [
                 section.stderr.strip() or f"{name} exited with status {section.returncode}"
@@ -679,6 +690,16 @@ def collect_status(
                 account_rules = parse_account_rules(
                     account_section.stdout, str(cluster_name), machine.username,
                 )
+                if tree_section is not None and tree_section.returncode == 0:
+                    # sacctmgr may show only the user's association rows.
+                    # Retain its parent records when available and fill gaps
+                    # from the user-visible sshare hierarchy.
+                    tree_parents = parse_account_tree(tree_section.stdout)
+                    account_rules["parents"] = {
+                        **tree_parents,
+                        **{account: parent for account, parent in account_rules["parents"].items()
+                           if parent is not None},
+                    }
                 missing = []
                 if not partition_rules:
                     missing.append("partition access rules unavailable")
@@ -688,7 +709,12 @@ def collect_status(
                     rule["allow_accounts"] not in (None, ["ALL"])
                     for rule in partition_rules.values()
                 ):
-                    missing.append("account ancestry unavailable")
+                    detail = (
+                        tree_section.stderr.strip() or f"sshare tree exited with status {tree_section.returncode}"
+                        if tree_section is not None and tree_section.returncode
+                        else "no account parent rows visible"
+                    )
+                    missing.append(f"account ancestry unavailable: {detail}")
                 status.fair_share_rules = {
                     "partitions": partition_rules,
                     "accounts": account_rules,

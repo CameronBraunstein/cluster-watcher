@@ -2,7 +2,8 @@
 
 from clusterwatcher.fair_share import (
     ACCOUNT_RULES_COMMAND, PARTITION_RULES_COMMAND, SSHARE_COMMAND,
-    annotate_partition_access, parse_account_rules, parse_fair_share,
+    account_tree_command, annotate_partition_access, parse_account_rules,
+    parse_account_tree, parse_fair_share,
     parse_partition_rules, partition_associations,
 )
 from helpers import TimedTestCase
@@ -28,6 +29,39 @@ class FairShareTests(TimedTestCase):
         self.assertIsNone(summary["error"])
         self.assertEqual(partition_associations(summary, "gpu_a100"), [summary["associations"][1]])
         self.assertEqual(partition_associations(summary, "apu"), [])
+
+    def test_user_scoped_sshare_tree_preserves_real_account_ancestry(self):
+        """Recover INF parent records hidden from ordinary sacctmgr queries."""
+        command = account_tree_command("cbraunst")
+        self.assertIn("sshare --users=cbraunst", command)
+        self.assertNotIn("--Users", command)
+        self.assertIn("--parsable2", command)
+        self.assertIn("--users='alice;echo bad'", account_tree_command("alice;echo bad"))
+        tree = parse_account_tree(
+            "root|||\n"
+            " gpu_v100|||\n"
+            "  gpu_v100_bs|||\n"
+            "   gpu_v100_bs_default|||\n"
+            "    gpu_v100_bs_default|cbraunst||0.998561\n"
+            "   gpu_v100_bs_prio|||\n"
+            "  gpu_v100_other|||\n"
+            "   gpu_v100_other_default|||\n"
+            "    gpu_v100_other_default|cbraunst||0.983556\n"
+        )
+        self.assertEqual(tree["gpu_v100_bs_default"], "gpu_v100_bs")
+        self.assertEqual(tree["gpu_v100_bs"], "gpu_v100")
+        self.assertEqual(tree["gpu_v100_other_default"], "gpu_v100_other")
+        self.assertEqual(tree["gpu_v100_other"], "gpu_v100")
+        self.assertEqual(tree["gpu_v100"], "root")
+        self.assertNotIn("cbraunst", tree)
+
+    def test_tree_rejects_missing_ancestors_and_truncated_names(self):
+        self.assertEqual(parse_account_tree(
+            "root|||\n"
+            "  orphan|||\n"
+            " child_name+|||\n"
+            " account|alice||0.5\n"
+        ), {"root": None})
 
     def test_same_account_can_have_different_partition_factors(self):
         summary = parse_fair_share(

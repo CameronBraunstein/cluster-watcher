@@ -100,7 +100,7 @@ class CapacityCadenceTests(TimedTestCase):
         status = collect_status(MACHINE, 5, True, previous=previous, refresh_capacity=False)
 
         self.assertEqual(list(run_batch.call_args.args[2]), [
-            "running", "pending", "priority_counts", "fair_share", "partition_rules", "account_rules",
+            "running", "pending", "priority_counts", "fair_share", "partition_rules", "account_rules", "account_tree",
         ])
         self.assertEqual(status.partitions, previous.partitions)
         self.assertEqual(status.jobs, {"RUNNING": 3})
@@ -121,7 +121,7 @@ class CapacityCadenceTests(TimedTestCase):
 
         self.assertEqual(
             list(run_batch.call_args.args[2]),
-            ["sinfo", "nodes", "scheduler", "running", "pending", "priority_counts", "releases", "queue", "fair_share", "partition_rules", "account_rules"],
+            ["sinfo", "nodes", "scheduler", "running", "pending", "priority_counts", "releases", "queue", "fair_share", "partition_rules", "account_rules", "account_tree"],
         )
 
     @patch("clusterwatcher.slurm.run_batch")
@@ -180,6 +180,40 @@ class CapacityCadenceTests(TimedTestCase):
         self.assertEqual(third.fair_share["associations"][0]["matched_partitions"], ["gpu-v100"])
 
     @patch("clusterwatcher.slurm.run_batch")
+    def test_user_only_assoc_rows_use_sshare_account_tree(self, run_batch):
+        """INF hides account associations but exposes their exact tree in sshare."""
+        run_batch.return_value = {
+            name: Section("", "", 0)
+            for name in ("sinfo", "nodes", "scheduler", "running", "pending",
+                         "priority_counts", "releases", "fair_share", "partition_rules",
+                         "account_rules", "account_tree")
+        }
+        run_batch.return_value["sinfo"] = Section("gpu-v100|up|3|0/96/0/96|idle\n", "", 0)
+        run_batch.return_value["scheduler"] = Section("ClusterName = infcluster\n", "", 0)
+        run_batch.return_value["fair_share"] = Section(
+            "gpu_v100_bs_default|alice||0.998561\n", "", 0,
+        )
+        run_batch.return_value["partition_rules"] = Section(
+            "PartitionName=gpu-v100 AllowGroups=ALL AllowAccounts=gpu_v100 "
+            "AllowQos=interactive,gpu_v100 RootOnly=NO\n", "", 0,
+        )
+        run_batch.return_value["account_rules"] = Section(
+            "infcluster|gpu_v100_bs_default|alice|||gpu_v100,interactive\n", "", 0,
+        )
+        run_batch.return_value["account_tree"] = Section(
+            "root|||\n gpu_v100|||\n  gpu_v100_bs|||\n"
+            "   gpu_v100_bs_default|||\n"
+            "    gpu_v100_bs_default|alice||0.998561\n", "", 0,
+        )
+
+        status = collect_status(MACHINE, 5, False)
+
+        self.assertIsNone(status.fair_share_rules.get("error"))
+        self.assertEqual(status.fair_share["associations"][0]["matched_partitions"], ["gpu-v100"])
+        self.assertEqual(status.fair_share["associations"][0]["mapping_source"], "account_qos")
+        self.assertIn("sshare --users=alice", run_batch.call_args.args[2]["account_tree"])
+
+    @patch("clusterwatcher.slurm.run_batch")
     def test_unavailable_scheduler_details_do_not_hide_other_status(self, run_batch):
         run_batch.return_value = {
             name: Section("", "", 0)
@@ -219,6 +253,13 @@ class CapacityCadenceTests(TimedTestCase):
         self.assertEqual(status.partitions[0]["partition"], "gpu-v100")
         self.assertIn("access denied", status.fair_share["mapping_error"])
         self.assertEqual(status.fair_share["associations"][0]["matched_partitions"], [])
+
+        collect_status(MACHINE, 5, False, previous=status, refresh_capacity=False)
+        self.assertNotIn("account_tree", run_batch.call_args.args[2])
+
+        status.fair_share_rules_collected_at = "2020-01-01T00:00:00+00:00"
+        collect_status(MACHINE, 5, False, previous=status, refresh_capacity=False)
+        self.assertIn("account_tree", run_batch.call_args.args[2])
 
     @patch("clusterwatcher.slurm.run_batch")
     def test_fair_share_is_optional_and_reused_until_its_own_cadence(self, run_batch):

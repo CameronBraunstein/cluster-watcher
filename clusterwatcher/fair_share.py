@@ -8,6 +8,7 @@ can make that set incomplete.
 
 import math
 import re
+import shlex
 
 
 # Never let an accounting/controller stall delay the rest of the dashboard.
@@ -19,6 +20,47 @@ ACCOUNT_RULES_COMMAND = (
     "timeout 10s sacctmgr -n -P show assoc "
     "format=Cluster,Account,User,Partition,ParentName,QOS"
 )
+
+
+def account_tree_command(username: str) -> str:
+    """Request the user's visible account ancestry without exposing other users.
+
+    ``--Users`` removes account rows, so this deliberately uses lowercase
+    ``--users`` to select one person while retaining the indented tree.
+    ``--parsable2`` preserves leading spaces in the Account field.
+    """
+    return (
+        f"timeout 8s sshare --users={shlex.quote(username)} --partition "
+        "--noheader --parsable2 --format=Account,User,Partition,FairShare"
+    )
+
+
+def parse_account_tree(output: str) -> dict[str, str | None]:
+    """Read account parents from indented, user-scoped ``sshare`` rows.
+
+    Only account rows (empty User field) establish ancestry. Malformed depths,
+    truncated account names, and user rows never create parent links.
+    """
+    parents: dict[str, str | None] = {}
+    path: dict[int, str] = {}
+    for line in output.splitlines():
+        fields = line.split("|", 3)
+        if len(fields) != 4 or fields[1].strip():
+            continue
+        raw_account = fields[0]
+        depth = len(raw_account) - len(raw_account.lstrip(" "))
+        account = raw_account.strip()
+        if not account or account.endswith("+"):
+            continue
+        if depth and depth - 1 not in path:
+            continue
+        parent = path.get(depth - 1) if depth else None
+        parents[account] = parent
+        path[depth] = account
+        for old_depth in tuple(path):
+            if old_depth > depth:
+                del path[old_depth]
+    return parents
 
 
 def _names(value: str) -> list[str]:
