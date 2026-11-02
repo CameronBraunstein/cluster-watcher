@@ -561,7 +561,9 @@ Each view heading has its own **Refresh** button, and **Cluster Watcher:
 Refresh Sidebar** refreshes both. A `Last update` line under each heading
 shows when data last changed. Unchanged refreshes cost almost nothing (the
 service answers `304 Not Modified`), and progress bars and waits keep counting
-locally in the meantime.
+locally in the meantime. Cluster Status requests the compact snapshot summary,
+which retains aggregate availability and wait data without transferring the
+per-node arrays used by routing clients.
 
 | Setting | Default | Effect |
 | --- | --- | --- |
@@ -921,10 +923,12 @@ job-wide `--gpus=N` in the same SSH call. A "More than N gpus per node"
 refusal is a policy limit and is not retried. `QOSMinGRES` failures are not
 copied to larger GPU counts, since a larger request may satisfy them.
 
-All shapes of a partition run in order in one SSH call; partitions and
-clusters run concurrently. Each `sbatch --test-only` may take up to 60
-seconds, and a partition starts no further probes after 240 seconds. The
-first round starts with the service. Successful messages are parsed from both
+All shapes of a partition run in order in one SSH call. Clusters remain
+concurrent, but a process-wide pool permits at most four partition SSH batches
+at once across all clusters. The first round waits 30 seconds so login and the
+normal capacity collection settle before controller-intensive probes begin.
+Each `sbatch --test-only` may take up to 60 seconds, and a partition starts no
+further probes after 240 seconds. Successful messages are parsed from both
 stdout and stderr, and every scheduled refresh retries every probe. Slurm
 start times without a UTC offset are interpreted in the service host's local
 timezone.
@@ -937,8 +941,11 @@ GPU model, VRAM, and TFLOPS/s come from optional `[[profile]]` entries in the
 same `clusters.toml` as your machines. See
 [`clusters.example.toml`](clusters.example.toml), or add profiles through
 `cluster-watcher setup`. Without profiles, no GPU details are shown and
-partitions are ranked by GPU count. Malformed profiles or unknown cluster names
-are reported during configuration validation. There is no second config file.
+partitions are ranked by GPU count. Normalized aliases and repeated label
+matches are cached for the selected configuration, avoiding repeated regular
+expression scans while thousands of nodes are summarized. Malformed profiles
+or unknown cluster names are reported during configuration validation. There
+is no second config file.
 If upgrading from an earlier version, append the `[[profile]]` sections from
 your old `gpu_profiles.toml` to `clusters.toml`; the old file is no longer read.
 Keep a backup until you verify the display. The installer no longer copies the
@@ -967,13 +974,13 @@ return JSON.
 | Endpoint | Needs | Purpose |
 | --- | --- | --- |
 | `GET /api/v1/service` | — | Local service process ID and start time. |
-| `GET /api/v1/snapshot` | — | Capacity, hardware, and wait estimates for every cluster. |
+| `GET /api/v1/snapshot` | — | Capacity, hardware, and wait estimates; add `?detail=summary` to omit per-node arrays. |
 | `GET /api/v1/jobs` | `--jobs-api` | Your active and recent jobs. |
 | `GET /api/v1/jobs/{cluster}/{job_id}/log` | `--jobs-api` | Bounded, pageable log tail. |
 | `GET /api/v1/jobs/{cluster}/{job_id}/script` | `--jobs-api` | The job's batch script. |
 | `POST /api/v1/jobs/{cluster}/{job_id}/cancel` | `--jobs-api` | Cancel one of your jobs. |
 | `POST /api/v1/shutdown` | — | Gracefully stop the local service. Loopback JSON requests only. |
-| `GET /api/v1/sessions` | `--command-api` | Open SSH sessions and their estimated lifetime. |
+| `GET /api/v1/sessions` | — | Loopback-only open SSH sessions and their estimated lifetime. |
 | `POST /api/v1/commands` | `--command-api` | Run a command over an existing session. |
 
 [`AGENT_CAPABILITIES.md`](AGENT_CAPABILITIES.md) is a copy-ready guide for
@@ -1007,6 +1014,13 @@ It returns `200`, or `503` with `Retry-After: 1` before the first collection
 finishes. Responses are `Cache-Control: no-store`. Usernames and personal job
 details are excluded. Treat the snapshot as infrastructure data: it contains
 cluster names, hosts, node names, capacities, and utilization.
+
+Use `/api/v1/snapshot?detail=summary` when individual node names and resources
+are unnecessary. It preserves cluster and partition totals, model summaries,
+node-state and unavailable-GPU state counts, fair share, and wait estimates,
+but omits each partition's `nodes` array. The VS Code sidebar uses this much
+smaller representation; the default remains the full routing document for
+compatibility.
 
 <details>
 <summary><b>Snapshot schema</b></summary>
@@ -1235,9 +1249,10 @@ curl --fail-with-body --silent -H 'Content-Type: application/json' \
   http://127.0.0.1:8080/api/v1/commands | python3 -m json.tool
 ```
 
-`/api/v1/sessions` lists every visible machine with `name`, `host`,
-`username`, `interactive_auth`, `credential_group`, `available` (a live connection verified with
-`ssh -O check`),
+`/api/v1/sessions` is read-only, available without `--command-api`, restricted
+to loopback clients, and cached for 30 seconds. It lists every visible machine
+with `name`, `host`, `username`, `interactive_auth`, `credential_group`,
+`available` (a live connection verified with `ssh -O check`),
 `session_open`, `pid`, `control_persist_seconds`, `last_activity_at`,
 `estimated_remaining_seconds` (approximate, or `null`), and `error`. It never
 logs in.
@@ -1287,12 +1302,21 @@ every time. So the service:
    5 minutes. The jobs API serves these records for its default 24-hour
    window, so polling clients add no `sacct` queries; explicit `job_id`s or
    another `since` query `sacct` directly.
-4. **Answers unchanged data with `304 Not Modified`.** `/api/status`,
-   `/api/v1/snapshot`, and `/api/v1/jobs` send an `ETag` that ignores moving
+4. **Caches serialized API documents and answers unchanged data with
+   `304 Not Modified`.** `/api/status`, `/api/v1/snapshot`, and `/api/v1/jobs`
+   send an `ETag` that ignores moving
    fields (`generated_at`, `updated_at`, the default `since`,
    `capacity_updated_at`, elapsed/remaining times, `estimated_wait_seconds`).
    Clients extrapolate those values from `generated_at`, so times stay
-   current in the browser and VS Code without new data.
+   current in the browser and VS Code without new data. Snapshot bytes and
+   ETags are reused across personal-job-only refreshes, avoiding repeated
+   rebuild, parse, and hash passes over the full document.
+5. **Avoids unchanged browser DOM work.** A `304` updates freshness text
+   without recreating cluster and job cards. Collapsed partitions keep a
+   lightweight summary and create individual node cards only while opened.
+6. **Reuses the service for session inventory.** The loopback-only sessions
+   endpoint caches control-master checks briefly, so VS Code does not launch a
+   fresh standalone executable every polling interval.
 
 Browsers may drop in-flight requests on reload; the server treats the
 resulting broken pipe as a normal disconnect. Normal refreshes, wait probes,

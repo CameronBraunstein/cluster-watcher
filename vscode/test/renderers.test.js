@@ -334,6 +334,12 @@ test('GPU availability tooltips count resources separately from node states', ()
   };
 
   assert.equal(gpuAvailabilityTitle(partition), '3 idle, 2 allocated, 1 reserved, 2 drained');
+  assert.equal(gpuAvailabilityTitle({
+    gpus: {
+      total: 8, allocated: 2, schedulable_idle: 3,
+      unavailable_by_state: { 'IDLE+DRAIN': 2, RESERVED: 1 },
+    },
+  }), '3 idle, 2 allocated, 1 reserved, 2 drained');
 });
 
 test('GPU catalog names are reduced to recognizable model labels', () => {

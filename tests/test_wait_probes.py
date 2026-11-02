@@ -9,12 +9,13 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
-from threading import Barrier
+import time
+from threading import Barrier, Lock
 from unittest.mock import patch
 
 from clusterwatcher.dashboard import StatusStore
 from clusterwatcher.models import ClusterStatus, Machine
-from clusterwatcher.remote_batch import BUDGET_EXHAUSTED, run_batch
+from clusterwatcher.remote_batch import BUDGET_EXHAUSTED, Section, run_batch
 from clusterwatcher.snapshot import _wait_estimates
 from clusterwatcher.terminal_status import wait_error_label
 from clusterwatcher.wait_probes import (
@@ -118,6 +119,35 @@ class ProbeShapeTests(TimedTestCase):
 
 
 class BatchedProbeTests(FakeClusterTestCase):
+    @patch("clusterwatcher.wait_probes.run_batch")
+    def test_partition_probe_processes_are_globally_bounded(self, run_batch_mock):
+        """Large clusters must not start one SSH child for every partition."""
+        active = 0
+        maximum = 0
+        lock = Lock()
+
+        def bounded(_machine, _timeout, commands, **_kwargs):
+            nonlocal active, maximum
+            with lock:
+                active += 1
+                maximum = max(maximum, active)
+            time.sleep(0.02)
+            with lock:
+                active -= 1
+            return {name: Section(START, "", 0) for name in commands}
+
+        run_batch_mock.side_effect = bounded
+        nodes = [
+            {"name": f"n{index}", "partitions": f"p{index}", "gpu": {"total": 1}}
+            for index in range(12)
+        ]
+
+        estimates = collect_wait_estimates(MACHINE, nodes, 5, walltime_minutes=(60,))
+
+        self.assertEqual(len(estimates), 12)
+        self.assertGreater(maximum, 1)
+        self.assertLessEqual(maximum, 4)
+
     def test_each_partition_is_one_ssh_call_with_every_shape(self):
         estimates = collect_wait_estimates(MACHINE, nodes(8, 8, "gpu") + nodes(2, 1, "dev"), 5)
 

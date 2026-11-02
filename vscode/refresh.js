@@ -158,7 +158,7 @@ class RefreshCoordinator {
   async runStatus() {
     const generation = this.serviceGeneration;
     try {
-      const result = await this.client.poll('/api/v1/snapshot', this.etags.status);
+      const result = await this.client.poll('/api/v1/snapshot?detail=summary', this.etags.status);
       const checkedAt = Date.now();
       this.onServiceAvailable();
       if (result.notModified) {

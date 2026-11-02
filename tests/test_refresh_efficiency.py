@@ -390,6 +390,20 @@ class ETagTests(TimedTestCase):
         self.assertEqual(stable_etag({**base, "since": "2026-10-05T10:00:00"}), stable_etag({**base, "since": "2026-10-05T10:00:15"}))
         self.assertNotEqual(stable_etag(base), stable_etag(finished))
 
+    def test_status_document_cache_ignores_extrapolated_job_times(self):
+        before = ClusterStatus(
+            "alpha", "h", "alice",
+            user_jobs=[{"id": "1", "state": "RUNNING", "elapsed_seconds": 10}],
+        )
+        later = ClusterStatus(
+            "alpha", "h", "alice",
+            user_jobs=[{"id": "1", "state": "RUNNING", "elapsed_seconds": 25}],
+        )
+
+        self.assertFalse(StatusStore._status_source_changed([before], [later]))
+        later.user_jobs[0]["state"] = "COMPLETED"
+        self.assertTrue(StatusStore._status_source_changed([before], [later]))
+
     def request(self, store: StatusStore, path: str, if_none_match: str | None = None) -> dict[str, object]:
         handler = object.__new__(make_handler(store))
         handler.path = path

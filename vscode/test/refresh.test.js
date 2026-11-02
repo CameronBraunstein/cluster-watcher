@@ -169,8 +169,8 @@ test('Cluster Status refresh polls and updates only the snapshot endpoint', asyn
   const second = await state.coordinator.refreshStatus();
 
   assert.deepEqual(calls, [
-    { path: '/api/v1/snapshot', etag: undefined },
-    { path: '/api/v1/snapshot', etag: 'status-1' },
+    { path: '/api/v1/snapshot?detail=summary', etag: undefined },
+    { path: '/api/v1/snapshot?detail=summary', etag: 'status-1' },
   ]);
   assert.equal(state.statusProvider.updates.length, 2);
   assert.equal(state.jobsProvider.updates.length, 0);
@@ -188,7 +188,7 @@ test('combined refresh continues to poll both endpoints', async () => {
 
   await state.coordinator.refresh();
 
-  assert.deepEqual(calls.sort(), ['/api/v1/jobs', '/api/v1/snapshot']);
+  assert.deepEqual(calls.sort(), ['/api/v1/jobs', '/api/v1/snapshot?detail=summary']);
   assert.equal(state.jobsProvider.updates.length, 1);
   assert.equal(state.statusProvider.updates.length, 1);
 });
@@ -232,14 +232,14 @@ test('overlapping refreshes share the request for each endpoint', async () => {
 
   const jobsOnly = state.coordinator.refreshJobs();
   const combined = state.coordinator.refresh();
-  assert.deepEqual(calls.sort(), ['/api/v1/jobs', '/api/v1/snapshot']);
+  assert.deepEqual(calls.sort(), ['/api/v1/jobs', '/api/v1/snapshot?detail=summary']);
 
   resolvers.get('/api/v1/jobs')({ payload: { jobs: [] }, etag: 'jobs' });
-  resolvers.get('/api/v1/snapshot')({ payload: { clusters: [] }, etag: 'status' });
+  resolvers.get('/api/v1/snapshot?detail=summary')({ payload: { clusters: [] }, etag: 'status' });
   await Promise.all([jobsOnly, combined]);
 
   assert.equal(calls.filter((path) => path === '/api/v1/jobs').length, 1);
-  assert.equal(calls.filter((path) => path === '/api/v1/snapshot').length, 1);
+  assert.equal(calls.filter((path) => path === '/api/v1/snapshot?detail=summary').length, 1);
 });
 
 test('an unchanged jobs check updates the status-bar refresh time', async () => {

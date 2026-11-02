@@ -31,7 +31,11 @@ from .models import ClusterStatus, Machine
 from .slurm import collect_status
 from .ssh import session_status
 from .snapshot import build_snapshot
-from .wait_probes import WAIT_PROBE_REFRESH_SECONDS, collect_wait_estimates
+from .wait_probes import (
+    WAIT_PROBE_REFRESH_SECONDS,
+    WAIT_PROBE_STARTUP_DELAY_SECONDS,
+    collect_wait_estimates,
+)
 
 
 PAGE = """<!doctype html>
@@ -677,21 +681,38 @@ async function fetchUnlessUnchanged(url) {
   return { response, payload, notModified: false };
 }
 
-async function refreshJobs(result) {
-  if (!result.jobs_api_enabled) { jobsView(result.clusters); return; }
+async function refreshJobs(result, statusChanged) {
+  if (!result.jobs_api_enabled) { if (statusChanged) jobsView(result.clusters); return; }
   try {
-    const { response, payload } = await fetchUnlessUnchanged('/api/v1/jobs');
+    const { response, payload, notModified } = await fetchUnlessUnchanged('/api/v1/jobs');
     if (!response.ok && response.status !== 304) throw new Error(payload.error || `HTTP ${response.status}`);
-    recentJobsView(payload, result.clusters);
+    if (!notModified) recentJobsView(payload, result.clusters);
   } catch (error) {
     jobsView(result.clusters, `<p class="error">Could not load recent jobs: ${escapeHtml(error.message)}</p>`);
   }
 }
 
 const partitionDisclosure = new Map();
+const partitionBodies = new Map();
 
 function rememberPartitionDisclosure() {
   document.querySelectorAll('details[data-partition-key]').forEach(details => partitionDisclosure.set(details.dataset.partitionKey, details.open));
+}
+
+function materializePartition(details) {
+  const container = details.querySelector(':scope > .partition-body');
+  if (!container || container.dataset.materialized === 'true') return;
+  const render = partitionBodies.get(details.dataset.partitionKey);
+  if (!render) return;
+  container.innerHTML = render();
+  container.dataset.materialized = 'true';
+}
+
+function releasePartition(details) {
+  const container = details.querySelector(':scope > .partition-body');
+  if (!container || container.dataset.materialized !== 'true') return;
+  container.replaceChildren();
+  delete container.dataset.materialized;
 }
 
 // Keep cluster summaries compact while retaining the catalog name on hover.
@@ -724,9 +745,9 @@ function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, es
   const badges = jobBadges(jobs, name, thresholds);
   const launchability = launchabilityStrip(estimates, name, totalGpus, estimatesUpdatedAt, thresholds);
   const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}</h3>${launchability}<div class="partition-status" data-availability="${escapeHtml(availability)}" aria-label="${escapeHtml(availability)}">${status}</div>${badges ? `<div class="job-badges">${badges}</div>` : ''}</div>`;
-  const body = `<div class="partition-compute">${details}</div><div class="node-grid">${nodesByAvailableGpu(nodes).map(nodeCard).join('')}</div>`;
   const disclosureKey = JSON.stringify([clusterName, name]);
-  return `<details class="partition-section${summary?.aggregate ? ' aggregate-partition' : ''}" data-partition-key="${escapeHtml(disclosureKey)}"${partitionDisclosure.get(disclosureKey) ? ' open' : ''}><summary>${heading}${partitionFairShareView(fairShare, name)}</summary>${body}</details>`;
+  partitionBodies.set(disclosureKey, () => `<div class="partition-compute">${details}</div><div class="node-grid">${nodesByAvailableGpu(nodes).map(nodeCard).join('')}</div>`);
+  return `<details class="partition-section${summary?.aggregate ? ' aggregate-partition' : ''}" data-partition-key="${escapeHtml(disclosureKey)}"${partitionDisclosure.get(disclosureKey) ? ' open' : ''}><summary>${heading}${partitionFairShareView(fairShare, name)}</summary><div class="partition-body"></div></details>`;
 }
 
 function fairShareFactorBar(entry) {
@@ -805,9 +826,12 @@ async function refresh() {
     if (!response.ok && !notModified) throw new Error(result.error || `HTTP ${response.status}`);
     const thresholds = result.wait_threshold_minutes || [5, 30, 60, 120];
     if (!result.updated_at) { document.querySelector('#updated').textContent = 'Waiting for first result…'; scheduleRefresh(1); return; }
-    rememberPartitionDisclosure();
-    document.querySelector('#clusters').innerHTML = result.clusters.map(cluster => clusterView(cluster, thresholds)).join('');
-    await refreshJobs(result);
+    if (!notModified) {
+      rememberPartitionDisclosure(); partitionBodies.clear();
+      document.querySelector('#clusters').innerHTML = result.clusters.map(cluster => clusterView(cluster, thresholds)).join('');
+      document.querySelectorAll('details[data-partition-key][open]').forEach(materializePartition);
+    }
+    await refreshJobs(result, !notModified);
     const checked = notModified ? ` · checked ${new Date().toLocaleTimeString()}` : '';
     document.querySelector('#updated').textContent = `Updated ${new Date(result.updated_at).toLocaleTimeString()}${checked}`;
     // An unchanged (304) answer carries the old updated_at, which must not look overdue.
@@ -868,6 +892,12 @@ document.addEventListener('click', async event => {
   } catch (error) { output.textContent = error.message; }
   finally { button.disabled = false; }
 });
+document.addEventListener('toggle', event => {
+  const details = event.target.closest?.('details[data-partition-key]');
+  if (!details) return;
+  partitionDisclosure.set(details.dataset.partitionKey, details.open);
+  if (details.open) materializePartition(details); else releasePartition(details);
+}, true);
 setInterval(updateDynamicDisplays, 1000); refresh();
 </script></body></html>"""
 
@@ -887,9 +917,13 @@ class StatusStore:
         self._wait_estimates_updated_at: dict[str, str] = {}
         self._updated_at: str | None = None
         self._capacity_collected: dict[str, float] = {}
+        self._document_cache: dict[str, tuple[bytes, str, object]] = {}
         self._service_started_at = datetime.now(timezone.utc).isoformat()
         self.job_service = JobService(machines, timeout, refresh_seconds, self.statuses) if jobs_api_enabled else None
-        self.command_service = RemoteCommandService(machines, timeout) if command_api_enabled else None
+        self.session_service = RemoteCommandService(machines, timeout)
+        self.command_service = self.session_service if command_api_enabled else None
+        self._session_lock = threading.Lock()
+        self._session_cache: tuple[float, dict[str, object]] | None = None
 
     def refresh(self) -> None:
         """Collect every cluster with one SSH call each (see ``collect_status``).
@@ -929,15 +963,76 @@ class StatusStore:
             for status in statuses:
                 status.wait_estimates = self._wait_estimates.get(status.name)
                 status.wait_estimates_updated_at = self._wait_estimates_updated_at.get(status.name)
+            snapshot_changed = self._snapshot_source_changed(self._statuses, statuses)
+            status_changed = self._status_source_changed(self._statuses, statuses)
             self._statuses = statuses
             self._updated_at = datetime.now(timezone.utc).isoformat()
+            if status_changed:
+                self._document_cache.pop("status", None)
+            if snapshot_changed:
+                self._document_cache.pop("snapshot-full", None)
+                self._document_cache.pop("snapshot-summary", None)
+
+    @staticmethod
+    def _snapshot_source_changed(
+        previous: list[ClusterStatus], current: list[ClusterStatus],
+    ) -> bool:
+        """Return whether fields represented by the snapshot API changed."""
+        if len(previous) != len(current):
+            return True
+        fields = (
+            "name", "host", "partitions", "nodes", "partition_compute",
+            "scheduling", "fair_share", "fair_share_updated_at",
+            "resource_error", "error", "login_required",
+        )
+        return any(
+            any(getattr(before, field) != getattr(after, field) for field in fields)
+            for before, after in zip(previous, current)
+        )
+
+    @staticmethod
+    def _stable_public_equal(before: object, after: object) -> bool:
+        """Compare API values while ignoring fields clients extrapolate locally."""
+        if isinstance(before, dict) and isinstance(after, dict):
+            before_keys = set(before) - VOLATILE_FIELDS
+            after_keys = set(after) - VOLATILE_FIELDS
+            return before_keys == after_keys and all(
+                StatusStore._stable_public_equal(before[key], after[key])
+                for key in before_keys
+            )
+        if isinstance(before, list) and isinstance(after, list):
+            return len(before) == len(after) and all(
+                StatusStore._stable_public_equal(left, right)
+                for left, right in zip(before, after)
+            )
+        return before == after
+
+    @classmethod
+    def _status_source_changed(
+        cls, previous: list[ClusterStatus], current: list[ClusterStatus],
+    ) -> bool:
+        """Return whether the browser status document has a stable change."""
+        if len(previous) != len(current):
+            return True
+        ignored = {"accounting", "fair_share_rules", *VOLATILE_FIELDS}
+        fields = set(ClusterStatus.__dataclass_fields__) - ignored
+        return any(
+            any(
+                not cls._stable_public_equal(
+                    getattr(before, field), getattr(after, field),
+                )
+                for field in fields
+            )
+            for before, after in zip(previous, current)
+        )
 
     def refresh_wait_estimates(self) -> bool:
         """Refresh slow hypothetical-job probes independently of status polling.
 
-        Clusters are probed concurrently (each partition is one SSH call; see
-        ``collect_wait_estimates``), so the first estimates appear after the
-        slowest cluster rather than after all of them in turn.
+        Clusters remain concurrent so one slow controller does not delay all
+        results. A process-wide semaphore in :mod:`wait_probes` bounds their
+        combined partition SSH calls, while the startup delay staggers this
+        work behind normal status collection.
         """
         with self._lock:
             statuses = list(self._statuses)
@@ -961,6 +1056,9 @@ class StatusStore:
                 if current.name == status.name:
                     current.wait_estimates = estimates
                     current.wait_estimates_updated_at = updated_at
+            self._document_cache.pop("status", None)
+            self._document_cache.pop("snapshot-full", None)
+            self._document_cache.pop("snapshot-summary", None)
 
     def payload(self) -> dict[str, object]:
         """Return the dashboard's internal status representation."""
@@ -984,6 +1082,62 @@ class StatusStore:
                 self.wait_threshold_minutes,
             )
 
+    def json_document(
+        self, kind: str, *, include_nodes: bool = True,
+    ) -> tuple[bytes, str, bool]:
+        """Return cached serialized API bytes, ETag, and collection readiness.
+
+        Snapshot documents survive fast personal-job refreshes when none of
+        their capacity/fair-share/reachability inputs changed. Status documents
+        are invalidated by every refresh because they include personal jobs.
+        """
+        cache_key = kind if kind == "status" else (
+            "snapshot-full" if include_nodes else "snapshot-summary"
+        )
+        with self._lock:
+            marker: object = tuple(
+                (status.name, status.error, status.resource_error, status.login_required)
+                for status in self._statuses
+            )
+            cached = self._document_cache.get(cache_key)
+            ready = self._updated_at is not None
+            if cached is not None and cached[2] == marker:
+                return cached[0], cached[1], ready
+            if kind == "status":
+                payload: dict[str, object] = {
+                    "clusters": [asdict(status) for status in self._statuses],
+                    "updated_at": self._updated_at,
+                    "refresh_seconds": self.refresh_seconds,
+                    "wait_threshold_minutes": self.wait_threshold_minutes,
+                    "jobs_api_enabled": self.jobs_api_enabled,
+                    "command_api_enabled": self.command_api_enabled,
+                }
+                for cluster in payload["clusters"]:
+                    cluster.pop("accounting", None)
+                    cluster.pop("fair_share_rules", None)
+            elif kind == "snapshot":
+                payload = build_snapshot(
+                    self._statuses, self._updated_at, self.refresh_seconds,
+                    self.wait_threshold_minutes, include_nodes=include_nodes,
+                )
+            else:
+                raise ValueError(f"unknown JSON document kind: {kind}")
+            body = json.dumps(payload).encode()
+            document = (body, stable_etag(payload), marker)
+            if ready:
+                self._document_cache[cache_key] = document
+            return body, document[1], ready
+
+    def sessions_payload(self, max_age_seconds: int = 30) -> dict[str, object]:
+        """Return a briefly cached read-only SSH session inventory."""
+        with self._session_lock:
+            now = time.monotonic()
+            if self._session_cache and now - self._session_cache[0] < max_age_seconds:
+                return self._session_cache[1]
+            payload = self.session_service.sessions()
+            self._session_cache = (now, payload)
+            return payload
+
     def service_payload(self) -> dict[str, object]:
         """Return identity metadata for clients attached to this process."""
         return {
@@ -999,6 +1153,8 @@ class StatusStore:
 
     def run_wait_probes_forever(self, stop: threading.Event) -> None:
         """Run controller-intensive test-only queries no more than every ten minutes."""
+        if stop.wait(WAIT_PROBE_STARTUP_DELAY_SECONDS):
+            return
         while not stop.is_set():
             try:
                 refreshed = self.refresh_wait_estimates()
@@ -1052,21 +1208,39 @@ def make_handler(store: StatusStore):
             if path == "/":
                 body, content_type, code = PAGE.encode(), "text/html; charset=utf-8", 200
             elif path == "/api/status":
-                payload = store.payload()
-                code = 200 if payload["updated_at"] else 503
-                if code == 503:
+                body, etag, ready = store.json_document("status")
+                code = 200 if ready else 503
+                if not ready:
+                    payload = json.loads(body)
                     payload["error"] = "The first cluster status collection has not completed"
+                    body = json.dumps(payload).encode()
                     extra_headers["Retry-After"] = "1"
-                body, content_type = json.dumps(payload).encode(), "application/json; charset=utf-8"
+                else:
+                    extra_headers["ETag"] = etag
+                content_type = "application/json; charset=utf-8"
                 extra_headers["Cache-Control"] = "no-store"
             elif path == "/api/v1/snapshot":
-                snapshot = store.snapshot_payload()
-                code = 200 if snapshot["generated_at"] else 503
-                if code == 503:
-                    snapshot["error"] = "The first cluster status collection has not completed"
-                    extra_headers["Retry-After"] = "1"
-                body, content_type = json.dumps(snapshot).encode(), "application/json; charset=utf-8"
-                extra_headers["Cache-Control"] = "no-store"
+                details = query.get("detail", ["full"])
+                if len(details) != 1 or details[0] not in {"full", "summary"}:
+                    body, content_type, code, headers = self._json_error(
+                        "detail must be full or summary", 400,
+                        {"Cache-Control": "no-store"},
+                    )
+                    extra_headers.update(headers)
+                else:
+                    body, etag, ready = store.json_document(
+                        "snapshot", include_nodes=details[0] == "full",
+                    )
+                    code = 200 if ready else 503
+                    if not ready:
+                        snapshot = json.loads(body)
+                        snapshot["error"] = "The first cluster status collection has not completed"
+                        body = json.dumps(snapshot).encode()
+                        extra_headers["Retry-After"] = "1"
+                    else:
+                        extra_headers["ETag"] = etag
+                    content_type = "application/json; charset=utf-8"
+                    extra_headers["Cache-Control"] = "no-store"
             elif path == "/api/v1/service":
                 body = json.dumps(store.service_payload()).encode()
                 content_type, code = "application/json; charset=utf-8", 200
@@ -1091,7 +1265,7 @@ def make_handler(store: StatusStore):
                 body, content_type, code = b"Not found\n", "text/plain; charset=utf-8", 404
             if code == 200 and path in {"/api/status", "/api/v1/snapshot", "/api/v1/jobs"}:
                 # Let polling clients skip unchanged data with If-None-Match.
-                etag = stable_etag(json.loads(body))
+                etag = extra_headers.get("ETag") or stable_etag(json.loads(body))
                 extra_headers["ETag"] = etag
                 requested = {value.strip() for value in self.headers.get("If-None-Match", "").split(",")}
                 if etag in requested:
@@ -1144,12 +1318,20 @@ def make_handler(store: StatusStore):
                 return
 
         def _sessions_response(self) -> tuple[bytes, str, int, dict[str, str]]:
-            """Serve current control-master state without opening connections."""
+            """Serve cached control-master state to loopback clients only."""
             headers = {"Cache-Control": "no-store"}
-            if store.command_service is None:
-                return self._json_error("The command API is disabled; restart with --command-api", 404, headers)
             try:
-                payload = store.command_service.sessions()
+                client_host = str(self.client_address[0]).split("%", 1)[0]
+                if not ipaddress.ip_address(client_host).is_loopback:
+                    return self._json_error(
+                        "SSH session inventory is available only from the local machine",
+                        403,
+                        headers,
+                    )
+            except (AttributeError, ValueError):
+                return self._json_error("Could not verify the session client's address", 403, headers)
+            try:
+                payload = store.sessions_payload()
             except ValueError as exc:
                 return self._json_error(str(exc), 500, headers)
             return json.dumps(payload).encode(), "application/json; charset=utf-8", 200, headers

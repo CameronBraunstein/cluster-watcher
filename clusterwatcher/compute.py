@@ -34,6 +34,8 @@ def configure_gpu_profiles(path: Path | None) -> None:
     global _config_path
     _config_path = path
     gpu_profiles.cache_clear()
+    _aliases_for_cluster.cache_clear()
+    _profile_for_normalized.cache_clear()
 
 
 @cache
@@ -95,23 +97,41 @@ def parse_gpu_profiles(
     return tuple(profiles)
 
 
+@cache
+def _aliases_for_cluster(cluster: str) -> tuple[tuple[str, GPUProfile], ...]:
+    """Return normalized aliases for one cluster, longest match first."""
+    return tuple(sorted(
+        (
+            (_normalized(alias), profile)
+            for profile in gpu_profiles()
+            if profile.cluster == cluster
+            for alias in profile.aliases
+        ),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ))
+
+
+@cache
+def _profile_for_normalized(
+    cluster: str, candidates: tuple[str, ...],
+) -> GPUProfile | None:
+    """Resolve an immutable set of normalized labels through the alias cache."""
+    for alias, profile in _aliases_for_cluster(cluster):
+        if any(alias in candidate for candidate in candidates):
+            return profile
+    return None
+
+
 def profile_for(cluster: str, labels: list[str]) -> GPUProfile | None:
-    """Return the profile matching ``labels`` in the named cluster only.
+    """Return the cached profile matching ``labels`` in the named cluster only.
 
     The cluster boundary is deliberate: Slurm partition and GRES labels are
     local names, so matching them across dashboard machines can misidentify
     otherwise identical labels.
     """
-    candidates = [_normalized(label) for label in labels]
-    aliases = sorted(
-        ((alias, profile) for profile in gpu_profiles() if profile.cluster == cluster for alias in profile.aliases),
-        key=lambda item: len(_normalized(item[0])), reverse=True,
-    )
-    for alias, profile in aliases:
-        normalized_alias = _normalized(alias)
-        if any(normalized_alias in candidate for candidate in candidates):
-            return profile
-    return None
+    candidates = tuple(_normalized(label) for label in labels)
+    return _profile_for_normalized(cluster, candidates)
 
 
 def rank_partitions(cluster: str, nodes: list[dict[str, object]]) -> list[dict[str, Any]]:

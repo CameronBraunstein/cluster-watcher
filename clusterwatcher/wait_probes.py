@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from math import ceil
@@ -26,6 +27,14 @@ WAIT_PROBE_TIMEOUT_SECONDS = 60.0
 
 WAIT_PROBE_BUDGET_SECONDS = 240.0
 """Time after which a partition's batch starts no further probes."""
+
+WAIT_PROBE_MAX_CONCURRENCY = 4
+"""Maximum partition probe batches allowed to run at the same time."""
+
+WAIT_PROBE_STARTUP_DELAY_SECONDS = 30
+"""Delay before the first probe round so normal status startup settles first."""
+
+_WAIT_PROBE_SLOTS = threading.BoundedSemaphore(WAIT_PROBE_MAX_CONCURRENCY)
 
 WAIT_PROBE_MEMORY_MB_PER_GPU = 1024
 """Minimal host-memory allocation per GPU used to isolate GPU pressure."""
@@ -234,11 +243,12 @@ def _collect_partition_wait_estimates(
         for index, (gpus, nodes, minutes) in enumerate(shapes)
     }
     try:
-        sections = run_batch(
-            machine, timeout, commands,
-            budget_seconds=time_budget_seconds,
-            process_timeout=time_budget_seconds + probe_timeout_seconds * 2 + timeout + 10,
-        )
+        with _WAIT_PROBE_SLOTS:
+            sections = run_batch(
+                machine, timeout, commands,
+                budget_seconds=time_budget_seconds,
+                process_timeout=time_budget_seconds + probe_timeout_seconds * 2 + timeout + 10,
+            )
         failure = None
     except (OSError, RuntimeError) as exc:
         sections, failure = {}, str(exc)
@@ -293,7 +303,7 @@ def collect_wait_estimates(
     if not partitions:
         return {}
     with ThreadPoolExecutor(
-        max_workers=len(partitions),
+        max_workers=min(WAIT_PROBE_MAX_CONCURRENCY, len(partitions)),
         thread_name_prefix="cluster-watcher-wait",
     ) as executor:
         futures = {

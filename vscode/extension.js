@@ -131,6 +131,11 @@ class BackendClient {
       throw error;
     }
   }
+
+  /** Read the server's cached, loopback-only SSH control-master inventory. */
+  async sessionInfo() {
+    return this.get('/api/v1/sessions');
+  }
 }
 
 /** Start a persistent tmux service and attach to any reachable local service. */
@@ -332,10 +337,9 @@ class ServiceController {
   /** Inspect service reachability and SSH masters without opening new sessions. */
   async refreshStatus() {
     const checkedAt = Date.now();
-    const settings = configuration();
     const [serviceResult, inventoryResult] = await Promise.allSettled([
       this.client.serviceInfo(),
-      runCli(settings, ['sessions', '--json', '--timeout', '2'], 60000),
+      this.client.sessionInfo(),
     ]);
     const reachable = serviceResult.status === 'fulfilled';
     this.onAvailabilityChange(reachable);
@@ -345,17 +349,8 @@ class ServiceController {
       this.sessionsError = inventoryResult.reason?.message || String(inventoryResult.reason);
       this.provider.updateServer(this.lifecycle, this.sessions, this.sessionsError, checkedAt);
     } else {
-      const inventory = inventoryResult.value;
-      if (inventory.code === 0) {
-        try {
-          this.sessions = JSON.parse(inventory.stdout);
-          this.sessionsError = undefined;
-        } catch (_error) {
-          this.sessionsError = 'cluster-watcher sessions returned invalid JSON';
-        }
-      } else {
-        this.sessionsError = inventory.stderr.trim() || `cluster-watcher sessions exited with status ${inventory.code}`;
-      }
+      this.sessions = inventoryResult.value;
+      this.sessionsError = undefined;
     }
     if (reachable) {
       this.publish({

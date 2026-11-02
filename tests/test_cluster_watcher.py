@@ -1071,6 +1071,24 @@ class ClusterWatcherTests(TimedTestCase):
             with self.assertRaisesRegex(ValueError, "unknown cluster 'typo'"):
                 load_config(config)
 
+    def test_repeated_gpu_profile_matches_use_the_normalized_resolution_cache(self):
+        """Thousands of identical node labels should normalize and scan once."""
+        from clusterwatcher.compute import (
+            _profile_for_normalized, configure_gpu_profiles, profile_for,
+        )
+
+        config = Path(__file__).parents[1] / "clusters.example.toml"
+        configure_gpu_profiles(config)
+        before = _profile_for_normalized.cache_info()
+
+        first = profile_for("cluster-a", ["GPU-H100"])
+        second = profile_for("cluster-a", ["GPU-H100"])
+        after = _profile_for_normalized.cache_info()
+
+        self.assertIs(first, second)
+        self.assertEqual(after.misses, before.misses + 1)
+        self.assertEqual(after.hits, before.hits + 1)
+
     def test_cli_reads_gpu_profiles_from_the_selected_config(self):
         from clusterwatcher import compute
 

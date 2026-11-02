@@ -214,6 +214,14 @@ class SnapshotTests(TimedTestCase):
         self.assertIn("Account: ${entry.account}", PAGE)
         self.assertIn("entry.matched_partitions || [entry.partition]", PAGE)
 
+    def test_browser_skips_unchanged_renders_and_materializes_open_partitions(self):
+        """A 304 must not rebuild thousands of hidden node and job elements."""
+        self.assertIn("if (!notModified) {", PAGE)
+        self.assertIn("if (!notModified) recentJobsView", PAGE)
+        self.assertIn("partitionBodies.set(disclosureKey, () =>", PAGE)
+        self.assertIn("document.addEventListener('toggle'", PAGE)
+        self.assertIn("if (details.open) materializePartition(details)", PAGE)
+
     @unittest.skipUnless(shutil.which("node"), "Node.js is needed to parse browser JavaScript")
     def test_browser_script_has_valid_javascript(self):
         """Catch Python string escapes that break embedded dashboard JavaScript."""
@@ -235,6 +243,38 @@ class SnapshotTests(TimedTestCase):
         self.assertEqual(response["headers"]["Cache-Control"], "no-store")
         self.assertEqual(document["schema_version"], "1.0")
         self.assertEqual(document["clusters"][0]["partitions"][0]["gpus"]["total"], 8)
+
+    def test_compact_snapshot_omits_nodes_but_keeps_aggregate_state_details(self):
+        """Summary clients avoid per-node duplication without losing tooltips."""
+        store = StatusStore([Machine("cluster_0", "slurm.example", "alice")], 5, False, 15)
+        store._statuses = [example_status()]
+        store._updated_at = "2026-09-22T10:00:00+00:00"
+
+        response, document = request_handler(store, "/api/v1/snapshot?detail=summary")
+        partition = document["clusters"][0]["partitions"][0]
+
+        self.assertEqual(response["status"], 200)
+        self.assertNotIn("nodes", partition)
+        self.assertEqual(partition["node_states"], {"IDLE+DRAIN": 1, "MIXED": 1})
+        self.assertEqual(partition["gpus"]["unavailable_by_state"], {"IDLE+DRAIN": 4})
+        invalid, error = request_handler(store, "/api/v1/snapshot?detail=large")
+        self.assertEqual(invalid["status"], 400)
+        self.assertIn("full or summary", error["error"])
+
+    def test_snapshot_documents_are_serialized_once_until_source_data_changes(self):
+        """Repeated clients reuse bytes and ETags instead of rebuilding JSON."""
+        store = StatusStore([Machine("cluster_0", "slurm.example", "alice")], 5, False, 15)
+        store._statuses = [example_status()]
+        store._updated_at = "2026-09-22T10:00:00+00:00"
+
+        with patch("clusterwatcher.dashboard.build_snapshot", wraps=build_snapshot) as build:
+            first, _ = request_handler(store, "/api/v1/snapshot?detail=summary")
+            second, _ = request_handler(store, "/api/v1/snapshot?detail=summary")
+            store._statuses[0].error = "unreachable"
+            changed, _ = request_handler(store, "/api/v1/snapshot?detail=summary")
+
+        self.assertEqual((first["status"], second["status"], changed["status"]), (200, 200, 200))
+        self.assertEqual(build.call_count, 2)
 
     def test_down_partition_has_no_schedulable_idle_gpus(self):
         status = example_status()
@@ -384,18 +424,32 @@ class SnapshotTests(TimedTestCase):
         self.assertEqual(response["status"], 502)
         self.assertIn("Invalid job id", document["error"])
 
-    def test_session_and_command_endpoints_are_opt_in(self):
+    def test_session_inventory_is_read_only_loopback_and_command_api_is_opt_in(self):
         disabled = StatusStore([Machine("a", "host", "user")], 5, False, 15)
-        response, document = request_handler(disabled, "/api/v1/sessions")
-        self.assertEqual(response["status"], 404)
-        self.assertIn("--command-api", document["error"])
+        inventory = {"schema_version": "1.0", "generated_at": "now", "machines": []}
+        with patch.object(disabled.session_service, "sessions", return_value=inventory) as sessions:
+            response, document = request_handler(disabled, "/api/v1/sessions")
+            repeated, _ = request_handler(disabled, "/api/v1/sessions")
+        self.assertEqual((response["status"], repeated["status"]), (200, 200))
+        self.assertEqual(document["schema_version"], "1.0")
+        sessions.assert_called_once()
+
+        denied, error = request_handler(disabled, "/api/v1/sessions", client_host="192.0.2.10")
+        self.assertEqual(denied["status"], 403)
+        self.assertIn("local machine", error["error"])
 
         store = StatusStore([Machine("a", "host", "user")], 5, False, 15, command_api_enabled=True)
-        inventory = {"schema_version": "1.0", "generated_at": "now", "machines": []}
         with patch.object(store.command_service, "sessions", return_value=inventory):
             response, document = request_handler(store, "/api/v1/sessions")
         self.assertEqual(response["status"], 200)
         self.assertEqual(document["schema_version"], "1.0")
+
+        command_disabled, command_error = request_handler(
+            disabled, "/api/v1/commands", "POST", b"{}",
+            {"Content-Type": "application/json", "Content-Length": "2"},
+        )
+        self.assertEqual(command_disabled["status"], 404)
+        self.assertIn("--command-api", command_error["error"])
 
     def test_service_endpoint_reports_process_identity_without_optional_apis(self):
         """Attached clients can identify the service even before collection."""

@@ -859,10 +859,15 @@ function gpuAvailabilityTitle(partition) {
     const total = Math.max(0, Number(gpu.total) || 0);
     const idle = Math.min(total, Math.max(0, Number(gpu.schedulable_idle) || 0));
     const allocated = Math.min(total - idle, Math.max(0, Number(gpu.allocated) || 0));
-    const unavailable = Math.max(0, total - idle - allocated);
     addAvailabilityCount(categories, 'idle', idle);
     addAvailabilityCount(categories, 'allocated', allocated);
-    addAvailabilityCount(categories, 'unavailable', unavailable);
+    const unavailableByState = Object.entries(gpu.unavailable_by_state || {});
+    for (const [state, count] of unavailableByState) {
+      const label = availabilityStateLabel(state);
+      addAvailabilityCount(categories, ['idle', 'mixed', 'full'].includes(label) ? 'unavailable' : label, count);
+    }
+    const classified = unavailableByState.reduce((sum, [, count]) => sum + Math.max(0, Number(count) || 0), 0);
+    addAvailabilityCount(categories, 'unavailable', Math.max(0, total - idle - allocated - classified));
   }
   const order = ['idle', 'allocated', 'reserved', 'drained', 'down', 'maintenance', 'rebooting', 'powered off', 'unavailable'];
   const entries = [...categories.entries()].sort(([left], [right]) => {

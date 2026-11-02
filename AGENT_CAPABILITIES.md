@@ -21,7 +21,7 @@ interactive MFA is required.
 | Read stdout or stderr | `GET /api/v1/jobs/{cluster}/{job_id}/log` | `--jobs-api`; resolvable or allowed path | No |
 | Cancel one personal job | `POST /api/v1/jobs/{cluster}/{job_id}/cancel` | `--jobs-api` and explicit user approval | **Yes** |
 | Inspect reusable SSH sessions | `cluster-watcher sessions --json` | Local configuration | No |
-| Inspect sessions over HTTP | `GET /api/v1/sessions` | `--command-api` | No |
+| Inspect sessions over HTTP | `GET /api/v1/sessions` | Loopback client | No |
 | Run a non-interactive remote command | `cluster-watcher exec` or `POST /api/v1/commands` | Existing SSH master; HTTP also needs `--command-api` | Potentially **yes** |
 | Open an interactive remote shell | `cluster-watcher shell MACHINE` | Existing SSH master and a human terminal | Potentially **yes** |
 | Present live terminal views | `cluster-watcher status [SECONDS]` and `cluster-watcher jobs [SECONDS]` | May prompt if no SSH master exists | No |
@@ -37,7 +37,7 @@ The user chooses which HTTP capabilities to expose when starting the service:
 ```bash
 cluster-watcher serve --no-browser                 # capacity snapshot only
 cluster-watcher serve --jobs-api --no-browser      # add personal jobs/logs/cancel
-cluster-watcher serve --command-api --no-browser   # add sessions/remote commands
+cluster-watcher serve --command-api --no-browser   # add remote commands; sessions are always local/read-only
 ```
 
 `--jobs-api` and `--command-api` may be combined, but neither is needed to read
@@ -164,11 +164,12 @@ For a job investigation:
 ## Reuse existing SSH sessions
 
 `cluster-watcher sessions --json` checks local OpenSSH control masters without
-logging in. The corresponding HTTP route, `/api/v1/sessions`, is available only
-with `--command-api`. A session marked `available` has been verified with
-`ssh -O check`; `credential_group` identifies machines whose interactive login
-shares a password. Remaining lifetime is approximate because OpenSSH does not
-publish its exact idle-expiry deadline and unrelated SSH clients can extend it.
+logging in. The corresponding HTTP route, `/api/v1/sessions`, is read-only and
+available to loopback clients without `--command-api`. A session marked
+`available` has been verified with `ssh -O check`; `credential_group`
+identifies machines whose interactive login shares a password. Remaining
+lifetime is approximate because OpenSSH does not publish its exact idle-expiry
+deadline and unrelated SSH clients can extend it.
 
 CLI, web service, and VS Code use the same user-private control paths when they
 run as the same Unix user on the same machine with the same endpoint settings.

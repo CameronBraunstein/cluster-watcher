@@ -187,6 +187,8 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   assert.match(extensionSource, /serverProvider,\s*\(\) => coordinator\.serviceReachable\(\), setServiceAvailable/);
   assert.match(extensionSource, /client\.post\('\/api\/v1\/shutdown', \{\}, 5000\)/);
   assert.match(extensionSource, /this\.client\.serviceInfo\(\)/);
+  assert.match(extensionSource, /this\.client\.sessionInfo\(\)/);
+  assert.doesNotMatch(extensionSource, /runCli\(settings, \['sessions'/);
   assert.match(extensionSource, /serviceInfo\.started_at/);
   assert.match(extensionSource, /Other dashboards and clients using it will be disconnected/);
   assert.match(extensionSource, /await startServiceSession\(sessionName, persistentServiceCommand\(settings\)\)/);

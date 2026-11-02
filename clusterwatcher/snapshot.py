@@ -186,8 +186,18 @@ def _node_snapshot(cluster: str, partition: str, node: dict[str, object], partit
     }
 
 
-def _partition_snapshot(status: ClusterStatus, name: str, generated_at: str | None) -> dict[str, object]:
-    """Build a complete routing snapshot for one Slurm partition."""
+def _partition_snapshot(
+    status: ClusterStatus,
+    name: str,
+    generated_at: str | None,
+    *,
+    include_nodes: bool,
+) -> dict[str, object]:
+    """Build a routing snapshot for one Slurm partition.
+
+    Compact consumers can omit the expensive per-node array while retaining
+    all aggregate resource and state counters needed for availability views.
+    """
     nodes = [node for node in (status.nodes or []) if name in _partitions(node)]
     compute = next((item for item in (status.partition_compute or []) if item.get("name") == name), {})
     slurm_rows = [row for row in (status.partitions or []) if row.get("partition") == name]
@@ -202,7 +212,12 @@ def _partition_snapshot(status: ClusterStatus, name: str, generated_at: str | No
         (row for row in slurm_rows if row.get("priority_job_factor") is not None),
         {},
     )
-    return {
+    unavailable_by_state = Counter()
+    for node in node_details:
+        unavailable = int(node["gpus"]["unavailable_idle"])
+        if unavailable:
+            unavailable_by_state[str(node["state"])] += unavailable
+    result = {
         "name": name,
         "fair_share": partition_associations(status.fair_share, name),
         "rank": compute.get("rank"),
@@ -222,12 +237,15 @@ def _partition_snapshot(status: ClusterStatus, name: str, generated_at: str | No
             "idle": gpu_idle,
             "schedulable_idle": schedulable_idle,
             "unavailable_idle": max(0, gpu_idle - schedulable_idle),
+            "unavailable_by_state": dict(sorted(unavailable_by_state.items())),
             "max_per_node": max((int(node["gpus"]["total"]) for node in node_details), default=0),
             "models": _model_summaries(status.name, name, nodes, partition_available),
         },
         "wait_estimates": _wait_estimates(status, name, generated_at),
-        "nodes": sorted(node_details, key=lambda node: str(node["name"])),
     }
+    if include_nodes:
+        result["nodes"] = sorted(node_details, key=lambda node: str(node["name"]))
+    return result
 
 
 def _partition_names(status: ClusterStatus) -> list[str]:
@@ -280,8 +298,15 @@ def _cluster_resources(status: ClusterStatus) -> dict[str, object]:
 def build_snapshot(
     statuses: list[ClusterStatus], generated_at: str | None, refresh_seconds: int,
     wait_threshold_minutes: tuple[int, ...] = DEFAULT_WAIT_THRESHOLD_MINUTES,
+    *,
+    include_nodes: bool = True,
 ) -> dict[str, object]:
-    """Build the public API document, including configured launch-wait buckets."""
+    """Build the public API document, including configured launch-wait buckets.
+
+    ``include_nodes=False`` creates the compact representation used by summary
+    clients such as the VS Code sidebar. Aggregate CPU/GPU/model/state data is
+    identical to the full routing document.
+    """
     clusters: list[dict[str, object]] = []
     for status in statuses:
         clusters.append(
@@ -300,7 +325,9 @@ def build_snapshot(
                 "fair_share_updated_at": status.fair_share_updated_at,
                 "resources": _cluster_resources(status),
                 "partitions": [
-                    _partition_snapshot(status, name, generated_at)
+                    _partition_snapshot(
+                        status, name, generated_at, include_nodes=include_nodes,
+                    )
                     for name in _partition_names(status)
                 ],
             }
