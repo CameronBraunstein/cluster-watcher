@@ -183,13 +183,15 @@ test('matched fair-share factors have bars above GPU and node availability', () 
   const gpuCard = cards.find((card) => card.includes('>gpu_a100</span>'));
   const apuCard = cards.find((card) => card.includes('>apu</span>'));
   assert.match(gpuCard, /role="progressbar"[^>]*aria-valuenow="0\.725"/);
-  assert.match(gpuCard, /style="width:72\.50%"/);
-  assert.match(gpuCard, /Factor: 0\.725000/);
+  assert.match(gpuCard, /class="fair-share-marker" style="left:72\.50%"/);
+  assert.match(gpuCard, /class="fair-share-label">0\.725000/);
   assert.match(gpuCard, /Account: gpu_a100_bs_default&#10;Visible rank: 1302\/4728/);
+  assert.match(html, /\.fair-share-track\{[^}]*height:6px/);
+  assert.match(html, /\.fair-share-track\{[^}]*linear-gradient\(90deg,var\(--vscode-editorError-foreground\),var\(--vscode-descriptionForeground\) 50%,var\(--vscode-testing-iconPassed\)\)/);
   assert.ok(gpuCard.indexOf('FairShare:') < gpuCard.indexOf('GPUs:'));
   assert.ok(gpuCard.indexOf('GPUs:') < gpuCard.indexOf('Nodes:'));
   assert.doesNotMatch(apuCard, /gpu_a100_bs_default|unscoped/);
-  assert.match(apuCard, /Factor: —/);
+  assert.match(apuCard, /class="fair-share-label">—/);
   assert.match(apuCard, /No confirmed association match for this partition/);
   assert.match(html, /sshare unavailable/);
   assert.doesNotMatch(html, /Other fair-share associations|fair-share-card/);
@@ -204,8 +206,8 @@ test('two fair-share associations render as separate bars with separate hover de
   }] });
 
   assert.equal((html.match(/class="fair-share-track" role="progressbar"/g) || []).length, 2);
-  assert.match(html, /Factor: 0\.800000/);
-  assert.match(html, /Factor: 0\.250000/);
+  assert.match(html, /class="fair-share-label">0\.800000/);
+  assert.match(html, /class="fair-share-label">0\.250000/);
   assert.match(html, /Account: lab&#10;Visible rank: 4\/100/);
   assert.match(html, /Account: other&#10;Visible rank: 50\/100/);
   assert.doesNotMatch(html, /Other fair-share associations/);
@@ -222,7 +224,7 @@ test('unscoped accounts matched through access rules appear on the partition car
     partitions: [{ name: 'gpu-v100', gpus: { total: 6 }, fair_share: [entry] }],
   }] });
 
-  assert.match(html, /Factor: 0\.998557/);
+  assert.match(html, /class="fair-share-label">0\.998557/);
   assert.match(html, /Account: gpu_v100_bs_default&#10;Visible rank: 3\/4728&#10;Slurm partition: not specified&#10;Matched by: account hierarchy and QOS/);
   assert.doesNotMatch(html, /Other fair-share associations|No partition specified/);
 });

@@ -51,8 +51,8 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .refresh-clock-hand { stroke:#2563eb; stroke-width:2; stroke-linecap:round; transform-origin:12px 12px; transition:transform .25s linear; }
 .refresh-clock-center { fill:#2563eb; }
 .cluster { border:1px solid #8885; border-radius:.5rem; margin:1rem 0; padding:1rem; }
-.partition-fair-share { margin:.45rem 0; } .fair-share-title { display:block; margin-bottom:.2rem; color:#666; font-size:.78rem; } .fair-share-bars { display:grid; gap:.2rem; }
-.fair-share-track { box-sizing:border-box; position:relative; display:flex; align-items:center; width:100%; height:1.2rem; border-radius:3px; background:#8884; cursor:help; } .fair-share-fill { position:absolute; inset:0 auto 0 0; height:100%; border-radius:3px; background:#16a34a; } .fair-share-label { position:relative; margin-left:.15rem; padding:0 .25rem; border-radius:2px; background:Canvas; color:CanvasText; font-size:.72rem; line-height:1rem; white-space:nowrap; } .fair-share-track.unavailable { background:#8883; }
+.partition-fair-share { margin:.45rem 0; } .fair-share-title { display:block; margin-bottom:.2rem; color:#666; font-size:.78rem; } .fair-share-bars { display:grid; gap:.35rem; }
+.fair-share-row { display:grid; grid-template-columns:minmax(4rem,10rem) max-content; align-items:center; gap:.35rem; min-width:0; } .fair-share-track { box-sizing:border-box; position:relative; display:block; width:100%; height:.62rem; overflow:visible; border-radius:999px; background:linear-gradient(90deg,#dc2626,#777 50%,#16a34a); cursor:help; } .fair-share-marker { position:absolute; top:-.18rem; width:2px; height:.98rem; transform:translateX(-1px); background:CanvasText; box-shadow:0 0 0 1px Canvas; } .fair-share-label { color:#666; font-size:.72rem; font-variant-numeric:tabular-nums; white-space:nowrap; } .fair-share-track.unavailable { background:#8883; }
 .key { border:1px solid #8885; border-radius:.5rem; margin:1rem 0; padding:1rem; }
 .key h2 { margin-top:0; } .key-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:.5rem 1.5rem; }
 .key-grid p { margin:.35rem 0; }
@@ -753,7 +753,7 @@ function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, es
 function fairShareFactorBar(entry) {
   const factor = Number(entry.factor), rank = Number(entry.rank), total = Number(entry.total);
   if (entry.factor == null || !Number.isFinite(factor) || factor < 0 || factor > 1 || !Number.isInteger(rank) || !Number.isInteger(total) || rank < 1 || total < rank) return '';
-  const label = `Factor: ${factor.toFixed(6)}`;
+  const label = factor.toFixed(6);
   const details = [
     `Account: ${entry.account}`,
     `Visible rank: ${rank}/${total}`,
@@ -762,14 +762,14 @@ function fairShareFactorBar(entry) {
     'Higher factors favor jobs; they do not predict start time.',
   ].join('\\n');
   const tooltip = escapeHtml(details).replace(/\\n/g, '&#10;');
-  return `<div class="fast-hover fair-share-track" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${factor}" aria-label="${tooltip}" data-fast-tooltip="${tooltip}"><span class="fair-share-fill" style="width:${(factor * 100).toFixed(2)}%"></span><span class="fair-share-label">${label}</span></div>`;
+  return `<div class="fair-share-row"><div class="fast-hover fair-share-track" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${factor}" aria-label="${tooltip}" data-fast-tooltip="${tooltip}"><i class="fair-share-marker" style="left:${(factor * 100).toFixed(2)}%"></i></div><span class="fair-share-label">${label}</span></div>`;
 }
 
 function partitionFairShareView(share, partition) {
   const associations = Array.isArray(share?.associations) ? share.associations : [];
   const bars = associations.filter(entry => (entry.matched_partitions || [entry.partition]).includes(partition)).map(fairShareFactorBar).filter(Boolean).join('');
   const explanation = escapeHtml(share?.mapping_error || share?.error || 'No confirmed association match for this partition.').replace(/\\n/g, '&#10;');
-  const unavailable = `<div class="fast-hover fair-share-track unavailable" aria-label="${explanation}" data-fast-tooltip="${explanation}"><span class="fair-share-label">Factor: —</span></div>`;
+  const unavailable = `<div class="fair-share-row"><div class="fast-hover fair-share-track unavailable" aria-label="${explanation}" data-fast-tooltip="${explanation}"></div><span class="fair-share-label">—</span></div>`;
   return `<div class="partition-fair-share"><span class="fair-share-title">FairShare:</span><div class="fair-share-bars">${bars || unavailable}</div></div>`;
 }
 

@@ -209,8 +209,11 @@ class SnapshotTests(TimedTestCase):
         self.assertNotIn("function fairShareView(cluster)", PAGE)
         self.assertIn("function fairShareFactorBar(entry)", PAGE)
         self.assertIn("${partitionFairShareView(fairShare, name)}", PAGE)
-        self.assertIn("Factor: ${factor.toFixed(6)}", PAGE)
+        self.assertIn("const label = factor.toFixed(6)", PAGE)
         self.assertIn('role="progressbar"', PAGE)
+        self.assertIn('class="fair-share-marker"', PAGE)
+        self.assertIn('style="left:${(factor * 100).toFixed(2)}%"', PAGE)
+        self.assertIn('background:linear-gradient(90deg,#dc2626,#777 50%,#16a34a)', PAGE)
         self.assertIn("Account: ${entry.account}", PAGE)
         self.assertIn("entry.matched_partitions || [entry.partition]", PAGE)
 

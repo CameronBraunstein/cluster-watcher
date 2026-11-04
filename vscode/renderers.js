@@ -299,7 +299,7 @@ button.button{border:0;font:inherit;cursor:pointer}
 .service-summary{display:flex;align-items:center;gap:4px;margin:3px 0 5px;min-width:0;white-space:nowrap;font-size:.78em}.service-summary>strong{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}.service-url{box-sizing:border-box;display:block;flex:0 0 auto;max-width:calc(100% - 26px);min-width:0;margin:0;padding:0;overflow:hidden;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;text-decoration:underline;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 22px;width:22px;height:12px;margin:0;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:12px}.service-toggle:disabled{cursor:wait;opacity:.65}.session-list{display:grid;gap:3px;margin-top:5px}.session-row{min-width:0;border:1px solid var(--vscode-panel-border);border-radius:4px;padding:4px 5px}.session-row-head{display:flex;align-items:center;justify-content:space-between;gap:4px;min-width:0}.session-name{font-weight:600;font-size:.85em;min-width:0;overflow:hidden;text-overflow:ellipsis}.session-state{font-size:.68em;white-space:nowrap}.session-state.open{color:var(--vscode-testing-iconPassed)}.session-state.closed{color:var(--vscode-errorForeground)}.session-target{margin-top:1px;font-size:.68em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.session-actions{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}.session-actions>.compact-action{box-sizing:border-box;max-width:100%;padding:2px 4px;font-size:.68em;line-height:1.3;white-space:normal;overflow-wrap:anywhere;text-align:left}.service-output{max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.72em}.server-details{margin-top:10px}.server-details>summary{cursor:pointer}
 .service-setup-actions{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 8px}.service-setup-actions>.button{box-sizing:border-box;max-width:100%;padding:3px 5px;font-size:.78em;white-space:normal;text-align:left}
 .configure-clusters{display:inline-block;margin-top:6px;padding:0;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;font-size:.78em;text-align:left;text-decoration:none;cursor:pointer}.configure-clusters:hover{text-decoration:underline}
-.partition-fair-share{margin-top:5px}.fair-share-title{display:block;margin-bottom:2px;color:var(--vscode-descriptionForeground);font-size:.72em}.fair-share-bars{display:grid;gap:2px}.fair-share-track{box-sizing:border-box;position:relative;display:flex;align-items:center;width:100%;height:16px;overflow:hidden;border-radius:3px;background:color-mix(in srgb,var(--vscode-foreground) 16%,transparent);cursor:help}.fair-share-fill{position:absolute;inset:0 auto 0 0;height:100%;background:var(--vscode-testing-iconPassed)}.fair-share-label{position:relative;margin-left:2px;padding:0 3px;border-radius:2px;background:var(--vscode-sideBar-background);color:var(--vscode-foreground);font-size:.7em;line-height:13px;white-space:nowrap}.fair-share-track.unavailable{background:color-mix(in srgb,var(--vscode-foreground) 10%,transparent)}
+.partition-fair-share{margin-top:5px}.fair-share-title{display:block;margin-bottom:2px;color:var(--vscode-descriptionForeground);font-size:.72em}.fair-share-bars{display:grid;gap:4px}.fair-share-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,max-content);align-items:center;column-gap:2px;min-width:0}.fair-share-track{box-sizing:border-box;position:relative;display:block;width:100%;height:6px;overflow:visible;border-radius:4px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed));cursor:help}.fair-share-marker{position:absolute;top:-3px;width:2px;height:12px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.fair-share-label{color:var(--vscode-foreground);font-size:.7em;font-variant-numeric:tabular-nums;white-space:nowrap}.fair-share-track.unavailable{background:color-mix(in srgb,var(--vscode-foreground) 10%,transparent)}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
@@ -939,7 +939,7 @@ function fairShareBar(entry) {
   const rank = Number(entry.rank), total = Number(entry.total);
   if (entry.factor == null || !Number.isFinite(factor) || factor < 0 || factor > 1
       || !Number.isInteger(rank) || !Number.isInteger(total) || rank < 1 || total < rank) return '';
-  const label = `Factor: ${factor.toFixed(6)}`;
+  const label = factor.toFixed(6);
   const details = [
     `Account: ${entry.account}`,
     `Visible rank: ${rank}/${total}`,
@@ -948,14 +948,14 @@ function fairShareBar(entry) {
     'Higher factors favor jobs; they do not predict start time.',
   ].join('\n');
   const tooltip = escapeHtml(details).replace(/\n/g, '&#10;');
-  return `<div class="fair-share-track" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${factor}" aria-label="${tooltip}" data-fast-tooltip="${tooltip}"><span class="fair-share-fill" style="width:${(factor * 100).toFixed(2)}%"></span><span class="fair-share-label">${label}</span></div>`;
+  return `<div class="fair-share-row"><div class="fair-share-track" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${factor}" aria-label="${tooltip}" data-fast-tooltip="${tooltip}"><i class="fair-share-marker" style="left:${(factor * 100).toFixed(2)}%"></i></div><span class="fair-share-label">${label}</span></div>`;
 }
 
 /** Put each matched factor above the GPU and node availability bars. */
 function partitionFairShare(entries, error = null) {
   const bars = (Array.isArray(entries) ? entries : []).map(fairShareBar).filter(Boolean).join('');
   const explanation = escapeHtml(error || 'No confirmed association match for this partition.').replace(/\n/g, '&#10;');
-  const unavailable = `<div class="fair-share-track unavailable" aria-label="${explanation}" data-fast-tooltip="${explanation}"><span class="fair-share-label">Factor: —</span></div>`;
+  const unavailable = `<div class="fair-share-row"><div class="fair-share-track unavailable" aria-label="${explanation}" data-fast-tooltip="${explanation}"></div><span class="fair-share-label">—</span></div>`;
   return `<div class="partition-fair-share"><span class="fair-share-title">FairShare:</span><div class="fair-share-bars">${bars || unavailable}</div></div>`;
 }
 
