@@ -14,6 +14,7 @@ from clusterwatcher.ssh import (
     _mark_activity,
     existing_session_ssh_command,
     parse_control_persist,
+    run_remote,
     run_remote_command,
     session_status,
 )
@@ -53,6 +54,59 @@ class RemoteCommandTests(TimedTestCase):
         self.assertEqual(status["pid"], 4321)
         self.assertEqual(status["control_persist_seconds"], 7200)
         self.assertGreaterEqual(status["estimated_remaining_seconds"], 7198)
+
+    @patch("clusterwatcher.ssh._read_last_activity", return_value=None)
+    @patch("clusterwatcher.ssh.subprocess.run")
+    def test_session_status_finds_an_open_secondary_login_node(self, run, _activity):
+        run.side_effect = [
+            subprocess.CompletedProcess([], 255, stdout="", stderr="No master"),
+            subprocess.CompletedProcess([], 0, stdout="", stderr="Master running (pid=99)"),
+        ]
+        machine = Machine(
+            "viper", "viper12.example", "alice", interactive_auth=True,
+            hosts=("viper12.example", "viper13.example"),
+        )
+        with patch.dict("clusterwatcher.ssh._selected_hosts", {}, clear=True):
+            status = session_status(machine)
+
+        self.assertTrue(status["session_open"])
+        self.assertEqual(status["host"], "viper13.example")
+        self.assertEqual(status["hosts"], ["viper12.example", "viper13.example"])
+
+    @patch("clusterwatcher.ssh._mark_activity")
+    @patch("clusterwatcher.ssh.subprocess.run")
+    def test_read_only_transport_fails_over_and_sticks_to_successful_node(self, run, _activity):
+        run.side_effect = [
+            subprocess.CompletedProcess([], 255, stdout="", stderr="connection refused"),
+            subprocess.CompletedProcess([], 0, stdout="ready\n", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="still ready\n", stderr=""),
+        ]
+        machine = Machine(
+            "viper", "viper12.example", "alice",
+            hosts=("viper12.example", "viper13.example"),
+        )
+        with patch.dict("clusterwatcher.ssh._selected_hosts", {}, clear=True):
+            self.assertEqual(run_remote(machine, 5, "sinfo"), "ready\n")
+            self.assertEqual(run_remote(machine, 5, "sinfo"), "still ready\n")
+
+        targets = [call.args[0][-2] for call in run.call_args_list]
+        self.assertEqual(targets, [
+            "alice@viper12.example", "alice@viper13.example", "alice@viper13.example",
+        ])
+
+    @patch("clusterwatcher.ssh._mark_activity")
+    @patch("clusterwatcher.ssh.subprocess.run")
+    def test_non_failover_remote_operation_is_never_replayed(self, run, _activity):
+        run.return_value = subprocess.CompletedProcess([], 255, stdout="", stderr="connection lost")
+        machine = Machine(
+            "viper", "viper12.example", "alice",
+            hosts=("viper12.example", "viper13.example"),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "connection lost"):
+            run_remote(machine, 5, "scancel 123", failover=False)
+
+        run.assert_called_once()
 
     def test_limited_pipe_drain_discards_excess_output(self):
         chunks: list[bytes] = []

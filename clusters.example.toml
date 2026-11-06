@@ -17,7 +17,12 @@ job_log_roots = ["/home/alice/jobs"]
 
 [[machine]]
 name = "cluster-b"
-host = "login.cluster-b.example.org"
+# Cluster Watcher selects the first reachable login node, remembers successful
+# nodes, and fails read-only status collection over to the next node.
+host = [
+    "login1.cluster-b.example.org",
+    "login2.cluster-b.example.org",
+]
 username = "alice"
 # Prompts once for the shared password, then for each machine's single-use OTP.
 interactive_auth = true

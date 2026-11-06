@@ -10,10 +10,10 @@ const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = req
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
 const { RefreshCoordinator, RefreshFeedback, refreshResultMessage } = require('./refresh');
 const { hasServiceSession, serviceSessionName, startServiceSession } = require('./tmux');
-const { isFailureGroup, jobRef, localTime, setDateFormat, renderJobs, renderJobsApiDisabled, renderLoading, renderServerStatus, renderStatus, renderWelcome, stateGroup } = require('./renderers');
+const { isFailureGroup, jobRef, localTime, setDateFormat, renderJobs, renderJobsApiDisabled, renderLoading, renderStatus, renderWelcome, stateGroup } = require('./renderers');
 const {
   ExecutableValidationError, backgroundLoginArguments, cliArguments,
-  jobsApiDisabled, responseError, cliTerminalOptions, configurationError, configFileExists, resolveConfigPath,
+  jobsApiDisabled, responseError, cliTerminalOptions, configurationError, resolveConfigPath,
   persistentServiceCommand, runCli, serviceCommand, validateBackgroundCredentialSupport, validateExecutable,
   validatePersistentServiceSupport,
 } = require('./service');
@@ -27,7 +27,7 @@ const WEBVIEW_COMMANDS = new Set([
   'clusterWatcher.cancelJob',
   'clusterWatcher.startService', 'clusterWatcher.runSetup', 'clusterWatcher.editConfig', 'clusterWatcher.openSettings',
   'clusterWatcher.stopService', 'clusterWatcher.openDashboard', 'clusterWatcher.copyServiceCommand',
-  'clusterWatcher.refresh', 'clusterWatcher.refreshServer', 'clusterWatcher.login', 'clusterWatcher.manageBackend',
+  'clusterWatcher.refresh', 'clusterWatcher.login', 'clusterWatcher.manageBackend',
 ]);
 
 /** Return the current extension configuration. */
@@ -159,7 +159,7 @@ class ServiceController {
     this.sessionsError = undefined;
   }
 
-  /** Publish lifecycle changes immediately to the Server Status view. */
+  /** Publish lifecycle changes immediately to Cluster Status. */
   publish(changes = {}) {
     const wasReachable = ['running', 'attached'].includes(this.lifecycle.state);
     this.lifecycle = { ...this.lifecycle, ...changes, url: configuration().backendUrl };
@@ -186,7 +186,7 @@ class ServiceController {
     return value;
   }
 
-  /** Update the bounded diagnostic tail shown in Server Status. */
+  /** Update the bounded diagnostic tail shown in Cluster Status. */
   processOutput(_line, recentLines) {
     this.publish({ recentLines });
   }
@@ -391,6 +391,8 @@ class SidebarProvider {
   constructor(kind) {
     this.kind = kind;
     this.view = undefined;
+    /** Service lifecycle and SSH inventory rendered by live or offline Cluster Status. */
+    this.server = { service: { state: 'offline' }, sessions: undefined, sessionsError: undefined };
     /** Remembered open/closed state of collapsible sections, keyed by disclosure key. */
     this.disclosures = {};
     /** The last data received from the service, and whether the view currently shows it. */
@@ -412,9 +414,9 @@ class SidebarProvider {
     view.webview.options = { enableScripts: true };
     view.webview.onDidReceiveMessage((message) => this.receive(message));
     if (this.loadingState || (!this.hasSuccessfulData && !this.errorState)) {
-      view.webview.html = renderLoading(this.title(), this.freshness(), !this.loadingState);
+      view.webview.html = renderLoading(this.title(), this.freshness(), !this.loadingState, this.server);
     } else if (this.errorState?.kind === 'offline') {
-      view.webview.html = renderWelcome(this.title(), this.errorState.detail, this.freshness());
+      view.webview.html = renderWelcome(this.title(), this.errorState.detail, this.freshness(), this.server);
     } else if (this.errorState?.kind === 'jobs-api-off') {
       view.webview.html = renderJobsApiDisabled(this.title(), restartCommandText(), this.freshness());
     } else this.render();
@@ -478,19 +480,37 @@ class SidebarProvider {
     this.render();
   }
 
+  /** Mirror service/session state and redraw Cluster Status only when visible data changes. */
+  updateServer(service = {}, sessions, sessionsError) {
+    const next = { service: { ...service }, sessions, sessionsError };
+    const renderKey = (value) => JSON.stringify([
+      value.service?.state, value.service?.url, value.service?.pid, value.service?.startedAt,
+      value.service?.activity, value.service?.error, value.service?.recentLines,
+      value.sessions?.machines, value.sessionsError,
+    ]);
+    if (renderKey(next) === renderKey(this.server)) return;
+    this.server = next;
+    if (this.kind !== 'status' || !this.view) return;
+    if (this.loadingState || (!this.hasSuccessfulData && !this.errorState)) {
+      this.view.webview.html = renderLoading(this.title(), this.freshness(), !this.loadingState, this.server);
+    } else if (this.errorState?.kind === 'offline') {
+      this.view.webview.html = renderWelcome(this.title(), this.errorState.detail, this.freshness(), this.server);
+    } else this.render();
+  }
+
   /** Show first-load progress while the service is reachable but has no data. */
   loading() {
     if (this.loadingState || (this.showingData && this.hasSuccessfulData)) return;
     this.loadingState = true;
     this.errorState = undefined;
     this.showingData = false;
-    if (this.view) this.view.webview.html = renderLoading(this.title(), this.freshness());
+    if (this.view) this.view.webview.html = renderLoading(this.title(), this.freshness(), false, this.server);
   }
 
   render() {
     if (!this.view || !this.payload) return;
     this.showingData = true;
-    this.view.webview.html = renderStatus(this.payload, this.disclosures, this.freshness());
+    this.view.webview.html = renderStatus(this.payload, this.disclosures, this.freshness(), this.server);
   }
 
   error(error) {
@@ -499,7 +519,7 @@ class SidebarProvider {
     const detail = error instanceof Error ? error.message : String(error);
     this.errorState = { kind: 'offline', detail };
     if (!this.view) return;
-    this.view.webview.html = renderWelcome(this.title(), detail, this.freshness());
+    this.view.webview.html = renderWelcome(this.title(), detail, this.freshness(), this.server);
   }
 
   /** Explain that the service runs without the jobs API and how to restart it. */
@@ -520,76 +540,14 @@ class OfflineSidebarProvider extends SidebarProvider {
   }
 }
 
-/** Render service ownership and reusable SSH masters in its own sidebar view. */
-class ServerSidebarProvider extends SidebarProvider {
-  constructor() {
-    super('server');
-    this.service = { state: 'offline', owned: false, recentLines: [] };
-    this.sessions = undefined;
-    this.sessionsError = undefined;
-    this.configExists = undefined;
-    this.configCheckKey = undefined;
-    this.configCheckedAt = 0;
-    this.configCheckInFlight = undefined;
+/** Fan service/session updates into both mutually exclusive Cluster Status views. */
+class ClusterStatusStatePublisher {
+  constructor(...providers) {
+    this.providers = providers;
   }
 
-  title() {
-    return 'Server Status';
-  }
-
-  resolveWebviewView(view) {
-    this.view = view;
-    view.onDidDispose(() => { if (this.view === view) this.view = undefined; });
-    this.view.description = undefined;
-    view.webview.options = { enableScripts: true };
-    view.webview.onDidReceiveMessage((message) => this.receive(message));
-    this.render();
-  }
-
-  updateServer(service, sessions, sessionsError, checkedAt = Date.now()) {
-    this.service = { ...service };
-    this.sessions = sessions;
-    this.sessionsError = sessionsError;
-    this.updatedAt = sessions?.generated_at || new Date(checkedAt).toISOString();
-    this.checkedAt = checkedAt;
-    this.render();
-    void this.checkConfigFile();
-  }
-
-  /** Refresh TOML existence without delaying status; an inspection error stays unknown. */
-  checkConfigFile(force = false) {
-    if (this.configCheckInFlight) {
-      return force ? this.configCheckInFlight.then(() => this.checkConfigFile(true)) : this.configCheckInFlight;
-    }
-    const settings = configuration();
-    const key = `${settings.executable}\0${settings.configPath}`;
-    if (!force && key === this.configCheckKey && Date.now() - this.configCheckedAt < 15000) return Promise.resolve();
-    this.configCheckKey = key;
-    this.configCheckedAt = Date.now();
-    const check = configFileExists(settings)
-      .catch(() => undefined)
-      .then((exists) => {
-        const current = configuration();
-        if (`${current.executable}\0${current.configPath}` !== key) return;
-        if (this.configExists !== exists) {
-          this.configExists = exists;
-          this.render();
-        }
-      })
-      .finally(() => { if (this.configCheckInFlight === check) this.configCheckInFlight = undefined; });
-    this.configCheckInFlight = check;
-    return check;
-  }
-
-  render() {
-    if (!this.view) return;
-    this.showingData = true;
-    this.view.webview.html = renderServerStatus({
-      service: this.service,
-      sessions: this.sessions,
-      sessionsError: this.sessionsError,
-      configExists: this.configExists,
-    }, this.freshness());
+  updateServer(service, sessions, sessionsError) {
+    for (const provider of this.providers) provider.updateServer(service, sessions, sessionsError);
   }
 }
 
@@ -918,7 +876,7 @@ function activate(context) {
   const statusProvider = new SidebarProvider('status');
   const offlineJobsProvider = new OfflineSidebarProvider('jobs');
   const offlineStatusProvider = new OfflineSidebarProvider('status');
-  const serverProvider = new ServerSidebarProvider();
+  const statusStatePublisher = new ClusterStatusStatePublisher(statusProvider, offlineStatusProvider);
   const monitor = new JobMonitor();
   let controller;
   const coordinator = new RefreshCoordinator(client, jobsProvider, statusProvider, monitor, {
@@ -943,17 +901,15 @@ function activate(context) {
   const refreshJobsWithFeedback = () => manualRefresh(
     'clusterWatcher.refreshingJobs', () => coordinator.refreshJobs(),
   );
-  const refreshStatusWithFeedback = () => manualRefresh(
-    'clusterWatcher.refreshingStatus', () => coordinator.refreshStatus(),
-  );
-  const refreshServerWithFeedback = () => manualRefresh(
-    'clusterWatcher.refreshingServer', () => coordinator.refreshServer(),
-  );
+  const refreshStatusWithFeedback = () => manualRefresh('clusterWatcher.refreshingStatus', async () => {
+    const [result] = await Promise.all([coordinator.refreshStatus(), coordinator.refreshServer()]);
+    return result;
+  });
   backendManager = new BackendManager(vscode, context, extensionManifest.version, {
     onWillChange: () => controller?.stopForBackendChange(),
   });
   controller = new ServiceController(
-    client, () => coordinator.refresh(), backendManager, serverProvider,
+    client, () => coordinator.refresh(), backendManager, statusStatePublisher,
     () => coordinator.serviceReachable(), setServiceAvailable,
   );
   const logProvider = new JobLogDocumentProvider(client);
@@ -964,7 +920,6 @@ function activate(context) {
     vscode.window.registerWebviewViewProvider('clusterWatcher.status', statusProvider, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.window.registerWebviewViewProvider('clusterWatcher.jobsOffline', offlineJobsProvider),
     vscode.window.registerWebviewViewProvider('clusterWatcher.statusOffline', offlineStatusProvider),
-    vscode.window.registerWebviewViewProvider('clusterWatcher.server', serverProvider, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.workspace.registerTextDocumentContentProvider('cluster-watcher-log', logProvider),
     vscode.workspace.registerTextDocumentContentProvider('cluster-watcher-script', scriptProvider),
     vscode.commands.registerCommand('clusterWatcher.startService', async () => {
@@ -976,8 +931,6 @@ function activate(context) {
     vscode.commands.registerCommand('clusterWatcher.refreshJobsBusy', refreshJobsWithFeedback),
     vscode.commands.registerCommand('clusterWatcher.refreshStatus', refreshStatusWithFeedback),
     vscode.commands.registerCommand('clusterWatcher.refreshStatusBusy', refreshStatusWithFeedback),
-    vscode.commands.registerCommand('clusterWatcher.refreshServer', refreshServerWithFeedback),
-    vscode.commands.registerCommand('clusterWatcher.refreshServerBusy', refreshServerWithFeedback),
     vscode.commands.registerCommand('clusterWatcher.openDashboard', () => vscode.env.openExternal(vscode.Uri.parse(configuration().backendUrl))),
     vscode.commands.registerCommand('clusterWatcher.archiveJob', async (key) => {
       if (!await jobsProvider.archive(String(key))) vscode.window.showWarningMessage('That job is no longer available to archive.');
@@ -995,16 +948,11 @@ function activate(context) {
     vscode.commands.registerCommand('clusterWatcher.manageBackend', async () => {
       try {
         await backendManager.manage();
-        await serverProvider.checkConfigFile(true);
       } catch (error) { reportError(error); }
     }),
     vscode.commands.registerCommand('clusterWatcher.openSettings', () => vscode.commands.executeCommand('workbench.action.openSettings', CONFIGURATION_SECTION)),
     vscode.workspace.onDidSaveTextDocument((document) => {
       void validateSavedConfig(document);
-      if (document.uri.scheme === 'file' && document.fileName.endsWith('.toml')) void serverProvider.checkConfigFile(true);
-    }),
-    vscode.window.onDidCloseTerminal((terminal) => {
-      if (terminal.name === 'Cluster Watcher Setup') void serverProvider.checkConfigFile(true);
     }),
     vscode.commands.registerCommand('clusterWatcher.cancelJob', async (cluster, jobId, name) => {
       try { await cancelJob(client, jobsProvider, coordinator, String(cluster), String(jobId), String(name || '')); }
@@ -1028,7 +976,7 @@ function activate(context) {
       if (event.affectsConfiguration(`${CONFIGURATION_SECTION}.dateFormat`)) {
         // Unchanged data is answered with 304, so redraw the pages here.
         setDateFormat(configuration().dateFormat);
-        for (const provider of [jobsProvider, statusProvider, serverProvider]) if (provider.showingData) provider.render();
+        for (const provider of [jobsProvider, statusProvider]) if (provider.showingData) provider.render();
       }
       if (event.affectsConfiguration(CONFIGURATION_SECTION)) {
         coordinator.schedule();
@@ -1043,7 +991,6 @@ function activate(context) {
   coordinator.schedule();
   void coordinator.refresh();
   const initialization = backendManager.initialize();
-  void initialization.then(() => serverProvider.checkConfigFile(true)).catch(() => {});
   if (configuration().autoStart) {
     void initialization.then(() => controller.start()).catch(reportStartError);
   } else {
@@ -1052,7 +999,6 @@ function activate(context) {
       if (await client.isClusterWatcherService()) return;
       const configured = vscode.workspace.getConfiguration(CONFIGURATION_SECTION).get('executable', 'cluster-watcher');
       await backendManager.offerFirstUse(configured);
-      await serverProvider.checkConfigFile(true);
     }).catch(reportError);
   }
 }

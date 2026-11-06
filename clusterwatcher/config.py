@@ -42,13 +42,41 @@ def load_config(path: Path) -> list[Machine]:
     for index, raw in enumerate(raw_machines, start=1):
         if not isinstance(raw, dict):
             raise ValueError(f"machine #{index} must be a TOML table")
-        missing = [key for key in ("name", "host", "username") if not isinstance(raw.get(key), str) or not raw[key].strip()]
+        missing = [key for key in ("name", "username") if not isinstance(raw.get(key), str) or not raw[key].strip()]
         if missing:
             raise ValueError(f"machine #{index} is missing a non-empty: {', '.join(missing)}")
         name = raw["name"].strip()
         if name in names:
             raise ValueError(f"machine names must be unique (duplicate: {name!r})")
         names.add(name)
+        if "hosts" in raw:
+            raise ValueError(
+                f"machine {name!r} uses obsolete hosts; use host = [\"node1\", \"node2\"]"
+            )
+        raw_host = raw.get("host")
+        if isinstance(raw_host, list):
+            if (
+                not raw_host
+                or any(
+                    not isinstance(host, str)
+                    or not host.strip()
+                    or any(character.isspace() for character in host)
+                    or "\x00" in host
+                    for host in raw_host
+                )
+            ):
+                raise ValueError(f"machine {name!r} host must be a non-empty string or list of host names")
+            hosts = tuple(host.strip() for host in raw_host)
+            if len(set(hosts)) != len(hosts):
+                raise ValueError(f"machine {name!r} host list must not contain duplicates")
+        else:
+            if not isinstance(raw_host, str) or not raw_host.strip():
+                raise ValueError(f"machine {name!r} host must be a non-empty string or list of host names")
+            if any(character.isspace() for character in raw_host) or "\x00" in raw_host:
+                raise ValueError(f"machine {name!r} has an invalid host")
+            hosts = (raw_host.strip(),)
+        if "ssh_alias" in raw:
+            raise ValueError(f"machine {name!r} uses obsolete ssh_alias; remove it")
         hidden = raw.get("hidden", False)
         if not isinstance(hidden, bool):
             raise ValueError(f"machine {name!r} has an invalid hidden value")
@@ -104,7 +132,7 @@ def load_config(path: Path) -> list[Machine]:
             machines.append(
                 Machine(
                     name=name,
-                    host=raw["host"].strip(),
+                    host=hosts[0],
                     username=raw["username"].strip(),
                     port=port,
                     identity_file=identity_file,
@@ -114,6 +142,7 @@ def load_config(path: Path) -> list[Machine]:
                     job_log_roots=job_log_roots,
                     default_partition_max_time_minutes=default_max_time,
                     partition_max_time_minutes=partition_max_times,
+                    hosts=hosts if isinstance(raw_host, list) else (),
                 )
             )
     if not machines:

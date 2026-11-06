@@ -2,17 +2,23 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, renderLoading, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderServerStatus, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
+const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, renderLoading, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
 
-test('first-collection loading views have no offline warning or start button', () => {
-  for (const title of ['My Jobs', 'Cluster Status']) {
-    const html = renderLoading(title);
-    assert.match(html, /role="status">Cluster Watcher is running\. Loading/);
-    assert.doesNotMatch(html, /service is not reachable|Start service &amp; SSH sessions|class="error"/);
-    const connecting = renderLoading(title, {}, true);
-    assert.match(connecting, /Connecting to the local Cluster Watcher service/);
-    assert.doesNotMatch(connecting, /is running/);
-  }
+test('first-collection loading views retain the Cluster Status service control', () => {
+  const jobs = renderLoading('My Jobs');
+  assert.match(jobs, /role="status">Cluster Watcher is running\. Loading jobs/);
+  assert.doesNotMatch(jobs, /class="service-summary"|class="error"/);
+
+  const status = renderLoading('Cluster Status', {}, false, { service: {
+    state: 'attached', url: 'http://127.0.0.1:8080/', pid: 42,
+  } });
+  assert.match(status, /<div class="service-summary">.*?http:\/\/127\.0\.0\.1:8080\/.*?<\/div><p class="muted" role="status">Cluster Watcher is running\. Loading cluster status/s);
+  assert.match(status, /data-command="clusterWatcher\.stopService"/);
+  assert.doesNotMatch(status, /class="error"/);
+
+  const connecting = renderLoading('Cluster Status', {}, true);
+  assert.match(connecting, /Connecting to the local Cluster Watcher service/);
+  assert.doesNotMatch(connecting, /is running/);
 });
 const { launchabilityStrip, waitColorIndex, waitEstimate } = require('../launchability');
 
@@ -118,7 +124,7 @@ test('status shows every partition detail compactly without a card disclosure', 
   const html = renderStatus({
     generated_at: '2026-09-30T15:02:00Z',
     wait_threshold_minutes: [5, 30, 60, 120],
-    clusters: [{ name: 'cluster_0', reachable: true, partitions: [partition] }],
+    clusters: [{ name: 'cluster_0', host: 'login-02.example', reachable: true, user_jobs: { running: 3, pending: 1 }, partitions: [partition] }],
   });
 
   const card = html.match(/<article class="card partition-card" style="--availability-count-width:8ch">.*?<\/article>/s)[0];
@@ -155,12 +161,32 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /querySelectorAll\('\[data-fast-tooltip\]'\)/);
   assert.doesNotMatch(html, /0 mixed/);
   assert.doesNotMatch(html, /<table/);
-  assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary>cluster_0<\/summary>/);
+  assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary><span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">cluster_0<\/span><span class="cluster-job-track" role="img" aria-label="3 running, 1 pending"/);
+  assert.match(html, /class="cluster-job-running" style="width:75%"/);
+  assert.match(html, /class="cluster-job-pending" style="width:25%"/);
+  assert.match(html, /<span class="cluster-login-host" aria-label="SSH session: login-02\.example" data-fast-tooltip="SSH session: login-02\.example">login-02\.example<\/span><\/span><\/summary>/);
+  assert.match(html, /\.cluster-job-running\{background:var\(--vscode-progressBar-background\)\}/);
+  assert.match(html, /\.cluster-job-pending\{background:var\(--vscode-editorError-foreground\)\}/);
+  assert.doesNotMatch(html, /\.cluster-group(?:\[open\])?>summary::before/);
+  assert.match(html, /\.cluster-summary\{[^}]*display:inline-flex;flex-direction:column/);
+  assert.match(html, /\.cluster-login-host\{[^}]*font-size:\.8em;font-weight:400/);
+  assert.ok(html.lastIndexOf('class="configure-clusters"') > html.lastIndexOf('class="cluster-group"'));
+  assert.match(html, /<button class="configure-clusters" data-scroll-anchor="configure-clusters" type="button" data-command="clusterWatcher\.editConfig" data-args="\[\]">configure clusters\.\.\.<\/button>/);
+  assert.match(html, /const statusAnchor = document\.querySelector\('\[data-scroll-anchor="configure-clusters"\]'\)/);
   assert.doesNotMatch(html, /## cluster_0 ##/);
   assert.doesNotMatch(html, /<body><h2>Cluster Status<\/h2>/);
   assert.equal(waitCell(partition, 1), '5m');
   assert.equal(waitCell(partition, 2), 'DENY');
   assert.equal(waitCell(partition, 16), '—');
+});
+
+test('cluster job ratio remains empty when no jobs are running or pending', () => {
+  const html = renderStatus({ clusters: [
+    { name: 'idle', reachable: true, user_jobs: { running: 0, pending: 0 }, partitions: [] },
+  ] });
+  const track = html.match(/<span class="cluster-job-track"[^>]*>.*?<\/span>/s)[0];
+  assert.match(track, /aria-label="0 running, 0 pending"/);
+  assert.doesNotMatch(track, /cluster-job-(?:running|pending)/);
 });
 
 test('matched fair-share factors have bars above GPU and node availability', () => {
@@ -241,68 +267,68 @@ test('long availability fractions keep their complete value available on hover',
   assert.match(html, /aria-label="2 of 7 free" title="2\/7 Free">2\/7 Free<\/span>/);
 });
 
-test('server status shows background ownership and per-machine login actions', () => {
-  const html = renderServerStatus({
-    service: { state: 'running', owned: true, pid: 1234, startedAt: '2026-10-13T10:00:00Z', url: 'http://127.0.0.1:8080/', recentLines: [] },
+test('Cluster Status puts the service toggle and dashboard URL before cluster cards', () => {
+  const html = renderStatus({ clusters: [
+    { name: 'cluster_0', reachable: true, partitions: [] },
+  ] }, {}, {}, { service: {
+    state: 'attached', pid: 1234, startedAt: '2026-10-13T10:00:00Z', url: 'http://127.0.0.1:8080/',
+  } });
+
+  assert.match(html, /class="service-toggle on"[^>]*data-command="clusterWatcher\.stopService"[^>]*aria-label="Stop service"/);
+  assert.match(html, /<div class="service-summary"><button class="service-toggle on"[^>]*><\/button><button class="service-url"[^>]*data-command="clusterWatcher\.openDashboard"[^>]*>http:\/\/127\.0\.0\.1:8080\/<\/button><\/div>/);
+  assert.match(html, /data-fast-tooltip="Process: 1234&#10;Started: [^"]+"/);
+  assert.ok(html.indexOf('class="service-summary"') < html.indexOf('class="cluster-group"'));
+  assert.doesNotMatch(html, /class="service-url"[^>]*href="#"/);
+
+  const stopped = renderStatus({ clusters: [] }, {}, {}, { service: { state: 'offline' } });
+  assert.match(stopped, /class="service-toggle off"[^>]*data-command="clusterWatcher\.startService"[^>]*data-fast-tooltip="Start service"/);
+  assert.match(stopped, /<div class="service-summary"><button class="service-toggle off"[^>]*><\/button><strong>Start Server<\/strong><\/div>/);
+  assert.match(stopped, /\.service-summary\{[^}]*white-space:nowrap/);
+  assert.match(stopped, /\.service-url\{[^}]*max-width:calc\(100% - 26px\)/);
+  assert.match(stopped, /\.service-toggle\{[^}]*width:22px;height:12px;margin:0/);
+
+  const starting = renderStatus({ clusters: [] }, {}, {}, { service: { state: 'starting' } });
+  assert.match(starting, /class="service-toggle on"[^>]*data-command="clusterWatcher\.stopService"[^>]* disabled/);
+  assert.match(starting, /<strong>Starting<\/strong>/);
+});
+
+test('Cluster Status replaces logged-out session details with scoped login actions', () => {
+  const html = renderStatus({ clusters: [
+    { name: 'open', host: 'old.example', reachable: true, user_jobs: { running: 2, pending: 1 }, partitions: [] },
+    { name: 'closed', host: 'b.example', reachable: false, login_required: true, error: 'Permission denied', user_jobs: { running: 9, pending: 4 }, partitions: [] },
+  ] }, {}, {}, {
+    service: {
+      state: 'attached', url: 'http://127.0.0.1:8080/', activity: 'Refreshing sessions…',
+      recentLines: [{ stream: 'stderr', text: 'diagnostic <line>' }],
+    },
+    sessionsError: 'temporary inspection error',
     sessions: { machines: [
-      { name: 'open', username: 'alice', host: 'a.example', session_open: true, control_persist_seconds: 3600, estimated_remaining_seconds: 28740 },
+      { name: 'open', username: 'alice', host: 'a.example', session_open: true, interactive_auth: true, control_persist_seconds: 3600, estimated_remaining_seconds: 28740 },
       { name: 'closed', username: 'alice', host: 'b.example', session_open: false, interactive_auth: true, credential_group: 'shared-site', error: 'No master' },
     ] },
   });
+  const summaryFor = (name) => html.match(new RegExp(`data-disclosure-key="cluster:${name}"[^>]*><summary>.*?</summary>`, 's'))[0];
+  const open = summaryFor('open');
+  const closed = summaryFor('closed');
 
-  assert.doesNotMatch(html, /Running in the background|<dt>Process<\/dt>|<dt>Started<\/dt>/);
-  assert.match(html, /data-fast-tooltip="Process: 1234&#10;Started: [^"]+"/);
-  assert.match(html, /open<\/span><span class="session-state open" aria-label="Open, about 7h 59m left" data-fast-tooltip="about 7h 59m left">Open<\/span>/);
-  assert.doesNotMatch(html, />Open · about 7h 59m left<\/span>/);
-  assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;closed&quot;,false\]">Log in<\/button>/);
-  assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;closed&quot;,true\]">Log into all machines on shared-site<\/button>/);
-  assert.match(html, /class="service-toggle on"[^>]*data-command="clusterWatcher\.stopService"[^>]*aria-label="Stop service"/);
-  assert.match(html, /<div class="service-summary"><button class="service-toggle on"[^>]*><\/button><button class="service-url"[^>]*data-command="clusterWatcher\.openDashboard"/);
-  assert.doesNotMatch(html, /class="service-setup-actions"/);
-  assert.ok(html.indexOf('class="configure-clusters"') > html.indexOf('class="session-list"'));
-  assert.match(html, /<button class="configure-clusters" data-scroll-anchor="configure-clusters" type="button" data-command="clusterWatcher\.editConfig" data-args="\[\]">configure clusters\.\.\.<\/button>/);
-  assert.doesNotMatch(html, /<a class="configure-clusters"|class="configure-clusters"[^>]*href="#"/);
-  assert.match(html, /const statusAnchor = document\.querySelector\('\[data-scroll-anchor="configure-clusters"\]'\)/);
-  assert.match(html, /anchorKey: statusAnchor\?\.dataset\.scrollAnchor/);
-  assert.match(html, /if \(restoringScroll \|\| scrollFrame\) return/);
-  assert.doesNotMatch(html, /class="service-url"[^>]*href="#"/);
-  assert.match(html, /class="muted session-target">alice@a\.example/);
-  assert.doesNotMatch(html, />Log in closed sessions<\/button>/);
-  assert.doesNotMatch(html, /terminal/);
+  assert.match(open, /class="cluster-job-track"[^>]*aria-label="2 running, 1 pending"/);
+  assert.match(open, /class="cluster-login-host" aria-label="SSH session: alice@a\.example&#10;Reusable session: about 7h 59m left"[^>]*>alice@a\.example<\/span>/);
+  assert.doesNotMatch(open, /clusterWatcher\.login/);
+  assert.match(closed, /data-command="clusterWatcher\.login" data-args="\[&quot;closed&quot;,false\]">Log in<\/button>/);
+  assert.match(closed, /data-command="clusterWatcher\.login" data-args="\[&quot;closed&quot;,true\]">Log into all machines on shared-site<\/button>/);
+  assert.doesNotMatch(closed, /cluster-job-track|cluster-login-host|alice@b\.example/);
+  assert.equal((html.match(/>Log in<\/button>/g) || []).length, 1);
+  assert.match(html, /Refreshing sessions…/);
+  assert.match(html, /Could not inspect SSH sessions: temporary inspection error/);
+  assert.match(html, /<details class="cluster-diagnostics"><summary class="muted">Recent backend output<\/summary><pre class="service-output">stderr: diagnostic &lt;line&gt;<\/pre><\/details>/);
+  assert.match(html, /\.cluster-login-actions\{display:flex;[^}]*flex-wrap:wrap/);
+  assert.doesNotMatch(html, /<title>Server Status<\/title>|class="session-row"/);
 
-  const attached = renderServerStatus({
-    service: { state: 'attached', owned: false, pid: 4321, startedAt: '2026-10-13T09:00:00Z', url: 'http://127.0.0.1:8080/' },
-    sessions: { machines: [] },
-  });
-  assert.match(attached, /<div class="service-summary"><button class="service-toggle on"[^>]*><\/button><button class="service-url"[^>]*>http:\/\/127\.0\.0\.1:8080\/<\/button>/);
-  assert.doesNotMatch(attached, /Attached to an existing service/);
-  assert.match(attached, /data-fast-tooltip="Process: 4321&#10;Started: [^"]+"/);
-  assert.match(attached, /data-command="clusterWatcher\.stopService"[^>]*data-fast-tooltip="Stop service"/);
-  assert.doesNotMatch(attached, /<dt>URL<\/dt>|Open dashboard/);
-
-  const stopped = renderServerStatus({ service: { state: 'offline', owned: false }, configExists: false, sessions: { machines: [] } });
-  assert.match(stopped, /class="service-toggle off"[^>]*data-command="clusterWatcher\.startService"[^>]*data-fast-tooltip="Start service"/);
-  assert.match(stopped, /<div class="service-summary"><button class="service-toggle off"[^>]*><\/button><strong>Start Server<\/strong><\/div>/);
-  const setup = stopped.match(/<div class="service-summary">.*?<\/div><div class="service-setup-actions">.*?<\/div>/s)[0];
-  const setupButtons = setup.slice(setup.indexOf('<div class="service-setup-actions">'));
-  assert.ok(setup.indexOf('class="service-summary"') < setup.indexOf('class="service-setup-actions"'));
-  assert.match(setupButtons, /data-command="clusterWatcher\.runSetup"/);
-  assert.doesNotMatch(setupButtons, /Start service &amp; SSH sessions|data-command="clusterWatcher\.(startService|editConfig|openSettings)"/);
-  assert.equal((setupButtons.match(/data-command=/g) || []).length, 1);
-  assert.match(setup, /Run setup wizard/);
-  assert.match(stopped, /class="configure-clusters"[^>]*data-command="clusterWatcher\.editConfig"/);
-  assert.doesNotMatch(renderServerStatus({ service: { state: 'offline' }, configExists: true }), /class="service-setup-actions"/);
-  assert.doesNotMatch(renderServerStatus({ service: { state: 'offline' } }), /class="service-setup-actions"/);
-  assert.doesNotMatch(renderServerStatus({ service: { state: 'starting' } }), /class="service-setup-actions"/);
-  assert.match(renderServerStatus({ service: { state: 'error' }, configExists: false }), /class="service-setup-actions"/);
-  assert.match(renderServerStatus({ service: { state: 'error' } }), /<strong>Start Server<\/strong>/);
-  assert.match(stopped, /\.service-summary\{[^}]*white-space:nowrap/);
-  assert.match(stopped, /\.service-summary\{[^}]*font-size:\.78em/);
-  assert.match(stopped, /\.service-url\{[^}]*max-width:calc\(100% - 26px\)/);
-  assert.match(stopped, /\.service-toggle\{[^}]*width:22px;height:12px;margin:0/);
-  assert.match(stopped, /\.session-target\{[^}]*font-size:\.68em/);
-  assert.match(stopped, /\.session-row\{[^}]*padding:4px 5px/);
-  assert.match(stopped, /\.session-actions\{display:flex;flex-wrap:wrap/);
+  const fallback = renderStatus({ clusters: [
+    { name: 'fallback', host: 'login.example', reachable: false, login_required: true },
+  ] });
+  assert.match(fallback, /data-command="clusterWatcher\.login" data-args="\[&quot;fallback&quot;,false\]">Log in<\/button>/);
+  assert.equal((fallback.match(/clusterWatcher\.login/g) || []).length, 1);
 });
 
 test('availability tooltips group restrictive Slurm states and omit zero counts', () => {
@@ -372,8 +398,9 @@ test('remembered disclosure choices override default open/closed state', () => {
   assert.match(html, /data-disclosure-key="group:archive" open>/);
   assert.match(html, /<details class="card" data-disclosure-key="[^"]+" data-job-ref="cluster_0\/7" open>/);
 
-  const status = renderStatus({ clusters: [{ name: 'cluster_0', reachable: false }] }, { 'cluster:cluster_0': false });
-  assert.match(status, /data-disclosure-key="cluster:cluster_0"><summary>cluster_0/);
+  const status = renderStatus({ clusters: [{ name: 'cluster_0', host: 'login.example', reachable: false }] }, { 'cluster:cluster_0': false });
+  assert.match(status, /data-disclosure-key="cluster:cluster_0"><summary><span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">cluster_0<\/span>/);
+  assert.match(status, /class="cluster-login-host"[^>]*>login\.example<\/span>/);
 });
 
 test('openAttribute falls back to the renderer default', () => {
@@ -565,12 +592,17 @@ test('webview buttons post allow-listed commands instead of using command URIs',
   assert.match(html, /rememberScroll\(movesJob \? button\.closest\('\[data-job-ref\]'\) : undefined\);\s+let args/);
 });
 
-test('offline job and status views point to Server Status without duplicate controls', () => {
+test('offline Cluster Status owns the service control while My Jobs points to it', () => {
   const html = renderWelcome('My Jobs', 'connect ECONNREFUSED <127.0.0.1>');
-  assert.match(html, /No service found\. Use Server Status to start it\./);
+  assert.match(html, /No service found\. Use Cluster Status to start it\./);
   assert.doesNotMatch(html, /data-command="clusterWatcher\.(?:startService|runSetup|editConfig|openSettings)"/);
   assert.match(html, /ECONNREFUSED &lt;127\.0\.0\.1&gt;/);
-  assert.doesNotMatch(renderWelcome('Cluster Status', ''), /Connection details/);
+  const status = renderWelcome('Cluster Status', '', {}, { service: { state: 'offline' } });
+  assert.doesNotMatch(status, /Connection details/);
+  assert.match(status, /class="service-toggle off"[^>]*data-command="clusterWatcher\.startService"/);
+  assert.ok(status.indexOf('class="service-summary"') < status.indexOf('class="welcome"'));
+  assert.equal((status.match(/data-command="clusterWatcher\.startService"/g) || []).length, 1);
+  assert.match(status, /class="configure-clusters"[^>]*data-command="clusterWatcher\.editConfig"/);
 });
 
 test('every card offers a compact script action for its job', () => {
@@ -815,13 +847,14 @@ test('view freshness shows only the last update with second precision', () => {
   assert.match(html, /\.view-freshness\{margin:0 0 7px;/);
 });
 
-test('a closed SSH session offers a login button on the cluster card', () => {
+test('a closed SSH session offers its login button in the cluster summary', () => {
   const html = renderStatus({ clusters: [
     { name: 'cluster_0', reachable: false, error: 'Permission denied (gssapi-with-mic,password).', login_required: true },
     { name: 'cluster_1', reachable: false, error: 'Connection timed out', login_required: false },
   ] });
-  assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;cluster_0&quot;\]"[^>]*>Log in again<\/a>/);
-  assert.equal((html.match(/Log in again<\/a>/g) || []).length, 1);
+  assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;cluster_0&quot;,false\]">Log in<\/button>/);
+  assert.equal((html.match(/>Log in<\/button>/g) || []).length, 1);
+  assert.doesNotMatch(html, /Log in again|The SSH session has closed/);
 });
 
 test('wait cells label policy refusals separately from real errors', () => {

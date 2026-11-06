@@ -16,6 +16,7 @@ from clusterwatcher.dashboard import StatusStore
 from clusterwatcher.models import ClusterStatus, Machine
 from clusterwatcher.snapshot import build_snapshot
 from clusterwatcher.ssh import ssh_command
+from clusterwatcher.ssh import select_login_machine
 from helpers import TimedTestCase
 
 
@@ -44,6 +45,27 @@ class LoginTargetTests(TimedTestCase):
     def test_unknown_names_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "unknown machine"):
             login_targets(MACHINES, ["nope"])
+
+    @patch("clusterwatcher.ssh.socket.create_connection")
+    @patch("clusterwatcher.ssh.session_status", return_value={"session_open": False})
+    def test_login_selection_skips_an_unreachable_primary_node(self, _status, connect):
+        """Probe physical nodes before prompting so a dead node consumes no OTP."""
+        connection = connect.return_value
+        connect.side_effect = [OSError("connection refused"), connection]
+        machine = Machine(
+            "viper", "viper12.example", "alice", interactive_auth=True,
+            hosts=("viper12.example", "viper13.example"),
+        )
+        with patch.dict("clusterwatcher.ssh._selected_hosts", {}, clear=True):
+            selected = select_login_machine(machine, 7)
+
+        self.assertEqual(selected.host, "viper13.example")
+        self.assertEqual(selected.candidate_hosts, ("viper13.example",))
+        self.assertEqual(
+            [call.args[0] for call in connect.call_args_list],
+            [("viper12.example", 22), ("viper13.example", 22)],
+        )
+        connection.close.assert_called_once_with()
 
     @patch("clusterwatcher.cli.establish_interactive_sessions")
     def test_run_login_reports_each_target_and_fails_on_errors(self, establish):

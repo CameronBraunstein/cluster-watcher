@@ -171,6 +171,11 @@ function commandButtonAttributes(command, args = []) {
   return `type="button" data-command="${escapeHtml(command)}" data-args="${escapeHtml(JSON.stringify(args))}"`;
 }
 
+/** Return the configuration action owned by the Cluster Status view. */
+function configureClustersButton() {
+  return `<button class="configure-clusters" data-scroll-anchor="configure-clusters" ${commandButtonAttributes('clusterWatcher.editConfig')}>configure clusters...</button>`;
+}
+
 /**
  * Capture what a job's progress bar needs, relative to ``asOf`` (the
  * payload's ``generated_at`` in milliseconds). Elapsed time is reported at
@@ -285,7 +290,7 @@ function archiveIcon() {
 function document(title, body, freshness = {}) {
   const nonce = crypto.randomBytes(16).toString('base64');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:3px 0;background:var(--vscode-sideBar-background);min-width:0}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none;min-width:0}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card-summary-title[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:0;top:calc(100% + 2px);max-width:calc(100% - 14px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open]) .card-summary-title[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{position:relative;display:flex;min-width:0}.card-summary-progress{display:flex;align-items:center;gap:5px;min-width:0}.card-summary-progress>:not(.job-id){flex:1 1 auto;min-width:0}.card-summary-progress>.job-id{flex:0 0 auto;font-size:.72em}.card:not([open]) .card-summary-progress>.job-id{display:none}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0;max-width:100%}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px;min-width:0}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta{min-width:0;white-space:normal;overflow-wrap:anywhere}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:2px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0;cursor:help}.availability-count{font-variant-numeric:tabular-nums;white-space:nowrap}.available{background:var(--vscode-testing-iconPassed)}.fast-tooltip{position:fixed;z-index:100;display:none;max-width:220px;padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));outline:1px solid #fff;border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:pre-line;pointer-events:none}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em;min-width:0}.times dt{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd{margin:0;min-width:0;white-space:normal;text-align:right}.times dd.dependency-value{overflow-wrap:anywhere}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px;min-width:0}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
+body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px;min-width:0}.cluster-summary{box-sizing:border-box;display:inline-flex;flex-direction:column;gap:2px;width:calc(100% - 16px);min-width:0;vertical-align:top}.cluster-summary-main{display:flex;align-items:center;gap:7px;min-width:0}.cluster-summary-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cluster-login-host{overflow:hidden;color:var(--vscode-descriptionForeground);font-size:.8em;font-weight:400;line-height:1.2;text-overflow:ellipsis;white-space:nowrap;cursor:help}.cluster-job-track{display:flex;flex:1 1 70px;max-width:140px;min-width:40px;height:6px;margin-left:auto;overflow:hidden;border-radius:4px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent);cursor:help}.cluster-job-running,.cluster-job-pending{display:block;height:100%}.cluster-job-running{background:var(--vscode-progressBar-background)}.cluster-job-pending{background:var(--vscode-editorError-foreground)}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:3px 0;background:var(--vscode-sideBar-background);min-width:0}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none;min-width:0}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card-summary-title[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:0;top:calc(100% + 2px);max-width:calc(100% - 14px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open]) .card-summary-title[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{position:relative;display:flex;min-width:0}.card-summary-progress{display:flex;align-items:center;gap:5px;min-width:0}.card-summary-progress>:not(.job-id){flex:1 1 auto;min-width:0}.card-summary-progress>.job-id{flex:0 0 auto;font-size:.72em}.card:not([open]) .card-summary-progress>.job-id{display:none}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0;max-width:100%}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px;min-width:0}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta{min-width:0;white-space:normal;overflow-wrap:anywhere}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:2px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0;cursor:help}.availability-count{font-variant-numeric:tabular-nums;white-space:nowrap}.available{background:var(--vscode-testing-iconPassed)}.fast-tooltip{position:fixed;z-index:100;display:none;max-width:220px;padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));outline:1px solid #fff;border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:pre-line;pointer-events:none}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em;min-width:0}.times dt{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd{margin:0;min-width:0;white-space:normal;text-align:right}.times dd.dependency-value{overflow-wrap:anywhere}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px;min-width:0}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
 .card-summary-progress>.summary-archive-action{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;padding:2px 3px;line-height:1.4}
 .card-summary-title[data-full-name]::after{outline:1px solid #fff}
 .card[open] .name{white-space:normal;overflow-wrap:anywhere}
@@ -296,7 +301,7 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 .launchability{display:flex;align-items:end;gap:2px;margin-left:auto;min-width:0}.launch-shape{display:grid;grid-template-rows:7px 9px;justify-items:center;gap:1px}.launch-count{color:var(--vscode-descriptionForeground);font-size:7px;line-height:7px}.launch-block{box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:9px;height:9px;border:1px solid color-mix(in srgb,var(--vscode-foreground) 24%,transparent);border-radius:2px;color:#fff;font-size:7px;font-weight:700;line-height:1;cursor:help}.launch-wait-0{background:#15803d}.launch-wait-1{background:#22c55e}.launch-wait-2{background:#eab308;color:#111}.launch-wait-3{background:#f97316}.launch-wait-4{background:#dc2626}.launch-blocked{background:#111}.launch-missing,.launch-pending{background:#777}.launch-unsupported{color:var(--vscode-descriptionForeground);background:repeating-linear-gradient(135deg,transparent 0 2px,color-mix(in srgb,var(--vscode-descriptionForeground) 25%,transparent) 2px 4px)}
 .job-id:hover,.job-id:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--vscode-focusBorder)}
 button.button{border:0;font:inherit;cursor:pointer}
-.service-summary{display:flex;align-items:center;gap:4px;margin:3px 0 5px;min-width:0;white-space:nowrap;font-size:.78em}.service-summary>strong{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}.service-url{box-sizing:border-box;display:block;flex:0 0 auto;max-width:calc(100% - 26px);min-width:0;margin:0;padding:0;overflow:hidden;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;text-decoration:underline;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 22px;width:22px;height:12px;margin:0;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:12px}.service-toggle:disabled{cursor:wait;opacity:.65}.session-list{display:grid;gap:3px;margin-top:5px}.session-row{min-width:0;border:1px solid var(--vscode-panel-border);border-radius:4px;padding:4px 5px}.session-row-head{display:flex;align-items:center;justify-content:space-between;gap:4px;min-width:0}.session-name{font-weight:600;font-size:.85em;min-width:0;overflow:hidden;text-overflow:ellipsis}.session-state{font-size:.68em;white-space:nowrap}.session-state.open{color:var(--vscode-testing-iconPassed)}.session-state.closed{color:var(--vscode-errorForeground)}.session-target{margin-top:1px;font-size:.68em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.session-actions{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}.session-actions>.compact-action{box-sizing:border-box;max-width:100%;padding:2px 4px;font-size:.68em;line-height:1.3;white-space:normal;overflow-wrap:anywhere;text-align:left}.service-output{max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.72em}.server-details{margin-top:10px}.server-details>summary{cursor:pointer}
+.service-summary{display:flex;align-items:center;gap:4px;margin:3px 0 5px;min-width:0;white-space:nowrap;font-size:.78em}.service-summary>strong{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}.service-url{box-sizing:border-box;display:block;flex:0 0 auto;max-width:calc(100% - 26px);min-width:0;margin:0;padding:0;overflow:hidden;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;text-decoration:underline;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 22px;width:22px;height:12px;margin:0;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:12px}.service-toggle:disabled{cursor:wait;opacity:.65}.cluster-login-actions{display:flex;flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end;gap:3px;margin-left:auto}.cluster-login-actions>.compact-action{box-sizing:border-box;max-width:100%;padding:2px 4px;font-size:.68em;line-height:1.3;white-space:normal;overflow-wrap:anywhere;text-align:left}.service-output{max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.72em}.cluster-diagnostics{margin-top:10px}.cluster-diagnostics>summary{cursor:pointer}
 .service-setup-actions{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 8px}.service-setup-actions>.button{box-sizing:border-box;max-width:100%;padding:3px 5px;font-size:.78em;white-space:normal;text-align:left}
 .configure-clusters{display:inline-block;margin-top:6px;padding:0;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;font-size:.78em;text-align:left;text-decoration:none;cursor:pointer}.configure-clusters:hover{text-decoration:underline}
 .partition-fair-share{margin-top:5px}.fair-share-title{display:block;margin-bottom:2px;color:var(--vscode-descriptionForeground);font-size:.72em}.fair-share-bars{display:grid;gap:4px}.fair-share-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,max-content);align-items:center;column-gap:2px;min-width:0}.fair-share-track{box-sizing:border-box;position:relative;display:block;width:100%;height:6px;overflow:visible;border-radius:4px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed));cursor:help}.fair-share-marker{position:absolute;top:-3px;width:2px;height:12px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.fair-share-label{color:var(--vscode-foreground);font-size:.7em;font-variant-numeric:tabular-nums;white-space:nowrap}.fair-share-track.unavailable{background:color-mix(in srgb,var(--vscode-foreground) 10%,transparent)}
@@ -481,43 +486,8 @@ function renderMessage(title, message, action = '', freshness = {}) {
   return document(title, `<p class="error">${escapeHtml(message)}</p>${action}`, freshness);
 }
 
-/** Render startup progress without suggesting that the service is offline. */
-function renderLoading(title, freshness = {}, connecting = false) {
-  const subject = title === 'My Jobs' ? 'jobs' : 'cluster status';
-  const message = connecting
-    ? `Connecting to the local Cluster Watcher service to load ${subject}…`
-    : `Cluster Watcher is running. Loading ${subject}…`;
-  return document(title, `<p class="muted" role="status">${message}</p>`, freshness);
-}
-
-/**
- * Render the view shown when the service is reachable but was started without
- * ``--jobs-api``: why My Jobs is empty, and the command that fixes it.
- */
-function renderJobsApiDisabled(title, command, freshness = {}) {
-  const body = `<div class="welcome"><p>The Cluster Watcher service is running, but it was started without <code>--jobs-api</code>, so your jobs cannot be shown. Cluster Status still works.</p>`
-    + `<p>Stop that service (Ctrl-C in its terminal), then start it with:</p><pre class="command-line">${escapeHtml(command)}</pre>`
-    + `<p class="actions"><a class="button" role="button" ${commandAttributes('clusterWatcher.copyServiceCommand')}>Copy restart command</a>`
-    + `<a class="button secondary" role="button" ${commandAttributes('clusterWatcher.refresh')}>Retry</a></p>`
-    + `<p class="muted">Or close it and use the <b>Server Status</b> toggle, which starts the service with the jobs API enabled.</p></div>`;
-  return document(title, body, freshness);
-}
-
-/**
- * Render a compact offline notice in My Jobs or Cluster Status. Service
- * startup and setup controls live in Server Status; ``detail`` remains
- * available in a collapsed diagnostic section.
- */
-function renderWelcome(title, detail, freshness = {}) {
-  const body = `<div class="welcome"><p class="muted" role="status">No service found. Use Server Status to start it.</p>`
-    + (detail ? `<details class="welcome-detail"><summary class="muted">Connection details</summary><p class="error">${escapeHtml(detail)}</p></details>` : '')
-    + '</div>';
-  return document(title, body, freshness);
-}
-
-/** Render service/session status plus configuration actions below the toggle and cards. */
-function renderServerStatus(payload = {}, freshness = {}) {
-  const service = payload.service || {};
+/** Render the shared service toggle and dashboard URL shown atop Cluster Status. */
+function serviceSummary(service = {}) {
   const state = String(service.state || 'offline').toLowerCase();
   const labels = {
     starting: 'Starting', authenticating: 'Waiting for credentials', stopping: 'Stopping',
@@ -536,45 +506,65 @@ function renderServerStatus(payload = {}, freshness = {}) {
     : '';
   const summaryLabel = serviceOn ? (labels[state] || '') : 'Start Server';
   const summaryText = `${summaryLabel ? `<strong>${escapeHtml(summaryLabel)}</strong>` : ''}${linkedUrl}`;
-  const serviceSummary = `<div class="service-summary">${toggle}${summaryText}</div>`;
-  const setupActions = ['offline', 'error'].includes(state) && payload.configExists === false
-    ? `<div class="service-setup-actions"><a class="button secondary" role="button" ${commandAttributes('clusterWatcher.runSetup')}>Run setup wizard</a></div>`
-    : '';
+  return `<div class="service-summary">${toggle}${summaryText}</div>`;
+}
 
-  const machines = (payload.sessions?.machines || []).map((machine) => {
-    const open = Boolean(machine.session_open);
-    let remaining = '';
-    if (open && machine.control_persist_seconds == null) remaining = 'no idle limit';
-    else if (open && machine.estimated_remaining_seconds != null) remaining = `about ${formatDuration(machine.estimated_remaining_seconds)} left`;
-    else if (open) remaining = 'remaining time unknown';
-    const remainingAttributes = open
-      ? ` aria-label="Open, ${escapeHtml(remaining)}" data-fast-tooltip="${escapeHtml(remaining)}"`
-      : '';
-    let login = '';
-    if (!open && machine.interactive_auth) {
-      const buttons = [
-        `<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.login', [String(machine.name), false])}>Log in</button>`,
-      ];
-      if (machine.credential_group) {
-        buttons.push(`<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.login', [String(machine.name), true])}>Log into all machines on ${escapeHtml(machine.credential_group)}</button>`);
-      }
-      login = `<div class="session-actions">${buttons.join('')}</div>`;
-    }
-    const error = !open && machine.error ? `<div class="muted">${escapeHtml(machine.error)}</div>` : '';
-    return `<div class="session-row"><div class="session-row-head"><span class="session-name">${escapeHtml(machine.name)}</span><span class="session-state ${open ? 'open' : 'closed'}"${remainingAttributes}>${open ? 'Open' : 'Closed'}</span></div><div class="muted session-target">${escapeHtml(machine.username)}@${escapeHtml(machine.host)}</div>${error}${login}</div>`;
-  }).join('');
-  const sessionError = payload.sessionsError ? `<p class="error">Could not inspect SSH sessions: ${escapeHtml(payload.sessionsError)}</p>` : '';
+/** Render current service/session errors without duplicating cluster cards. */
+function serverNotices(server = {}) {
+  const service = server.service || {};
+  const activity = service.activity ? `<p class="muted">${escapeHtml(service.activity)}</p>` : '';
   const error = service.error ? `<p class="error">${escapeHtml(service.error)}</p>` : '';
-  const output = (service.recentLines || []).map((line) => `${line.stream === 'stderr' ? 'stderr: ' : ''}${line.text}`).join('\n');
-  const diagnostics = output
-    ? `<details class="server-details"><summary class="muted">Recent backend output</summary><pre class="service-output">${escapeHtml(output)}</pre></details>`
+  const sessionsError = server.sessionsError
+    ? `<p class="error">Could not inspect SSH sessions: ${escapeHtml(server.sessionsError)}</p>` : '';
+  return activity + error + sessionsError;
+}
+
+/** Render the bounded backend-output diagnostic formerly owned by Server Status. */
+function backendDiagnostics(service = {}) {
+  const output = (service.recentLines || [])
+    .map((line) => `${line.stream === 'stderr' ? 'stderr: ' : ''}${line.text}`).join('\n');
+  return output
+    ? `<details class="cluster-diagnostics"><summary class="muted">Recent backend output</summary><pre class="service-output">${escapeHtml(output)}</pre></details>`
     : '';
-  const body = serviceSummary + setupActions
-    + (service.activity ? `<p class="muted">${escapeHtml(service.activity)}</p>` : '')
-    + error + sessionError
-    + `<div class="session-list">${machines || '<p class="muted">No session inventory is available yet.</p>'}</div>`
-    + `<button class="configure-clusters" data-scroll-anchor="configure-clusters" ${commandButtonAttributes('clusterWatcher.editConfig')}>configure clusters...</button>${diagnostics}`;
-  return document('Server Status', body, freshness);
+}
+
+/** Render startup progress without suggesting that the service is offline. */
+function renderLoading(title, freshness = {}, connecting = false, server = {}) {
+  const subject = title === 'My Jobs' ? 'jobs' : 'cluster status';
+  const message = connecting
+    ? `Connecting to the local Cluster Watcher service to load ${subject}…`
+    : `Cluster Watcher is running. Loading ${subject}…`;
+  const controls = title === 'Cluster Status'
+    ? serviceSummary(server.service) + serverNotices(server) + backendDiagnostics(server.service) : '';
+  return document(title, `${controls}<p class="muted" role="status">${message}</p>`, freshness);
+}
+
+/**
+ * Render the view shown when the service is reachable but was started without
+ * ``--jobs-api``: why My Jobs is empty, and the command that fixes it.
+ */
+function renderJobsApiDisabled(title, command, freshness = {}) {
+  const body = `<div class="welcome"><p>The Cluster Watcher service is running, but it was started without <code>--jobs-api</code>, so your jobs cannot be shown. Cluster Status still works.</p>`
+    + `<p>Stop that service (Ctrl-C in its terminal), then start it with:</p><pre class="command-line">${escapeHtml(command)}</pre>`
+    + `<p class="actions"><a class="button" role="button" ${commandAttributes('clusterWatcher.copyServiceCommand')}>Copy restart command</a>`
+    + `<a class="button secondary" role="button" ${commandAttributes('clusterWatcher.refresh')}>Retry</a></p>`
+    + `<p class="muted">Or close it and use the <b>Cluster Status</b> toggle, which starts the service with the jobs API enabled.</p></div>`;
+  return document(title, body, freshness);
+}
+
+/**
+ * Render a compact offline notice in My Jobs or Cluster Status. Service
+ * startup lives atop Cluster Status; ``detail`` remains available in a
+ * collapsed diagnostic section.
+ */
+function renderWelcome(title, detail, freshness = {}, server = {}) {
+  const controls = title === 'Cluster Status'
+    ? serviceSummary(server.service) + serverNotices(server) + backendDiagnostics(server.service) : '';
+  const guidance = title === 'Cluster Status' ? 'No service found.' : 'No service found. Use Cluster Status to start it.';
+  const body = `${controls}<div class="welcome"><p class="muted" role="status">${guidance}</p>`
+    + (detail ? `<details class="welcome-detail"><summary class="muted">Connection details</summary><p class="error">${escapeHtml(detail)}</p></details>` : '')
+    + `</div>${title === 'Cluster Status' ? configureClustersButton() : ''}`;
+  return document(title, body, freshness);
 }
 
 /**
@@ -769,15 +759,6 @@ function compactGpuName(value) {
 }
 
 /**
- * Offer to re-open a cluster's closed SSH session. The login also covers
- * other closed clusters that share its password (credential group).
- */
-function loginPrompt(cluster) {
-  if (!cluster.login_required) return '';
-  return `<p class="muted">The SSH session has closed.</p><div class="actions"><a class="button" ${commandAttributes('clusterWatcher.login', [String(cluster.name)])} title="Prompts securely in VS Code. Closed clusters that share this password are included, so it is asked for once; each cluster asks for its own one-time code.">Log in again</a></div>`;
-}
-
-/**
  * Return the concise availability category for one Slurm node state.
  * Restrictive modifiers take precedence over the base state because an
  * ``IDLE+DRAIN`` node is physically idle but unavailable to new jobs.
@@ -959,31 +940,93 @@ function partitionFairShare(entries, error = null) {
   return `<div class="partition-fair-share"><span class="fair-share-title">FairShare:</span><div class="fair-share-bars">${bars || unavailable}</div></div>`;
 }
 
+/** Render the current user's running/pending ratio in a cluster summary. */
+function clusterJobRatio(counts = {}) {
+  const count = (value) => Number.isFinite(Number(value)) ? Math.max(0, Math.floor(Number(value))) : 0;
+  const running = count(counts.running);
+  const pending = count(counts.pending);
+  const total = running + pending;
+  const runningPercent = total ? running / total * 100 : 0;
+  const pendingPercent = total ? pending / total * 100 : 0;
+  const label = `${running} running, ${pending} pending`;
+  const segments = total
+    ? `<span class="cluster-job-running" style="width:${runningPercent}%"></span><span class="cluster-job-pending" style="width:${pendingPercent}%"></span>`
+    : '';
+  return `<span class="cluster-job-track" role="img" aria-label="${escapeHtml(label)}" data-fast-tooltip="${escapeHtml(label)}">${segments}</span>`;
+}
+
+/** Return whether an interactive machine currently lacks its reusable SSH session. */
+function clusterLoggedOut(cluster, session) {
+  if (session) return Boolean(session.interactive_auth && !session.session_open);
+  return Boolean(cluster.login_required);
+}
+
+/** Render scoped authentication actions for one logged-out cluster. */
+function clusterLoginActions(cluster, session) {
+  if (!clusterLoggedOut(cluster, session)) return '';
+  const machine = String(session?.name || cluster.name);
+  const buttons = [
+    `<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.login', [machine, false])}>Log in</button>`,
+  ];
+  if (session?.credential_group) {
+    buttons.push(`<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.login', [machine, true])}>Log into all machines on ${escapeHtml(session.credential_group)}</button>`);
+  }
+  return `<span class="cluster-login-actions">${buttons.join('')}</span>`;
+}
+
+/** Render one cluster heading with active-session details or login actions. */
+function clusterSummary(cluster, session) {
+  const clusterName = escapeHtml(cluster.name);
+  const loggedOut = clusterLoggedOut(cluster, session);
+  const host = String(session?.host || cluster.host || '').trim();
+  const username = String(session?.username || '').trim();
+  const endpoint = username && host ? `${username}@${host}` : host;
+  let remaining = '';
+  if (session?.session_open && session.control_persist_seconds == null) remaining = 'no idle limit';
+  else if (session?.session_open && session.estimated_remaining_seconds != null) remaining = `about ${formatDuration(session.estimated_remaining_seconds)} left`;
+  else if (session?.session_open) remaining = 'remaining time unknown';
+  const hostLabel = endpoint
+    ? `SSH session: ${endpoint}${remaining ? `\nReusable session: ${remaining}` : ''}` : '';
+  const hostTooltip = escapeHtml(hostLabel).replace(/\n/g, '&#10;');
+  const loginHost = host
+    ? `<span class="cluster-login-host" aria-label="${hostTooltip}" data-fast-tooltip="${hostTooltip}">${escapeHtml(endpoint)}</span>`
+    : '';
+  const status = loggedOut ? clusterLoginActions(cluster, session) : clusterJobRatio(cluster.user_jobs);
+  return `<span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">${clusterName}</span>${status}</span>${loggedOut ? '' : loginHost}</span>`;
+}
+
 /**
  * Render the stable availability snapshot as one collapsible group per
  * cluster holding permanently expanded compact partition cards.
- * `disclosures` maps cluster disclosure keys to remembered choices.
+ * `disclosures` maps cluster disclosure keys to remembered choices. ``server``
+ * supplies lifecycle diagnostics and the reusable-session inventory.
  */
-function renderStatus(payload, disclosures = {}, freshness = {}) {
+function renderStatus(payload, disclosures = {}, freshness = {}, server = {}) {
   const asOf = Date.parse(payload.generated_at || '') || Date.now();
   const thresholds = payload.wait_threshold_minutes || DEFAULT_WAIT_THRESHOLDS_MINUTES;
+  const sessions = new Map((server.sessions?.machines || [])
+    .map((session) => [String(session.name), session]));
   const clusters = [];
   for (const cluster of payload.clusters || []) {
-    const clusterName = escapeHtml(cluster.name);
+    const session = sessions.get(String(cluster.name));
+    const summary = clusterSummary(cluster, session);
     const rawKey = `cluster:${cluster.name}`;
     const disclosureKey = escapeHtml(rawKey);
     const open = openAttribute(disclosures, rawKey, true);
     if (!cluster.reachable) {
-      clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary><p class="error">${escapeHtml(cluster.error || 'Cluster is unreachable')}</p>${loginPrompt(cluster)}</details>`);
+      clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${summary}</summary><p class="error">${escapeHtml(cluster.error || 'Cluster is unreachable')}</p></details>`);
       continue;
     }
     // No probe round has finished for this cluster yet (they start with the service).
     const pending = !cluster.wait_estimates_updated_at;
     const partitions = [...(cluster.partitions || [])].sort((left, right) => (Number(left.rank) || 9999) - (Number(right.rank) || 9999) || String(left.name).localeCompare(String(right.name)));
     const cards = partitions.map((partition) => partitionCard(partition, pending, asOf, thresholds, cluster.fair_share?.mapping_error || cluster.fair_share?.error)).join('');
-    clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${clusterName}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(cluster.resource_error)}</p>` : ''}${cards}</details>`);
+    clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${summary}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(cluster.resource_error)}</p>` : ''}${cards}</details>`);
   }
-  return document('Cluster Status', clusters.join('') || '<p>No clusters returned.</p>', freshness);
+  const content = clusters.join('') || '<p>No clusters returned.</p>';
+  const body = serviceSummary(server.service) + serverNotices(server) + content
+    + configureClustersButton() + backendDiagnostics(server.service);
+  return document('Cluster Status', body, freshness);
 }
 
-module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, isFailureGroup, jobGroup, jobRef, launchabilityStrip, openAttribute, parseDependency, relativeJobPriority, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderLoading, renderMessage, renderServerStatus, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };
+module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, isFailureGroup, jobGroup, jobRef, launchabilityStrip, openAttribute, parseDependency, relativeJobPriority, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderLoading, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };

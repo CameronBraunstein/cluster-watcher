@@ -48,7 +48,8 @@ class RemoteCommandService:
             raise SessionUnavailableError(
                 f"SSH session for {machine_name} is not open: {status['error']}"
             )
-        return machine
+        host = status.get("host")
+        return machine.for_host(str(host)) if host else machine
 
     def execute(
         self,
@@ -73,10 +74,14 @@ class RemoteCommandService:
             raise UnknownMachineError(f"unknown machine: {machine_name}")
         with lock:
             machine = self._open_machine(machine_name)
+            configured_machine = self.machines[machine_name]
             started_at = datetime.now(timezone.utc)
             result = run_remote_command(machine, timeout_seconds, command, MAX_OUTPUT_BYTES)
             finished_at = datetime.now(timezone.utc)
             after = session_status(machine, self.ssh_timeout)
+            after.update({
+                "hosts": list(configured_machine.candidate_hosts),
+            })
 
         payload = asdict(result)
         payload["exit_code"] = payload.pop("returncode")

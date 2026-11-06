@@ -139,6 +139,7 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
     'cluster-watcher',
   );
   const views = new Map(manifest.contributes.views.clusterWatcher.map((view) => [view.id, view]));
+  assert.equal(views.size, 4);
   for (const kind of ['jobs', 'status']) {
     assert.equal(views.get(`clusterWatcher.${kind}`).when, 'clusterWatcher.serviceAvailable');
     assert.deepEqual(
@@ -153,14 +154,11 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
     { command: 'clusterWatcher.refreshJobsBusy', when: 'view == clusterWatcher.jobs && clusterWatcher.refreshingJobs', group: 'navigation@1' },
     { command: 'clusterWatcher.refreshStatus', when: 'view == clusterWatcher.status && !clusterWatcher.refreshingStatus', group: 'navigation@1' },
     { command: 'clusterWatcher.refreshStatusBusy', when: 'view == clusterWatcher.status && clusterWatcher.refreshingStatus', group: 'navigation@1' },
-    { command: 'clusterWatcher.refreshServer', when: 'view == clusterWatcher.server && !clusterWatcher.refreshingServer', group: 'navigation@1' },
-    { command: 'clusterWatcher.refreshServerBusy', when: 'view == clusterWatcher.server && clusterWatcher.refreshingServer', group: 'navigation@1' },
-    { command: 'clusterWatcher.runSetup', when: 'view == clusterWatcher.server', group: '2_configuration@1' },
+    { command: 'clusterWatcher.runSetup', when: 'view == clusterWatcher.status || view == clusterWatcher.statusOffline', group: '2_configuration@1' },
   ]);
   assert.deepEqual(manifest.contributes.menus.commandPalette, [
     { command: 'clusterWatcher.refreshJobsBusy', when: 'false' },
     { command: 'clusterWatcher.refreshStatusBusy', when: 'false' },
-    { command: 'clusterWatcher.refreshServerBusy', when: 'false' },
   ]);
   assert.match(manifest.contributes.menus['editor/title'][0].when, /cluster-watcher-log/);
   const commands = new Map(manifest.contributes.commands.map((command) => [command.command, command]));
@@ -169,22 +167,24 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   assert.equal(commands.get('clusterWatcher.refreshJobsBusy').icon, '$(sync~spin)');
   assert.equal(commands.get('clusterWatcher.refreshStatus').icon, '$(refresh)');
   assert.equal(commands.get('clusterWatcher.refreshStatusBusy').icon, '$(sync~spin)');
-  assert.equal(commands.get('clusterWatcher.refreshServer').icon, '$(refresh)');
-  assert.equal(commands.get('clusterWatcher.refreshServerBusy').icon, '$(sync~spin)');
+  assert.equal(commands.has('clusterWatcher.refreshServer'), false);
+  assert.equal(commands.has('clusterWatcher.refreshServerBusy'), false);
   assert.equal(commands.get('clusterWatcher.startService').icon, '$(play)');
   assert.equal(commands.get('clusterWatcher.stopService').title, 'Cluster Watcher: Stop Service');
   const extensionSource = readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   assert.match(extensionSource, /this\.view\.description = undefined/);
-  assert.match(extensionSource, /renderStatus\(this\.payload, this\.disclosures, this\.freshness\(\)\)/);
-  assert.match(extensionSource, /renderServerStatus/);
+  assert.match(extensionSource, /renderStatus\(this\.payload, this\.disclosures, this\.freshness\(\), this\.server\)/);
+  assert.doesNotMatch(extensionSource, /renderServerStatus|ServerSidebarProvider|clusterWatcher\.server/);
+  assert.match(extensionSource, /new ClusterStatusStatePublisher\(statusProvider, offlineStatusProvider\)/);
   assert.match(extensionSource, /registerWebviewViewProvider\('clusterWatcher\.jobsOffline', offlineJobsProvider\)/);
   assert.match(extensionSource, /registerWebviewViewProvider\('clusterWatcher\.statusOffline', offlineStatusProvider\)/);
   assert.match(extensionSource, /setContext', 'clusterWatcher\.serviceAvailable', available/);
   assert.match(extensionSource, /view\.onDidDispose\(\(\) => \{ if \(this\.view === view\) this\.view = undefined; \}\)/);
   assert.match(extensionSource, /coordinator\.refreshJobs\(\)/);
   assert.match(extensionSource, /coordinator\.refreshStatus\(\)/);
+  assert.match(extensionSource, /Promise\.all\(\[coordinator\.refreshStatus\(\), coordinator\.refreshServer\(\)\]\)/);
   assert.match(extensionSource, /if \(!wasReachable && \['running', 'attached'\]\.includes\(this\.lifecycle\.state\)\) this\.onReachable\(\)/);
-  assert.match(extensionSource, /serverProvider,\s*\(\) => coordinator\.serviceReachable\(\), setServiceAvailable/);
+  assert.match(extensionSource, /statusStatePublisher,\s*\(\) => coordinator\.serviceReachable\(\), setServiceAvailable/);
   assert.match(extensionSource, /client\.post\('\/api\/v1\/shutdown', \{\}, 5000\)/);
   assert.match(extensionSource, /this\.client\.serviceInfo\(\)/);
   assert.match(extensionSource, /this\.client\.sessionInfo\(\)/);
@@ -237,8 +237,8 @@ test('manifest declares license, icon, new settings, and no redundant activation
     assert.ok(commands.includes(command), command);
   }
   assert.ok(commands.includes('clusterWatcher.manageBackend'));
-  assert.ok(commands.includes('clusterWatcher.refreshServer'));
-  assert.equal(manifest.contributes.views.clusterWatcher.at(-1).id, 'clusterWatcher.server');
+  assert.ok(!commands.includes('clusterWatcher.refreshServer'));
+  assert.ok(!manifest.contributes.views.clusterWatcher.some((view) => view.id === 'clusterWatcher.server'));
   assert.equal(manifest.capabilities.untrustedWorkspaces.supported, false);
   assert.match(manifest.scripts.package, /vsce package --no-dependencies/);
   assert.match(manifest.scripts.publish, /vsce publish --no-dependencies/);
@@ -263,7 +263,7 @@ test('login is allowlisted and dispatched through the background controller', ()
   const commands = manifest.contributes.commands.map((command) => command.command);
   assert.ok(commands.includes('clusterWatcher.login'));
   const extensionSource = readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-  assert.match(extensionSource, /'clusterWatcher\.refreshServer', 'clusterWatcher\.login'/);
+  assert.match(extensionSource, /'clusterWatcher\.refresh', 'clusterWatcher\.login'/);
   assert.match(extensionSource, /controller\.login\(machine, includeCredentialGroup\)/);
   assert.doesNotMatch(extensionSource, /createTerminal\([^)]*Login/);
 });

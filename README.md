@@ -279,6 +279,7 @@ username = "alice"
 
 | Setting | Purpose |
 | --- | --- |
+| `host` | One SSH host string, or an ordered array of physical login nodes for automatic selection and failover. |
 | `port`, `identity_file` | Standard SSH options. |
 | `hidden = true` | Keep the entry but ignore the machine everywhere: no login, polling, listing, dashboard, or API. At least one machine must stay visible. |
 | `default_partition_max_time_minutes`, `[machine.partition_max_time_minutes]` | Cap wait-probe runtimes (see [Estimated queue waits](#estimated-queue-waits)). |
@@ -300,6 +301,34 @@ default_partition_max_time_minutes = 1440
 [machine.partition_max_time_minutes]
 gpudev = 15
 ```
+
+### Multiple login nodes
+
+Set `host` to an array instead of a string when several physical login nodes
+serve the same cluster:
+
+```toml
+[[machine]]
+name = "viper"
+host = [
+    "viper12i.mpcdf.mpg.de",
+    "viper13i.mpcdf.mpg.de",
+]
+username = "cbraunst"
+interactive_auth = true
+control_persist = "8h"
+```
+
+This is native Cluster Watcher routing: its routing code does not parse,
+generate, or modify `~/.ssh/config`. The normal SSH client may still apply an
+existing SSH config. An
+already-open session is reused first. Otherwise interactive login selects the
+first node whose configured SSH port is reachable. Read-only status, job, log,
+and wait-probe calls try the sticky successful node first and fail over on an
+SSH transport failure. Remote `exec`, `shell`, job submission, and cancellation
+are not replayed on another node, because repeating arbitrary or mutating
+commands could execute them twice. Cluster Status shows the physical login
+node used by the current session.
 
 `job_log_roots` only limits caller-supplied `path` values for the personal log
 API; logs found through Slurm do not need it. Paths are canonicalized on the
@@ -382,19 +411,18 @@ cluster-watcher serve --jobs-api
 
 ### VS Code sidebar
 
-The extension adds a Cluster Watcher icon to the Activity Bar with three views.
+The extension adds a Cluster Watcher icon to the Activity Bar with two views.
 It is a thin client for the service above and has no SSH or Slurm code of its
 own.
 
 **Getting started.** If no service is found, **My Jobs** and **Cluster Status**
-switch to collapsed, compact offline placeholders. Expand either heading for a
-short notice; the startup controls are not duplicated there. Immediately below
-the off switch in **Server Status**, **Start Server** tells you that the switch
-starts the service. **Run setup wizard** appears below it only when the selected
-`clusters.toml` does not exist. The **configure clusters...** link below the
+switch to collapsed, compact offline placeholders. Expand **Cluster Status** to
+use its always-visible server toggle; **Start Server** beside the off switch
+explains its action. **My Jobs** points to that control instead of duplicating
+it. **Run setup wizard** remains in the **Cluster Status** title menu. The
+**configure clusters...** link below the
 cluster cards opens that file; configuration and settings commands remain
-available from VS Code's Command Palette. The wizard is always available from
-the Server Status title menu.
+available from VS Code's Command Palette.
 The placeholders disappear when the service responds, and the live job and
 cluster views return. On Linux and macOS, **Start Server** launches
 `serve --jobs-api --skip-login --no-browser` in a detached `tmux` session on
@@ -520,35 +548,41 @@ so their right edges line up in a roomy sidebar. On a tight sidebar, a longer
 fraction takes space from only its own bar. At very narrow widths, an
 abbreviated fraction reveals its complete value on hover.
 
-If a cluster's SSH session closes, its group shows **Log in again**, which
-runs `cluster-watcher login <cluster>` in the background and presents any
-password/OTP requests as masked VS Code input boxes.
+If a cluster's interactive SSH session closes, its summary replaces both the
+job-ratio bar and SSH endpoint with **Log in**. A cluster in a
+`credential_group` also shows **Log into all machines on `<group>`**. The first
+action targets only that cluster; the second reuses the shared password for
+all closed group members. Password/OTP requests appear as masked VS Code input
+boxes.
 
-#### Server Status
+Each cluster's always-visible summary line includes an active-job ratio bar:
+running jobs fill it in blue and pending jobs in red. Hover shows the exact
+counts, and the track stays empty when neither kind exists. The **configure
+clusters...** link at the end of Cluster Status opens the selected
+`clusters.toml`; if it is missing, the extension offers the setup wizard. Each
+summary shows the active physical SSH login node beneath the cluster name and
+job-ratio bar, which is useful when a configured login-node pool fails over.
+Cluster disclosures use the browser's same native marker as the My Jobs groups,
+so their triangles have exactly the same size.
+At the top of the view, the service toggle and linked local dashboard URL remain
+available while cluster data is loading and while the backend is offline.
 
-The third view shows whether the service is starting, attached to a running
-process, or stopped. Its compact first
-line puts a small start/stop toggle on the left. Both the control and text are
-sized to preserve the complete local dashboard URL at the sidebar's minimum
-width. Both tmux and independently started services show only the dashboard URL,
-without a redundant status label. The URL opens the dashboard through a button
-styled as a link, avoiding a second `#` link-target tooltip; its single hover
-text gives the service process ID and start time. The
-green/on toggle says **Stop service** on hover, and the gray/off toggle says
-**Start service** and has **Start Server** beside it. The view also includes a
-bounded recent login diagnostic tail and
-every configured machine's reusable SSH-session state and approximate remaining
-idle lifetime. Machine cards use compact spacing and truncate the smaller SSH
-login address when necessary, so their status and login controls remain within
-the minimum-width sidebar. An open card shows only **Open**; hover that label for
-the approximate remaining reusable-session lifetime. A closed interactive
-machine has **Log in** on its card. If it belongs to a `credential_group`, the
-card also has **Log into all machines on `<group>`**; individual login uses the
-new `cluster-watcher login MACHINE --only` mode. There is no separate global
-login control because the machine cards provide the relevant scoped actions.
-Below the machine cards, **configure clusters...** opens the selected
-`clusters.toml` in an editor without moving the Server Status scroll position;
-if the file does not exist, the extension offers the setup wizard instead.
+#### Integrated service and SSH status
+
+The service control now lives at the top of **Cluster Status**. Its compact line
+puts a small start/stop toggle on the left and preserves the linked local
+dashboard URL at the sidebar's minimum width. Both tmux and independently
+started services show only the dashboard URL, without a redundant status label.
+Hovering the URL shows the service process ID and start time. The green/on
+toggle says **Stop service** on hover; the gray/off toggle says **Start service**
+and has **Start Server** beside it.
+
+Cluster Status also owns the bounded recent login diagnostic tail and reusable
+SSH-session state; there is no separate Server Status view. A logged-in cluster
+shows `username@host` below its name and job bar. Hover it for the approximate
+remaining reusable-session lifetime. A logged-out interactive cluster shows
+the scoped login actions described above instead. Its **Refresh** action checks
+the capacity snapshot, service process, and SSH-session inventory together.
 Stopping an attached service
 requires confirmation and warns that other connected clients will be
 disconnected. The managed process stops with the extension host; its OpenSSH
@@ -717,9 +751,11 @@ Use `--help` on either command for interval and SSH-timeout options.
 
 ### Shared SSH sessions
 
-`serve` keeps one authenticated OpenSSH connection open per cluster. Another
-terminal on the same machine, as the same user, can use it without typing
-the password or OTP again:
+`serve` keeps one authenticated OpenSSH connection open per cluster. For a
+multi-node machine, that connection belongs to the currently selected physical
+login node and later processes discover it by checking the configured pool.
+Another terminal on the same machine, as the same user, can use it without
+typing the password or OTP again:
 
 ```bash
 cluster-watcher sessions                          # which sessions are open, and for how long
@@ -1038,7 +1074,9 @@ compatibility.
 
 Each cluster has its `name` and `host`, `reachable`,
 `resource_data_complete`, collection errors, unique cluster-wide resource
-totals, `wait_estimates_updated_at`, and every known partition. `scheduling`
+totals, `wait_estimates_updated_at`, and every known partition. `user_jobs`
+contains current `running` and `pending` counts for compact status clients.
+`scheduling`
 holds `scheduler_type`, `priority_type`, `priority_weight_partition`, and
 `priority_flags` when Slurm exposes them (otherwise it is empty). `error` means
 the cluster could not be queried; `resource_error` means partitions were read
@@ -1077,6 +1115,7 @@ are `null` and `error` explains why.
       "host": "slurm-submit.example",
       "reachable": true,
       "resource_data_complete": true,
+      "user_jobs": {"running": 2, "pending": 1},
       "error": null,
       "resource_error": null,
       "wait_estimates_updated_at": "2026-09-22T09:59:00+00:00",
@@ -1253,7 +1292,8 @@ curl --fail-with-body --silent -H 'Content-Type: application/json' \
 
 `/api/v1/sessions` is read-only, available without `--command-api`, restricted
 to loopback clients, and cached for 30 seconds. It lists every visible machine
-with `name`, `host`, `username`, `interactive_auth`, `credential_group`,
+with `name`, active physical `host`, configured `hosts`, `username`,
+`interactive_auth`, `credential_group`,
 `available` (a live connection verified with `ssh -O check`),
 `session_open`, `pid`, `control_persist_seconds`, `last_activity_at`,
 `estimated_remaining_seconds` (approximate, or `null`), and `error`. It never
@@ -1465,7 +1505,7 @@ personal `clusters.toml`.
 
 The extension integration test downloads VS Code into `vscode/.vscode-test/`
 and checks that the extension activates, registers every command, and opens
-all three views without a service. Headless Linux needs Xvfb:
+both views without a service. Headless Linux needs Xvfb:
 
 ```bash
 cd vscode
@@ -1499,8 +1539,8 @@ Development Host. There:
    Development installs are standalone commands; use `./uninstall.sh` to
    remove one, rather than the extension's managed-backend uninstall action.
 2. Open the Cluster Watcher view and run **Start Service & SSH Sessions**;
-   complete MFA in the masked VS Code prompts and check that all three views
-   refresh. Confirm **Server Status** reports the persistent tmux service and
+   complete MFA in the masked VS Code prompts and check that both views
+   refresh. Confirm **Cluster Status** reports the persistent tmux service and
    SSH sessions without opening a terminal. Install `tmux` on the extension
    host first.
    The extension checks `cluster-watcher capabilities` before starting a

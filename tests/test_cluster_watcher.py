@@ -597,6 +597,39 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertIn("-p", command)
         self.assertEqual(command[-2:], ["alice@login.alpha", "sinfo"])
 
+    def test_host_accepts_a_native_login_node_pool(self):
+        """Let one host key contain either one endpoint or an ordered pool."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "clusters.toml"
+            path.write_text(
+                '[[machine]]\nname="viper"\n'
+                'host=["viper12i.example", "viper13i.example"]\n'
+                'username="alice"\n'
+            )
+
+            machine = load_config(path)[0]
+
+        self.assertEqual(machine.host, "viper12i.example")
+        self.assertEqual(machine.candidate_hosts, ("viper12i.example", "viper13i.example"))
+        command = ssh_command(machine, 5, "true")
+        self.assertIn("alice@viper12i.example", command)
+
+    def test_login_node_pool_configuration_rejects_obsolete_or_invalid_values(self):
+        """Reject malformed pools and explain the superseded plural spelling."""
+        invalid = (
+            ('hosts=["one", "two"]\n', "obsolete hosts"),
+            ('host=[]\n', "non-empty string or list"),
+            ('host=["one", "one"]\n', "duplicates"),
+            ('host=12\n', "non-empty string or list"),
+            ('host="one"\nssh_alias="pool"\n', "obsolete ssh_alias"),
+        )
+        for routing, message in invalid:
+            with self.subTest(routing=routing), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "clusters.toml"
+                path.write_text(f'[[machine]]\nname="viper"\nusername="alice"\n{routing}')
+                with self.assertRaisesRegex(ValueError, message):
+                    load_config(path)
+
     def test_interactive_machine_uses_a_reusable_ssh_control_socket(self):
         machine = Machine("cluster_1", "cluster_1.example", "alice", interactive_auth=True, control_persist="4h")
         with tempfile.TemporaryDirectory() as directory, patch("clusterwatcher.ssh.CONTROL_SOCKET_DIRECTORY", Path(directory)), patch("clusterwatcher.ssh.subprocess.run") as run:

@@ -1,6 +1,8 @@
 """Shared data structures for configuration and collected cluster status."""
 
-from dataclasses import dataclass, field
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
 
 
 @dataclass(frozen=True)
@@ -18,6 +20,20 @@ class Machine:
     job_log_roots: tuple[str, ...] = ()
     default_partition_max_time_minutes: int = 1440
     partition_max_time_minutes: tuple[tuple[str, int], ...] = ()
+    hosts: tuple[str, ...] = ()
+
+    @property
+    def candidate_hosts(self) -> tuple[str, ...]:
+        """Return physical login nodes in configured failover order."""
+        return self.hosts or (self.host,)
+
+    def for_host(self, host: str) -> Machine:
+        """Return an endpoint-specific copy that cannot fail over implicitly.
+
+        Endpoint copies are used for interactive shells and arbitrary remote
+        commands, where retrying on another node could execute user code twice.
+        """
+        return replace(self, host=host, hosts=())
 
     def max_time_minutes(self, partition: str) -> int:
         """Return the configured maximum runtime for a Slurm partition."""
@@ -86,3 +102,6 @@ class ClusterStatus:
     # The machine needs an interactive login (password/OTP) and has no open SSH
     # session; set by the service when collection fails (``cluster-watcher login``).
     login_required: bool = False
+    # Logical routing metadata. ``host`` remains the physical node used by the
+    # most recent successful operation for backwards-compatible clients.
+    hosts: tuple[str, ...] = ()

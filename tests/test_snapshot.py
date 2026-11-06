@@ -118,8 +118,14 @@ class SnapshotTests(TimedTestCase):
                 handler.wfile.write.assert_called_once_with(b"payload")
 
     def test_snapshot_contains_routing_resources_specs_and_waits(self):
+        status = example_status()
+        status.user_jobs = [
+            {"state": "RUNNING"}, {"state": "RUNNING"},
+            {"state": "PENDING"}, {"state": "CONFIGURING"},
+            {"state": "COMPLETED"},
+        ]
         snapshot = build_snapshot(
-            [example_status()], "2026-09-22T10:00:00+00:00", 15,
+            [status], "2026-09-22T10:00:00+00:00", 15,
             (10, 45, 90, 180),
         )
 
@@ -130,6 +136,7 @@ class SnapshotTests(TimedTestCase):
         self.assertTrue(cluster["reachable"])
         self.assertTrue(cluster["resource_data_complete"])
         self.assertEqual(cluster["scheduling"]["scheduler_type"], "sched/backfill")
+        self.assertEqual(cluster["user_jobs"], {"running": 2, "pending": 2})
         self.assertNotIn("username", cluster)
         self.assertEqual(cluster["resources"]["gpus"]["total"], 8)
         self.assertEqual(cluster["resources"]["gpus"]["schedulable_idle"], 3)
@@ -163,6 +170,17 @@ class SnapshotTests(TimedTestCase):
             snapshot["clusters"][0]["partitions"][0]["wait_estimates"][0]["walltime_seconds"],
             900,
         )
+
+    def test_snapshot_identifies_pool_and_active_physical_node(self):
+        """Expose routing metadata without replacing the compatible host field."""
+        status = example_status()
+        status.host = "viper13.example"
+        status.hosts = ("viper12.example", "viper13.example")
+
+        cluster = build_snapshot([status], "2026-09-22T10:00:00+00:00", 15)["clusters"][0]
+
+        self.assertEqual(cluster["host"], "viper13.example")
+        self.assertEqual(cluster["hosts"], ["viper12.example", "viper13.example"])
 
     def test_snapshot_exposes_only_the_users_fair_share_summary(self):
         status = example_status()

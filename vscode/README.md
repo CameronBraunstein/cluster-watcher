@@ -1,15 +1,14 @@
 # Cluster Watcher for VS Code
 
-This extension adds **My Jobs**, **Cluster Status**, and **Server Status** views
+This extension adds **My Jobs** and **Cluster Status** views
 to the Activity Bar. It is a thin client for the loopback APIs provided by
 `cluster-watcher serve`; the Python application remains responsible for
 configuration, SSH, MFA, Slurm queries, and refresh scheduling.
 
 When no backend service is found, **My Jobs** and **Cluster Status** become
-collapsed offline placeholders. Their expanded content contains only a short
-notice. The off switch in **Server Status** is labeled **Start Server**.
-**Run setup wizard** appears beneath it only if the selected `clusters.toml`
-is missing, but remains in the Server Status title menu at all times. The
+collapsed offline placeholders. Cluster Status retains its service switch,
+which is labeled **Start Server** while off. **Run setup wizard** remains in
+the Cluster Status title menu at all times. The
 **configure clusters...** link beneath the cluster cards opens the
 configuration file; configuration and settings commands remain in the Command
 Palette. Successful backend responses restore the live views. You can still
@@ -156,7 +155,7 @@ inside each webview. A compact `Last update: <date and time with seconds>` line
 appears directly below each heading. Each heading has its own **Refresh**
 action, which polls only that view's endpoint.
 **Cluster Watcher: Refresh Sidebar** in the Command Palette
-refreshes all three views; service, dashboard, configuration, settings, and
+refreshes both views; service, dashboard, configuration, settings, and
 backend-management actions also remain available there. A pressed heading
 refresh button changes briefly to a spinning sync icon, including when the
 response is unchanged. A notification distinguishes new data (`Refreshed at:`)
@@ -168,8 +167,8 @@ use the upward-arrow **Load 2,000 Older Lines** editor-title action; each click
 prepends one more bounded page until the complete remote file is loaded.
 
 When the service is not reachable, the collapsed jobs and cluster placeholders
-contain no startup buttons. **Run setup wizard** runs `cluster-watcher setup`
-in a terminal, and the Server Status title menu keeps that action available
+contain no duplicate startup buttons. **Run setup wizard** runs `cluster-watcher setup`
+in a terminal, and the Cluster Status title menu keeps that action available
 even when a TOML already exists. **Edit configuration** opens the file reported
 by `cluster-watcher config --path` in an editor tab; if missing, it offers the
 wizard. Saving the configuration from VS Code validates it immediately (via
@@ -250,8 +249,8 @@ runtime in its hover text.
 The main README explains the scheduling semantics; unavailable data is simply
 omitted.
 
-**Server Status** sits below Cluster Status. It reports the service as
-starting, running, stopping, or stopped. Both a
+**Cluster Status** reports the service as starting, running, stopping, or
+stopped. Both a
 compatible service started elsewhere and a tmux service show only
 the clickable dashboard URL, with no status prefix. The URL is a button styled
 as a link, so its process/start tooltip is not accompanied by a dummy `#`
@@ -264,17 +263,19 @@ the URL without the redundant “Running in the background” label. Hover the U
 for the backend process ID and start time. The view also shows bounded recent
 login diagnostic output and an
 Open/Closed card for every reusable SSH session with its approximate remaining
-idle lifetime. These cards use tighter spacing and a smaller, truncatable SSH
-login address at minimum width. Open cards display only **Open**; hovering it
-shows the approximate remaining session lifetime. Every closed interactive
-machine has **Log in**. A machine with
+idle lifetime. A logged-in cluster shows its `username@host` endpoint beneath
+the cluster name and job-ratio bar; hovering it shows the approximate remaining
+session lifetime. Every logged-out interactive machine replaces both of those
+details with **Log in**. A machine with
 `credential_group = "site"` also has **Log into all machines on site**; the
 first action targets only that machine, while the second reuses the shared
-password for all closed group members. Stopping an attached local service asks
+password for all closed group members. Recent backend output and session
+inspection errors also appear in Cluster Status, so there is no separate Server
+Status view. Stopping an attached local service asks
 for confirmation, warns that other connected clients will be disconnected,
 and then requests a graceful shutdown from the backend.
-**configure clusters...** appears below the machine cards and opens the
-selected `clusters.toml` without moving the Server Status scroll position (or
+**configure clusters...** appears below the cluster cards and opens the
+selected `clusters.toml` without moving the Cluster Status scroll position (or
 offers setup if the file does not exist).
 The extension starts the service in a detached `tmux` session on its host, so
 closing or reloading VS Code does not stop it. `tmux` must be installed there.
@@ -306,7 +307,7 @@ logs/scripts/dashboard, end job, start/stop/refresh the service, setup, edit
 configuration, settings, backend management, and login).
 
 Use **Cluster Watcher: Start Service & SSH Sessions** from the Command Palette
-or Server Status. The extension launches `serve --jobs-api --skip-login` in a
+or Cluster Status. The extension launches `serve --jobs-api --skip-login` in a
 detached tmux session, then opens closed SSH sessions with a separate login
 helper. Password and OTP requests use masked, focus-retaining VS Code input
 boxes; responses pass over the helper's private stdin and never appear in its

@@ -15,7 +15,7 @@ from typing import Callable, TextIO
 from .models import Machine
 from .askpass import ASKPASS_MODE_ENVIRONMENT_VARIABLE
 from .platforms import supports_ssh_multiplexing, user_runtime_token
-from .ssh import session_status, start_interactive_session
+from .ssh import select_login_machine, session_status, start_interactive_session
 
 
 ASKPASS_SOCKET_ENV = "CLUSTER_WATCHER_ASKPASS_SOCKET"
@@ -316,6 +316,13 @@ def establish_interactive_sessions(
         )
         return [(machine, error) for machine in machines]
     errors: list[tuple[Machine, RuntimeError]] = []
+    selected: list[Machine] = []
+    for machine in machines:
+        try:
+            selected.append(select_login_machine(machine, timeout))
+        except RuntimeError as exc:
+            errors.append((machine, exc))
+    machines = selected
     completed_groups: set[str] = set()
     for machine in machines:
         if machine.credential_group is None and secret_prompt is None:

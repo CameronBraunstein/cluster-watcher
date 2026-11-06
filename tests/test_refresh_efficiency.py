@@ -401,8 +401,10 @@ class ETagTests(TimedTestCase):
         )
 
         self.assertFalse(StatusStore._status_source_changed([before], [later]))
+        self.assertFalse(StatusStore._snapshot_source_changed([before], [later]))
         later.user_jobs[0]["state"] = "COMPLETED"
         self.assertTrue(StatusStore._status_source_changed([before], [later]))
+        self.assertTrue(StatusStore._snapshot_source_changed([before], [later]))
 
     def request(self, store: StatusStore, path: str, if_none_match: str | None = None) -> dict[str, object]:
         handler = object.__new__(make_handler(store))

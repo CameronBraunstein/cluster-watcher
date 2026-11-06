@@ -19,7 +19,7 @@ from .fair_share import (
     parse_partition_rules,
 )
 from .remote_batch import Section, run_batch
-from .ssh import run_remote
+from .ssh import active_host, run_remote
 
 SINFO_COMMAND = "sinfo --noheader --format='%P|%a|%D|%C|%T|%I|%p'"
 SQUEUE_COMMAND = "squeue --noheader --format='%T'"
@@ -526,7 +526,10 @@ def collect_status(
     call when the user's queue fingerprint changed (see
     :func:`accounting_gate_command`) and reused from ``previous`` otherwise.
     """
-    status = ClusterStatus(machine.name, machine.host, machine.username)
+    status = ClusterStatus(
+        machine.name, machine.host, machine.username,
+        hosts=machine.candidate_hosts,
+    )
     capacity = refresh_capacity or previous is None or previous.capacity_updated_at is None
     commands: dict[str, str] = {}
     if capacity:
@@ -724,17 +727,22 @@ def collect_status(
         status.fair_share = annotate_partition_access(status.fair_share, status.fair_share_rules)
     except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
         status.error = str(exc)
+    status.host = active_host(machine)
     return status
 
 
 def collect_user_job_status(machine: Machine, timeout: int) -> ClusterStatus:
     """Collect only the user's active jobs for the terminal jobs board."""
-    status = ClusterStatus(machine.name, machine.host, machine.username)
+    status = ClusterStatus(
+        machine.name, machine.host, machine.username,
+        hosts=machine.candidate_hosts,
+    )
     try:
         status.user_jobs = parse_jobs(run_remote(machine, timeout, SQUEUE_USER_JOBS_COMMAND))
     except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
         status.user_jobs = []
         status.error = str(exc)
+    status.host = active_host(machine)
     return status
 
 

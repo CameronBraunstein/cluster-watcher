@@ -288,6 +288,7 @@ class JobService:
         run_remote(
             machine, self.timeout,
             f"scancel --user={shlex.quote(machine.username)} -- {shlex.quote(job_id)}",
+            failover=False,
         )
         with self._lock:
             self._cache.clear()

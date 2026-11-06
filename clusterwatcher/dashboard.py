@@ -30,7 +30,7 @@ from .jobs import JobLogNotFound, JobService, parse_since
 from .models import ClusterStatus, Machine
 from .slurm import collect_status
 from .ssh import session_status
-from .snapshot import build_snapshot
+from .snapshot import active_job_counts, build_snapshot
 from .wait_probes import (
     WAIT_PROBE_REFRESH_SECONDS,
     WAIT_PROBE_STARTUP_DELAY_SECONDS,
@@ -981,12 +981,13 @@ class StatusStore:
         if len(previous) != len(current):
             return True
         fields = (
-            "name", "host", "partitions", "nodes", "partition_compute",
+            "name", "host", "hosts", "partitions", "nodes", "partition_compute",
             "scheduling", "fair_share", "fair_share_updated_at",
             "resource_error", "error", "login_required",
         )
         return any(
             any(getattr(before, field) != getattr(after, field) for field in fields)
+            or active_job_counts(before) != active_job_counts(after)
             for before, after in zip(previous, current)
         )
 

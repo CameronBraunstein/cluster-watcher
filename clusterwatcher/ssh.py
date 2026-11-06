@@ -5,6 +5,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import tempfile
 import threading
@@ -21,6 +22,35 @@ SERVER_ALIVE_INTERVAL_SECONDS = 30
 SERVER_ALIVE_COUNT_MAX = 4
 _activity_lock = threading.Lock()
 _last_activity: dict[tuple[str, str, int], datetime] = {}
+_routing_lock = threading.Lock()
+_selected_hosts: dict[tuple[str, str, int, tuple[str, ...]], str] = {}
+
+
+def _routing_key(machine: Machine) -> tuple[str, str, int, tuple[str, ...]]:
+    """Return the process-local key for one logical login-node pool."""
+    return machine.name, machine.username, machine.port, machine.candidate_hosts
+
+
+def _remember_host(machine: Machine, host: str) -> None:
+    """Make a successful physical node the sticky first choice for its pool."""
+    if host not in machine.candidate_hosts:
+        return
+    with _routing_lock:
+        _selected_hosts[_routing_key(machine)] = host
+
+
+def active_host(machine: Machine) -> str:
+    """Return the sticky physical node, falling back to configuration order."""
+    with _routing_lock:
+        selected = _selected_hosts.get(_routing_key(machine))
+    return selected if selected in machine.candidate_hosts else machine.candidate_hosts[0]
+
+
+def _route_candidates(machine: Machine) -> list[Machine]:
+    """Return endpoint copies with the sticky node first and no duplicates."""
+    selected = active_host(machine)
+    hosts = (selected, *(host for host in machine.candidate_hosts if host != selected))
+    return [machine.for_host(host) for host in hosts]
 
 
 def control_socket_path() -> Path:
@@ -138,12 +168,16 @@ def start_interactive_session(machine: Machine, timeout: int, askpass_environmen
 
 def run_remote(
     machine: Machine, timeout: int, remote_command: str, process_timeout: float | None = None,
+    *, failover: bool = True,
 ) -> str:
     """Run one fixed remote command through the system SSH client.
 
     ``process_timeout`` bounds the whole call (default: ``timeout`` + 5 s).
+    Read-only callers retain the default ``failover=True``. Mutating commands
+    must pass ``failover=False`` so an uncertain transport failure cannot
+    replay their operation on a second login node.
     """
-    result = _run_remote_process(machine, timeout, remote_command, process_timeout)
+    result = _run_remote_process(machine, timeout, remote_command, process_timeout, failover=failover)
     return result.stdout
 
 
@@ -168,21 +202,46 @@ def _run_remote_process(
     timeout: int,
     remote_command: str,
     process_timeout: float | None = None,
+    *,
+    failover: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    """Execute one remote command with an optional exact process deadline."""
+    """Execute one read-only collector command with login-node failover.
+
+    Only SSH transport failures (exit 255, a connection timeout, or failure to
+    start the local client) advance to the next configured node. A nonzero
+    remote-command status is never retried because the command did run.
+    """
     execution_timeout = timeout + 5 if process_timeout is None else process_timeout
-    result = subprocess.run(
-        ssh_command(machine, timeout, remote_command),
-        text=True,
-        capture_output=True,
-        timeout=execution_timeout,
-        check=False,
-    )
-    if result.returncode != 255:
-        _mark_activity(machine)
-    if result.returncode:
-        raise RuntimeError(result.stderr.strip() or f"ssh exited with status {result.returncode}")
-    return result
+    failures: list[str] = []
+    candidates = _route_candidates(machine) if failover else [machine.for_host(active_host(machine))]
+    for endpoint in candidates:
+        try:
+            result = subprocess.run(
+                ssh_command(endpoint, timeout, remote_command),
+                text=True,
+                capture_output=True,
+                timeout=execution_timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            if len(candidates) == 1:
+                raise
+            failures.append(f"{endpoint.host}: {exc}")
+            continue
+        if result.returncode != 255:
+            _mark_activity(endpoint)
+            _remember_host(machine, endpoint.host)
+        if result.returncode == 0:
+            return result
+        detail = result.stderr.strip() or f"ssh exited with status {result.returncode}"
+        if result.returncode != 255:
+            raise RuntimeError(detail)
+        if len(candidates) == 1:
+            raise RuntimeError(detail)
+        failures.append(f"{endpoint.host}: {detail}")
+    if failures:
+        raise RuntimeError("all configured login nodes failed: " + "; ".join(failures))
+    raise RuntimeError("no configured login nodes")
 
 
 def parse_control_persist(value: str) -> int | None:
@@ -262,8 +321,8 @@ def control_check_command(machine: Machine) -> list[str]:
     return command
 
 
-def session_status(machine: Machine, timeout: int = 5) -> dict[str, object]:
-    """Return verified SSH availability and optional persistence time.
+def _endpoint_session_status(machine: Machine, timeout: int) -> dict[str, object]:
+    """Return verified SSH availability for exactly one physical endpoint.
 
     OpenSSH reports whether the master is running but not its idle deadline.
     The remaining value is therefore an estimate based on activity observed by
@@ -309,6 +368,62 @@ def session_status(machine: Machine, timeout: int = 5) -> dict[str, object]:
             )
         ),
     }
+
+
+def session_status(machine: Machine, timeout: int = 5) -> dict[str, object]:
+    """Return availability for a logical machine across all login nodes.
+
+    An already-open control master wins and becomes the sticky endpoint. If no
+    candidate is open, the configured order is retained and errors identify
+    the physical nodes that were checked.
+    """
+    failures: list[str] = []
+    first: dict[str, object] | None = None
+    candidates = _route_candidates(machine)
+    for endpoint in candidates:
+        status = _endpoint_session_status(endpoint, timeout)
+        first = first or status
+        if status["session_open"]:
+            _remember_host(machine, endpoint.host)
+            status.update({
+                "hosts": list(machine.candidate_hosts),
+            })
+            return status
+        failures.append(f"{endpoint.host}: {status['error']}")
+    assert first is not None
+    first.update({
+        "host": active_host(machine),
+        "hosts": list(machine.candidate_hosts),
+        "error": failures[0].split(": ", 1)[1] if len(failures) == 1 else "; ".join(failures),
+    })
+    return first
+
+
+def select_login_machine(machine: Machine, timeout: int = 5) -> Machine:
+    """Choose a reachable physical node before requesting interactive secrets.
+
+    Existing sessions are preferred. Otherwise each candidate's configured
+    SSH TCP port is probed in sticky/configuration order; this does not invoke
+    authentication and therefore cannot consume an OTP or modify SSH config.
+    """
+    if len(machine.candidate_hosts) == 1:
+        return machine.for_host(machine.host)
+    status = session_status(machine, timeout)
+    if status["session_open"]:
+        return machine.for_host(str(status["host"]))
+    failures: list[str] = []
+    for endpoint in _route_candidates(machine):
+        try:
+            connection = socket.create_connection(
+                (endpoint.host, endpoint.port), timeout=max(1, min(timeout, 5)),
+            )
+        except OSError as exc:
+            failures.append(f"{endpoint.host}: {exc}")
+            continue
+        connection.close()
+        _remember_host(machine, endpoint.host)
+        return endpoint
+    raise RuntimeError("no configured login node is reachable: " + "; ".join(failures))
 
 
 def _drain_limited(stream: object, chunks: list[bytes], state: dict[str, bool], limit: int) -> None:

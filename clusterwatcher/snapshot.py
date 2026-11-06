@@ -16,6 +16,20 @@ from .wait_probes import WAIT_PROBE_REFRESH_SECONDS, classify_wait_error
 SNAPSHOT_SCHEMA_VERSION = "1.0"
 """Current public snapshot schema; incompatible changes require a new API version."""
 
+_PENDING_JOB_STATES = {
+    "PENDING", "CONFIGURING", "REQUEUED", "REQUEUE_FED", "REQUEUE_HOLD",
+    "RESIZING", "SIGNALING", "STAGE_OUT", "SUSPENDED",
+}
+
+
+def active_job_counts(status: ClusterStatus) -> dict[str, int]:
+    """Return the current user's running and not-yet-running job counts."""
+    states = [str(job.get("state", "")).upper() for job in status.user_jobs or []]
+    return {
+        "running": sum(state == "RUNNING" for state in states),
+        "pending": sum(state in _PENDING_JOB_STATES for state in states),
+    }
+
 
 def _partitions(node: dict[str, object]) -> list[str]:
     """Return normalized partition names assigned to a Slurm node."""
@@ -313,6 +327,7 @@ def build_snapshot(
             {
                 "name": status.name,
                 "host": status.host,
+                "hosts": list(status.hosts or (status.host,)),
                 "reachable": status.error is None,
                 # Additive field: the session needs ``cluster-watcher login NAME``.
                 "login_required": status.login_required,
@@ -321,6 +336,7 @@ def build_snapshot(
                 "resource_error": status.resource_error,
                 "wait_estimates_updated_at": status.wait_estimates_updated_at,
                 "scheduling": status.scheduling or {},
+                "user_jobs": active_job_counts(status),
                 "fair_share": status.fair_share,
                 "fair_share_updated_at": status.fair_share_updated_at,
                 "resources": _cluster_resources(status),

@@ -73,16 +73,6 @@
         "icon": "$(sync~spin)"
       },
       {
-        "command": "clusterWatcher.refreshServer",
-        "title": "Cluster Watcher: Refresh Server Status",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "clusterWatcher.refreshServerBusy",
-        "title": "Cluster Watcher: Refreshing Server Status",
-        "icon": "$(sync~spin)"
-      },
-      {
         "command": "clusterWatcher.openDashboard",
         "title": "Cluster Watcher: Open Web Dashboard"
       },
@@ -149,11 +139,6 @@
           "type": "webview",
           "when": "!clusterWatcher.serviceAvailable",
           "visibility": "collapsed"
-        },
-        {
-          "id": "clusterWatcher.server",
-          "name": "Server Status",
-          "type": "webview"
         }
       ]
     },
@@ -165,10 +150,6 @@
         },
         {
           "command": "clusterWatcher.refreshStatusBusy",
-          "when": "false"
-        },
-        {
-          "command": "clusterWatcher.refreshServerBusy",
           "when": "false"
         }
       ],
@@ -194,18 +175,8 @@
           "group": "navigation@1"
         },
         {
-          "command": "clusterWatcher.refreshServer",
-          "when": "view == clusterWatcher.server && !clusterWatcher.refreshingServer",
-          "group": "navigation@1"
-        },
-        {
-          "command": "clusterWatcher.refreshServerBusy",
-          "when": "view == clusterWatcher.server && clusterWatcher.refreshingServer",
-          "group": "navigation@1"
-        },
-        {
           "command": "clusterWatcher.runSetup",
-          "when": "view == clusterWatcher.server",
+          "when": "view == clusterWatcher.status || view == clusterWatcher.statusOffline",
           "group": "2_configuration@1"
         }
       ],
