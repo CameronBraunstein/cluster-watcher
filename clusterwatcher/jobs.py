@@ -1,6 +1,7 @@
 """Versioned personal-job queries, caching, filtering, and safe log tails."""
 
 from copy import deepcopy
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import posixpath
 import re
@@ -153,7 +154,10 @@ class JobService:
         self.status_provider = status_provider
         self._cache: dict[tuple[object, ...], tuple[float, dict[str, object]]] = {}
         self._lock = threading.Lock()
-        self._query_lock = threading.Lock()
+        self._inflight: dict[tuple[object, ...], Future[dict[str, object]]] = {}
+        self._log_path_cache: dict[tuple[str, str, str], str] = {}
+        # Keep a bounded set of private paths from custom older-window queries.
+        self._log_records: dict[tuple[str, str], dict[str, object]] = {}
 
     def query(
         self,
@@ -174,20 +178,36 @@ class JobService:
         since_value = since or parse_since(None)
         cache_key = (selected_names, requested_ids, state, since_value.isoformat() if since else "default")
 
-        with self._query_lock:
-            with self._lock:
-                now = time.monotonic()
-                self._cache = {
-                    key: value for key, value in self._cache.items()
-                    if now - value[0] < self.refresh_seconds
-                }
-                cached = self._cache.get(cache_key)
-                if cached:
-                    return deepcopy(cached[1])
+        with self._lock:
+            now = time.monotonic()
+            self._cache = {
+                key: value for key, value in self._cache.items()
+                if now - value[0] < self.refresh_seconds
+            }
+            cached = self._cache.get(cache_key)
+            if cached:
+                return deepcopy(cached[1])
+            flight = self._inflight.get(cache_key)
+            owner = flight is None
+            if flight is None:
+                flight = Future()
+                self._inflight[cache_key] = flight
+        if not owner:
+            return deepcopy(flight.result())
+        try:
             payload = self._collect(selected_names, requested_ids, state, since_value, default_window=since is None)
+        except BaseException as exc:
+            flight.set_exception(exc)
             with self._lock:
+                self._inflight.pop(cache_key, None)
+            raise
+        with self._lock:
+            # A cancellation may have invalidated the cache during collection.
+            if self._inflight.get(cache_key) is flight:
                 self._cache[cache_key] = (time.monotonic(), payload)
-            return deepcopy(payload)
+                self._inflight.pop(cache_key, None)
+        flight.set_result(payload)
+        return deepcopy(payload)
 
     def _collect(
         self,
@@ -208,8 +228,25 @@ class JobService:
         statuses = {status.name: status for status in self.status_provider()}
         jobs: list[dict[str, object]] = []
         cluster_results: list[dict[str, object]] = []
-        for name in selected_names:
+        log_records: dict[tuple[str, str], dict[str, object]] = {}
+
+        def accounting_for(name: str) -> tuple[list[dict[str, object]], str | None]:
+            """Fetch one cluster's accounting without holding another query."""
             machine = machines[name]
+            status = statuses.get(name)
+            if default_window and not requested_ids and status is not None and status.accounting is not None:
+                return deepcopy(status.accounting.records), None
+            try:
+                return collect_accounting_jobs(machine, self.timeout, since, requested_ids), None
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+                return [], str(exc)
+
+        if len(selected_names) == 1:
+            accounting_results = [accounting_for(selected_names[0])]
+        else:
+            with ThreadPoolExecutor(max_workers=len(selected_names), thread_name_prefix="jobs") as pool:
+                accounting_results = list(pool.map(accounting_for, selected_names))
+        for name, (accounting, accounting_error) in zip(selected_names, accounting_results):
             status = statuses.get(name)
             active_records = [
                 _active_record(name, job)
@@ -220,22 +257,14 @@ class JobService:
                 for record in active_records
                 if _matches_requested(str(record["job_id"]), requested_ids)
             }
-            accounting_error: str | None = None
-            if default_window and not requested_ids and status is not None and status.accounting is not None:
-                accounting = deepcopy(status.accounting.records)
-            else:
-                try:
-                    accounting = collect_accounting_jobs(machine, self.timeout, since, requested_ids)
-                except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
-                    accounting = []
-                    accounting_error = str(exc)
-
             merged: dict[str, dict[str, object]] = {}
             for record in accounting:
                 record["cluster"] = name
                 job_id = str(record["job_id"])
                 if _matches_requested(job_id, requested_ids):
                     merged[job_id] = record
+                    if record.get("_stdout") or record.get("_stderr"):
+                        log_records[(name, job_id)] = record.copy()
             for job_id, record in active.items():
                 private = {key: value for key, value in merged.get(job_id, {}).items() if key.startswith("_")}
                 merged[job_id] = {**record, **private}
@@ -264,6 +293,12 @@ class JobService:
             })
 
         jobs.sort(key=lambda job: (str(job["cluster"]), str(job["job_id"])))
+        with self._lock:
+            for key, record in log_records.items():
+                self._log_records.pop(key, None)
+                self._log_records[key] = record
+            while len(self._log_records) > 1024:
+                self._log_records.pop(next(iter(self._log_records)))
         return {
             "schema_version": "1.0",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -292,6 +327,7 @@ class JobService:
         )
         with self._lock:
             self._cache.clear()
+            self._inflight.clear()
         return {
             "cluster": cluster,
             "job_id": job_id,
@@ -330,25 +366,39 @@ class JobService:
         machine = by_name[cluster]
 
         if explicit_path is not None:
-            path = self._validated_explicit_path(machine, explicit_path)
+            if not explicit_path.startswith("/") or "\x00" in explicit_path:
+                raise ValueError("path must be an absolute remote path")
+            if not machine.job_log_roots:
+                raise ValueError(f"cluster {machine.name} has no configured job_log_roots")
+            path = explicit_path
         else:
             path = self._resolve_job_log_path(machine, job_id, stream)
 
         try:
-            if before:
-                # Reverse on the remote host so only one bounded page crosses SSH.
-                # The extra line is a sentinel indicating that older data exists.
+            if explicit_path is not None:
+                command = self._explicit_tail_command(machine, path, tail, before)
+            elif before:
+                # GNU tail seeks backward from EOF for regular files. Limit
+                # its output, then discard the already loaded newest lines.
+                # The remaining extra line is the older-page sentinel.
                 quoted_path = shlex.quote(path)
                 command = (
                     f"test -r {quoted_path} || {{ echo 'Log file is not readable' >&2; exit 1; }}; "
-                    f"tac -- {quoted_path} | tail -n +{before + 1} | head -n {tail + 1} | tac"
+                    f"tail -n {before + tail + 1} -- {quoted_path} | head -n -{before}"
                 )
             else:
                 command = f"tail -n {tail + 1} -- {shlex.quote(path)}"
             output = run_remote(machine, self.timeout, command)
+            if explicit_path is not None:
+                canonical, separator, output = output.partition("\x00")
+                if not separator or not canonical.startswith("__CW_LOG_PATH__"):
+                    raise RuntimeError("could not validate the remote log path")
+                path = canonical[len("__CW_LOG_PATH__"):]
         except RuntimeError as exc:
             message = str(exc).lower()
-            if "tail:" in message or "no such file" in message or "log file is not readable" in message:
+            if "outside the configured job_log_roots" in message:
+                raise ValueError("path is outside the configured job_log_roots") from exc
+            if "tail:" in message or "realpath:" in message or "no such file" in message or "log file is not readable" in message:
                 raise JobLogNotFound(f"Log file does not exist yet or is not readable: {path}") from exc
             raise
         lines = output.splitlines(keepends=True)
@@ -367,28 +417,33 @@ class JobService:
             "content": "".join(lines),
         }
 
-    def _validated_explicit_path(self, machine: Machine, path: str) -> str:
-        """Canonicalize an explicit path remotely and enforce configured roots."""
-        if not path.startswith("/") or "\x00" in path or "\n" in path:
-            raise ValueError("path must be an absolute remote path")
-        if not machine.job_log_roots:
-            raise ValueError(f"cluster {machine.name} has no configured job_log_roots")
-        arguments = " ".join(shlex.quote(value) for value in (path, *machine.job_log_roots))
-        try:
-            resolved = run_remote(machine, self.timeout, f"realpath -e -- {arguments}").splitlines()
-        except RuntimeError as exc:
-            if "realpath:" in str(exc).lower() or "no such file" in str(exc).lower():
-                raise JobLogNotFound(f"Log file does not exist yet or is not readable: {path}") from exc
-            raise
-        if len(resolved) != len(machine.job_log_roots) + 1:
-            raise ValueError("could not validate the remote log path")
-        canonical_path, *canonical_roots = resolved
-        if not any(posixpath.commonpath((canonical_path, root)) == root for root in canonical_roots):
-            raise ValueError("path is outside the configured job_log_roots")
-        return canonical_path
+    @staticmethod
+    def _explicit_tail_command(machine: Machine, path: str, tail: int, before: int) -> str:
+        """Canonicalize, authorize, and read a log in one remote shell call."""
+        roots = " ".join(shlex.quote(root) for root in machine.job_log_roots)
+        page = (
+            f"tail -n {before + tail + 1} -- \"$resolved\" | head -n -{before}"
+            if before else f"tail -n {tail + 1} -- \"$resolved\""
+        )
+        return (
+            f"resolved=$(realpath -e -- {shlex.quote(path)}) || exit 1; "
+            "test -r \"$resolved\" || { echo 'Log file is not readable' >&2; exit 1; }; "
+            "allowed=0; "
+            f"for root in {roots}; do "
+            "canonical_root=$(realpath -e -- \"$root\") || exit 1; "
+            "if test \"$canonical_root\" = /; then allowed=1; continue; fi; "
+            "case \"$resolved\" in \"$canonical_root\"|\"$canonical_root\"/*) allowed=1;; esac; "
+            "done; "
+            "test \"$allowed\" -eq 1 || { echo 'path is outside the configured job_log_roots' >&2; exit 1; }; "
+            "printf '__CW_LOG_PATH__%s\\0' \"$resolved\"; " + page
+        )
 
     def _resolve_job_log_path(self, machine: Machine, job_id: str, stream: str) -> str:
-        """Use live controller data first, then accounting after completion."""
+        """Use cached accounting first, then bounded remote Slurm lookups."""
+        cache_key = (machine.name, job_id, stream)
+        with self._lock:
+            if cache_key in self._log_path_cache:
+                return self._log_path_cache[cache_key]
         statuses = {status.name: status for status in self.status_provider()}
         status = statuses.get(machine.name)
         live = any(str(job.get("id")) == job_id for job in (status.user_jobs if status and status.user_jobs else []))
@@ -400,14 +455,24 @@ class JobService:
             except (OSError, RuntimeError, subprocess.TimeoutExpired):
                 pass
 
-        accounting = collect_accounting_jobs(machine, self.timeout, datetime(1970, 1, 1, tzinfo=timezone.utc), (job_id,))
-        record = next((item for item in accounting if str(item["job_id"]) == job_id), None)
+        records = status.accounting.records if status and status.accounting else []
+        record = next((item for item in records if str(item["job_id"]) == job_id), None)
+        if record is None:
+            with self._lock:
+                record = self._log_records.get((machine.name, job_id))
+        if record is None:
+            accounting = collect_accounting_jobs(machine, self.timeout, parse_since(None), (job_id,))
+            record = next((item for item in accounting if str(item["job_id"]) == job_id), None)
         raw_path = str(record.get(f"_{'stdout' if stream == 'out' else 'stderr'}") or "") if record else ""
         if not raw_path:
             raise JobLogNotFound(f"No {stream} log path is available for job {job_id}; queued jobs may not have a log yet")
         path = self._expand_log_pattern(raw_path, record)
         workdir = str(record.get("_workdir") or "")
-        return posixpath.join(workdir, path) if not path.startswith("/") and workdir else path
+        resolved = posixpath.join(workdir, path) if not path.startswith("/") and workdir else path
+        if not live:
+            with self._lock:
+                self._log_path_cache[cache_key] = resolved
+        return resolved
 
     @staticmethod
     def _expand_log_pattern(path: str, record: dict[str, object]) -> str:
@@ -415,7 +480,7 @@ class JobService:
         job_id = str(record["job_id"])
         array_job_id, _, task_id = job_id.partition("_")
         replacements = {
-            "%j": job_id,
+            "%j": str(record.get("_allocation_id") or array_job_id),
             "%A": array_job_id,
             "%a": task_id or "4294967294",
             "%x": str(record.get("name") or job_id),

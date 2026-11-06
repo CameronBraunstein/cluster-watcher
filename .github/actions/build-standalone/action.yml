@@ -9,15 +9,22 @@ inputs:
     description: manylinux architecture (x86_64 or aarch64); empty off Linux.
     required: false
     default: ""
+  python-arch:
+    description: Required native Python architecture (x86_64 or aarch64).
+    required: true
 runs:
   using: composite
   steps:
     - uses: astral-sh/setup-uv@v6
+      with:
+        # UV_PYTHON_ARCH is supported from uv 0.12.22 onward.
+        version: "0.13.5"
 
     - name: Build on Linux or macOS
       if: runner.os != 'Windows'
       shell: bash
       env:
+        UV_PYTHON_ARCH: ${{ inputs.python-arch }}
         # The interpreter's own deployment target remains the effective floor;
         # this prevents project-built objects from accidentally requiring newer macOS.
         MACOSX_DEPLOYMENT_TARGET: "12.0"
@@ -41,9 +48,15 @@ runs:
     - name: Build on Windows
       if: runner.os == 'Windows'
       shell: pwsh
+      env:
+        UV_PYTHON_ARCH: ${{ inputs.python-arch }}
       run: |
         uv python install 3.12
         uv venv --python 3.12 --managed-python .build-venv
+        $interpreterPlatform = & .build-venv/Scripts/python.exe -c 'import sysconfig; print(sysconfig.get_platform())'
+        if ('${{ inputs.python-arch }}' -eq 'aarch64' -and $interpreterPlatform -ne 'win-arm64') {
+          throw "Expected native Windows ARM64 Python, got $interpreterPlatform"
+        }
         uv pip install --python .build-venv 'pyinstaller>=6.0,<7'
         & .build-venv/Scripts/python.exe -m PyInstaller --noconfirm --clean cluster-watcher.spec
         $binary = "dist/${{ inputs.artifact }}"

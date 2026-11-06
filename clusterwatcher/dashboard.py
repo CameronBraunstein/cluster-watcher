@@ -1070,6 +1070,11 @@ class StatusStore:
                 cluster.pop("fair_share_rules", None)  # Includes other users' account hierarchy.
             return {"clusters": clusters, "updated_at": self._updated_at, "refresh_seconds": self.refresh_seconds, "wait_threshold_minutes": self.wait_threshold_minutes, "jobs_api_enabled": self.jobs_api_enabled, "command_api_enabled": self.command_api_enabled}
 
+    def is_ready(self) -> bool:
+        """Check first-refresh readiness without copying cluster node detail."""
+        with self._lock:
+            return self._updated_at is not None
+
     def statuses(self) -> list[ClusterStatus]:
         """Return the latest per-cluster objects for the personal-job service."""
         with self._lock:
@@ -1197,11 +1202,32 @@ def stable_etag(payload: object) -> str:
     return f'"{digest[:32]}"'
 
 
-def make_handler(store: StatusStore):
-    """Create an HTTP handler bound to a particular status cache."""
+def make_handler(store: StatusStore, *, public_status: bool = False):
+    """Create a handler; public status mode serves only nonsensitive routes."""
 
     class DashboardHandler(BaseHTTPRequestHandler):
+        def _trusted_host(self) -> bool:
+            """Reject DNS rebinding requests addressed to a non-loopback host."""
+            if public_status and self.command == "GET" and urlsplit(self.path).path in {
+                "/", "/api/status", "/api/v1/snapshot", "/api/v1/service",
+            }:
+                return True
+            host = self.headers.get("Host", "")
+            if not host or any(char in host for char in "/@\\?#\r\n\t "):
+                return False
+            try:
+                parsed = urlsplit(f"//{host}")
+                name = parsed.hostname
+                if parsed.port is not None and not 1 <= parsed.port <= 65535:
+                    return False
+                return name == "localhost" or bool(name and ipaddress.ip_address(name).is_loopback)
+            except ValueError:
+                return False
+
         def do_GET(self) -> None:  # noqa: N802
+            if not self._trusted_host():
+                self._write_response(b"Invalid Host header\n", "text/plain; charset=utf-8", 421, {"Cache-Control": "no-store"})
+                return
             parsed_url = urlsplit(self.path)
             path = parsed_url.path
             query = parse_qs(parsed_url.query, keep_blank_values=True)
@@ -1275,6 +1301,9 @@ def make_handler(store: StatusStore):
 
         def do_POST(self) -> None:  # noqa: N802
             """Handle service control and the explicitly enabled write APIs."""
+            if not self._trusted_host():
+                self._write_response(b"Invalid Host header\n", "text/plain; charset=utf-8", 421, {"Cache-Control": "no-store"})
+                return
             path = urlsplit(self.path).path
             headers = {"Cache-Control": "no-store"}
             shutdown_requested = False
@@ -1443,7 +1472,7 @@ def make_handler(store: StatusStore):
             headers = {"Cache-Control": "no-store"}
             if store.job_service is None:
                 return self._json_error("The personal jobs API is disabled; restart with --jobs-api", 404, headers)
-            if not store.payload()["updated_at"]:
+            if not store.is_ready():
                 headers["Retry-After"] = "1"
                 return self._json_error("The first cluster status collection has not completed", 503, headers)
             try:
@@ -1459,6 +1488,7 @@ def make_handler(store: StatusStore):
                 )
             except ValueError as exc:
                 return self._json_error(str(exc), 400, headers)
+            headers["ETag"] = stable_etag(payload)
             return json.dumps(payload).encode(), "application/json; charset=utf-8", 200, headers
 
         def _job_script_response(self, cluster: str, job_id: str) -> tuple[bytes, str, int, dict[str, str]]:
@@ -1569,7 +1599,9 @@ def serve(
                 server_type = IPv6ThreadingHTTPServer
         except ValueError:
             pass
-        server = server_type((host.strip("[]"), port), make_handler(store))
+        server = server_type(
+            (host.strip("[]"), port), make_handler(store, public_status=not is_loopback_host(host)),
+        )
     except OSError as exc:
         stop.set()
         print(f"Could not start dashboard: {exc}", file=sys.stderr)

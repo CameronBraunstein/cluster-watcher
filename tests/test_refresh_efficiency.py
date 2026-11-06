@@ -89,6 +89,50 @@ class CapacityCadenceTests(TimedTestCase):
         )
 
     @patch("clusterwatcher.slurm.run_batch")
+    def test_personal_parse_failure_keeps_cached_nodes_and_partition_ranking(self, run_batch):
+        """A fast-refresh failure must not blank slower capacity data."""
+        run_batch.return_value = {
+            "running": Section("", "squeue failed", 1),
+            "pending": Section("", "", 0),
+            "priority_counts": Section("", "", 0),
+        }
+        previous = self.previous()
+
+        status = collect_status(
+            MACHINE, 5, True, previous=previous, refresh_capacity=False,
+        )
+
+        self.assertEqual(status.nodes, previous.nodes)
+        self.assertEqual(status.partition_compute, previous.partition_compute)
+        self.assertEqual(status.user_jobs, [])
+        self.assertIn("squeue failed", status.resource_error)
+
+        run_batch.return_value["running"] = Section("", "", 0)
+        recovered = collect_status(
+            MACHINE, 5, True, previous=status, refresh_capacity=False,
+        )
+        self.assertEqual(recovered.nodes[0]["name"], previous.nodes[0]["name"])
+        self.assertIsNone(recovered.resource_error)
+
+    @patch("clusterwatcher.slurm.run_batch")
+    def test_personal_failure_during_capacity_refresh_keeps_valid_node_detail(self, run_batch):
+        """A failed queue section cannot discard successfully parsed nodes."""
+        run_batch.return_value = {
+            "sinfo": Section("gpu|up|1|0/8/0/8|idle\n", "", 0),
+            "nodes": Section("NodeName=node01 Partitions=gpu State=IDLE CPUAlloc=0 CPUTot=8 Gres=gpu:1 GresUsed=(null)\n", "", 0),
+            "scheduler": Section("", "", 0),
+            "running": Section("", "squeue failed", 1),
+            "pending": Section("", "", 0),
+            "priority_counts": Section("", "", 0),
+        }
+
+        status = collect_status(MACHINE, 5, False, refresh_capacity=True)
+
+        self.assertEqual(status.nodes[0]["name"], "node01")
+        self.assertEqual(status.partition_compute[0]["name"], "gpu")
+        self.assertIn("squeue failed", status.resource_error)
+
+    @patch("clusterwatcher.slurm.run_batch")
     def test_jobs_only_refresh_sends_only_personal_queries_and_keeps_capacity(self, run_batch):
         running = "10|train|RUNNING|gpu|node01|1|4|gres/gpu:1|2026-09-22T10:00:00|2026-09-22T09:59:00|NULL|00:10:00|01:00:00|00:50:00|None\n"
         run_batch.return_value = {
@@ -411,6 +455,7 @@ class ETagTests(TimedTestCase):
         handler.path = path
         handler.wfile = BytesIO()
         handler.headers = Message()
+        handler.headers["Host"] = "127.0.0.1:8080"
         if if_none_match:
             handler.headers["If-None-Match"] = if_none_match
         response: dict[str, object] = {"headers": {}}
@@ -437,6 +482,18 @@ class ETagTests(TimedTestCase):
         self.assertEqual((unchanged["status"], unchanged["body"]), (304, b""))
         self.assertEqual(changed["status"], 200)
         self.assertNotEqual(changed["headers"]["ETag"], etag)
+
+    def test_jobs_etag_is_computed_from_payload_and_supports_304(self):
+        """Conditional job polling reuses the payload-derived ETag."""
+        store = StatusStore([MACHINE], 5, False, 15, jobs_api_enabled=True)
+        store._updated_at = "2026-09-22T10:00:00+00:00"
+        payload = {"schema_version": "1.0", "jobs": [{"job_id": "10", "state": "RUNNING"}]}
+        with patch.object(store.job_service, "query", return_value=payload):
+            first = self.request(store, "/api/v1/jobs")
+            cached = self.request(store, "/api/v1/jobs", first["headers"]["ETag"])
+
+        self.assertEqual(first["status"], 200)
+        self.assertEqual((cached["status"], cached["body"]), (304, b""))
 
     def test_internal_accounting_cache_never_reaches_the_api(self):
         store = StatusStore([MACHINE], 5, False, 15)

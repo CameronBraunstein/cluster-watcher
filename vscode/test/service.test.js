@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const {
   ServiceResponseError, backgroundLoginArguments, cliArguments, cliCommand,
-  cliTerminalOptions, configFileExists, jobsApiDisabled, persistentServiceCommand, responseError, serviceArguments, serviceCommand,
+  cliTerminalOptions, configFileExists, inspectionState, jobsApiDisabled, persistentServiceCommand, responseError, serviceArguments, serviceCommand,
   shellQuote, validateBackgroundCredentialSupport, validateExecutable, validatePersistentServiceSupport,
 } = require('../service');
 const manifest = require('../package.json');
@@ -191,11 +191,22 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   assert.doesNotMatch(extensionSource, /runCli\(settings, \['sessions'/);
   assert.match(extensionSource, /serviceInfo\.started_at/);
   assert.match(extensionSource, /Other dashboards and clients using it will be disconnected/);
-  assert.match(extensionSource, /await startServiceSession\(sessionName, persistentServiceCommand\(settings\)\)/);
+  assert.match(extensionSource, /await startOrRecoverServiceSession\(/);
   assert.match(extensionSource, /await this\.login\(undefined, false\)/);
   assert.match(extensionSource, /this\.disposed = true;\s*this\.loginProcess\?\.stop\(\);\s*}/);
   assert.match(extensionSource, /await validatePersistentServiceSupport\(settings\);/);
   assert.match(extensionSource, /await validateBackgroundCredentialSupport\(settings\);/);
+});
+
+test('offline service suppresses redundant SSH session fetch errors', () => {
+  const failed = { status: 'rejected', reason: new Error('fetch failed') };
+  assert.deepEqual(inspectionState(false, failed), { sessions: undefined, error: undefined });
+  assert.equal(inspectionState(true, failed).error, 'fetch failed');
+  const inventory = { machines: [{ name: 'alpha' }] };
+  assert.deepEqual(
+    inspectionState(true, { status: 'fulfilled', value: inventory }),
+    { sessions: inventory, error: undefined },
+  );
 });
 
 test('executable validation accepts a program and explains a missing setting', async () => {

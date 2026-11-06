@@ -34,18 +34,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: ubuntu-latest, artifact: cluster-watcher-linux-x86_64, linux_arch: x86_64 }
-          - { runner: ubuntu-24.04-arm, artifact: cluster-watcher-linux-aarch64, linux_arch: aarch64 }
-          - { runner: macos-15-intel, artifact: cluster-watcher-macos-x86_64, linux_arch: "" }
-          - { runner: macos-15, artifact: cluster-watcher-macos-aarch64, linux_arch: "" }
-          - { runner: windows-2022, artifact: cluster-watcher-windows-x86_64.exe, linux_arch: "" }
-          - { runner: windows-11-arm, artifact: cluster-watcher-windows-aarch64.exe, linux_arch: "" }
+          - { runner: ubuntu-latest, artifact: cluster-watcher-linux-x86_64, linux_arch: x86_64, python_arch: x86_64 }
+          - { runner: ubuntu-24.04-arm, artifact: cluster-watcher-linux-aarch64, linux_arch: aarch64, python_arch: aarch64 }
+          - { runner: macos-15-intel, artifact: cluster-watcher-macos-x86_64, linux_arch: "", python_arch: x86_64 }
+          - { runner: macos-15, artifact: cluster-watcher-macos-aarch64, linux_arch: "", python_arch: aarch64 }
+          - { runner: windows-2022, artifact: cluster-watcher-windows-x86_64.exe, linux_arch: "", python_arch: x86_64 }
+          - { runner: windows-11-arm, artifact: cluster-watcher-windows-aarch64.exe, linux_arch: "", python_arch: aarch64 }
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/build-standalone
         with:
           artifact: ${{ matrix.artifact }}
           linux-arch: ${{ matrix.linux_arch }}
+          python-arch: ${{ matrix.python_arch }}
 
       - name: Sign and notarize macOS executable
         if: runner.os == 'macOS'

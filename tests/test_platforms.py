@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -81,6 +82,20 @@ class PlatformTests(TimedTestCase):
         self.assertEqual(artifacts, expected)
         self.assertTrue((root / "install.ps1").is_file())
         self.assertTrue((root / "uninstall.ps1").is_file())
+
+    def test_standalone_ci_selects_the_artifact_architecture(self):
+        """Prevent an emulated x64 Python from producing a mislabeled ARM build."""
+        root = Path(__file__).parents[1]
+        for workflow in ("ci.yml", "release.yml"):
+            content = (root / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+            rows = re.findall(r"artifact: (cluster-watcher-[\w.-]+),[^\n]+python_arch: (\w+)", content)
+            self.assertEqual(len(rows), 6, workflow)
+            for artifact, architecture in rows:
+                self.assertIn(f"-{architecture}", artifact)
+            self.assertIn("python-arch: ${{ matrix.python_arch }}", content)
+        action = (root / ".github" / "actions" / "build-standalone" / "action.yml").read_text(encoding="utf-8")
+        self.assertEqual(action.count("UV_PYTHON_ARCH: ${{ inputs.python-arch }}"), 2)
+        self.assertIn("sysconfig.get_platform()", action)
 
     def test_windows_key_transport_uses_direct_noninteractive_ssh(self):
         machine = Machine("cluster", "login.example", "alice", port=2222)

@@ -41,6 +41,15 @@ function jobsApiDisabled(error) {
   return error instanceof ServiceResponseError && error.status === 404 && /--jobs-api/.test(error.message);
 }
 
+/** Suppress redundant SSH-inspection errors when the HTTP service is offline. */
+function inspectionState(reachable, inventoryResult) {
+  if (!reachable) return { sessions: undefined, error: undefined };
+  if (inventoryResult.status === 'rejected') {
+    return { sessions: undefined, error: inventoryResult.reason?.message || String(inventoryResult.reason) };
+  }
+  return { sessions: inventoryResult.value, error: undefined };
+}
+
 /** Build actionable guidance for an invalid executable setting. */
 function executableError(executable, detail) {
   return new ExecutableValidationError(
@@ -237,7 +246,7 @@ function persistentServiceCommand(settings) {
 
 module.exports = {
   ExecutableValidationError, ServiceResponseError, backgroundLoginArguments,
-  cliArguments, jobsApiDisabled, responseError, cliCommand, cliTerminalOptions, configurationError,
+  cliArguments, jobsApiDisabled, responseError, cliCommand, cliTerminalOptions, configurationError, inspectionState,
   configFileExists, persistentServiceCommand, resolveConfigPath, runCli, serviceArguments, serviceCommand, shellQuote,
   validateBackgroundCredentialSupport, validateExecutable, validatePersistentServiceSupport,
 };

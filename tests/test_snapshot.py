@@ -82,9 +82,12 @@ def request_handler(
     handler.wfile = BytesIO()
     handler.rfile = BytesIO(body)
     handler.headers = Message()
+    handler.headers["Host"] = "127.0.0.1:8080"
     handler.client_address = (client_host, 12345)
     handler.server = Mock()
     for name, value in (headers or {}).items():
+        if name.lower() == "host":
+            del handler.headers["Host"]
         handler.headers[name] = value
     response: dict[str, object] = {"headers": {}}
     handler.send_response = lambda code: response.update(status=code)
@@ -357,6 +360,47 @@ class SnapshotTests(TimedTestCase):
         args = query.call_args.args
         self.assertEqual(args[:3], (("a",), ("10", "11_2"), "terminal"))
         self.assertEqual(args[3].isoformat(), "2026-09-22T00:00:00+00:00")
+
+    def test_jobs_readiness_avoids_copying_node_detail_and_sets_etag(self):
+        """Polling jobs must not serialize the much larger status document."""
+        store = StatusStore([Machine("a", "host", "user")], 5, False, 15, jobs_api_enabled=True)
+        store._updated_at = "2026-09-23T10:00:00+00:00"
+        with patch.object(store, "payload", side_effect=AssertionError("status copied")), \
+                patch.object(store.job_service, "query", return_value={"jobs": []}):
+            response, document = request_handler(store, "/api/v1/jobs")
+
+        self.assertEqual(response["status"], 200)
+        self.assertEqual(document["jobs"], [])
+        self.assertIn("ETag", response["headers"])
+
+    def test_host_header_must_address_loopback_for_get_and_post(self):
+        """Reject rebinding Hosts before serving data or command endpoints."""
+        store = StatusStore([], 5, False, 15)
+        for method in ("do_GET", "do_POST"):
+            for host in ("example.com", "localhost.evil.test", "localhost#evil", ""):
+                with self.subTest(method=method, host=host):
+                    handler = object.__new__(make_handler(store))
+                    handler.headers = Message()
+                    if host:
+                        handler.headers["Host"] = host
+                    handler.path = "/api/v1/service"
+                    handler._write_response = Mock()
+                    getattr(handler, method)()
+                    self.assertEqual(handler._write_response.call_args.args[2], 421)
+        for host in ("localhost:8080", "127.0.0.1", "[::1]:8080"):
+            handler = object.__new__(make_handler(store))
+            handler.headers = Message()
+            handler.headers["Host"] = host
+            self.assertTrue(handler._trusted_host(), host)
+
+        public = object.__new__(make_handler(store, public_status=True))
+        public.headers = Message()
+        public.headers["Host"] = "dashboard.example.org"
+        public.command = "GET"
+        public.path = "/api/status"
+        self.assertTrue(public._trusted_host())
+        public.path = "/api/v1/sessions"
+        self.assertFalse(public._trusted_host())
 
     def test_queued_job_log_endpoint_returns_clear_not_found(self):
         store = StatusStore([Machine("a", "host", "user")], 5, False, 15, jobs_api_enabled=True)

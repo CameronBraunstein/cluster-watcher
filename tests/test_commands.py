@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -235,6 +236,25 @@ class RemoteCommandTests(TimedTestCase):
 
         self.assertEqual(payload["schema_version"], "1.0")
         self.assertEqual([item["name"] for item in payload["machines"]], ["open", "closed"])
+
+    @patch("clusterwatcher.commands.session_status")
+    def test_session_inventory_checks_machines_concurrently(self, status):
+        """One slow control-master check must not delay starting the next."""
+        barrier = threading.Barrier(2)
+
+        def check(machine, _timeout):
+            barrier.wait(timeout=2)
+            return {"name": machine.name, "session_open": True}
+
+        status.side_effect = check
+        service = RemoteCommandService(
+            [Machine("first", "a", "alice"), Machine("second", "b", "alice")], 5,
+        )
+
+        self.assertEqual(
+            [item["name"] for item in service.sessions()["machines"]],
+            ["first", "second"],
+        )
 
     @patch("clusterwatcher.commands.open_remote_shell", return_value=7)
     @patch("clusterwatcher.commands.session_status", return_value={"session_open": True, "error": None})

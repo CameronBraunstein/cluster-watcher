@@ -319,6 +319,12 @@ process.
 The tmux session name starts with `cluster-watcher-`. Inspect it with
 `tmux list-sessions` and `tmux attach -t <session-name>` on the extension host;
 detach using **Ctrl+B**, then **D**. **Stop service** shuts the backend down.
+If the tmux session exists but the service is unreachable, **Start service**
+offers **Restart Stale Session**. It terminates only the named session after
+confirmation, then starts the service again. A cancelled restart leaves the
+session intact; a service that recovers before the restart proceeds is attached instead.
+When the HTTP service is offline, Cluster Status omits the redundant SSH
+session fetch error.
 
 If a cluster's SSH session closes later, its **Cluster Status** card says so
 and shows **Log in again**. The button runs `cluster-watcher login <cluster>`

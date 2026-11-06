@@ -120,23 +120,42 @@ def _gpu_resource_text(fields: dict[str, str], primary: str, fallback: str) -> s
 
 
 def expand_hostlist(hostlist: str) -> list[str]:
-    """Expand common Slurm host-list ranges without invoking a remote shell."""
-    names: list[str] = []
-    for item in re.split(r",(?!(?:[^\[]*\]))", hostlist):
-        match = re.fullmatch(r"([^\[]+)\[([^]]+)\]", item)
-        if not match:
-            if item and not item.startswith("("):
-                names.append(item)
-            continue
-        prefix, ranges = match.groups()
-        for value in ranges.split(","):
-            if "-" not in value:
-                names.append(prefix + value)
-                continue
-            start, end = value.split("-", 1)
-            width = max(len(start), len(end))
-            names.extend(f"{prefix}{number:0{width}d}" for number in range(int(start), int(end) + 1))
-    return names
+    """Expand comma-separated Slurm ranges, suffixes, and bracket products."""
+    def split_items(value: str) -> list[str]:
+        """Split commas outside bracket expressions."""
+        parts: list[str] = []
+        depth = 0
+        start = 0
+        for index, char in enumerate(value):
+            if char == "[":
+                depth += 1
+            elif char == "]":
+                depth -= 1
+            elif char == "," and depth == 0:
+                parts.append(value[start:index])
+                start = index + 1
+        parts.append(value[start:])
+        return parts
+
+    def expand_item(value: str) -> list[str]:
+        """Expand the first bracket, then recursively expand its suffix."""
+        match = re.search(r"\[([^][]+)\]", value)
+        if match is None:
+            return [value] if value and not value.startswith("(") else []
+        result: list[str] = []
+        for part in match.group(1).split(","):
+            range_match = re.fullmatch(r"(\d+)-(\d+)", part)
+            if range_match:
+                start, end = range_match.groups()
+                width = max(len(start), len(end))
+                values = (f"{number:0{width}d}" for number in range(int(start), int(end) + 1))
+            else:
+                values = (part,)
+            for number in values:
+                result.extend(expand_item(value[:match.start()] + number + value[match.end():]))
+        return result
+
+    return [name for item in split_items(hostlist) for name in expand_item(item)]
 
 
 def slurm_duration_seconds(value: str) -> int | None:
@@ -183,6 +202,10 @@ def parse_jobs(output: str) -> list[dict[str, object]]:
     jobs: list[dict[str, object]] = []
     for line in output.splitlines():
         fields = line.split("|")
+        if len(fields) > 16:
+            # The current squeue format has 16 fields and JobName is the only
+            # free-text field allowed to contain the separator.
+            fields = [fields[0], "|".join(fields[1:len(fields) - 14]), *fields[len(fields) - 14:]]
         if len(fields) not in {14, 15, 16}:
             continue
         priority = fields.pop() if len(fields) == 16 else ""
@@ -310,6 +333,11 @@ def parse_accounting_jobs(output: str) -> list[dict[str, object]]:
     jobs: list[dict[str, object]] = []
     for line in output.splitlines():
         fields = line.rstrip("\n").split("|")
+        # JobIDRaw is a numeric allocation ID, distinct from an array task's
+        # display ID (for example 123_4). Older fixtures may omit it.
+        raw_job_id = fields.pop(1) if len(fields) >= 19 and fields[1].isdigit() else None
+        if len(fields) > 18:
+            fields = [fields[0], "|".join(fields[1:len(fields) - 16]), *fields[len(fields) - 16:]]
         if len(fields) != 18:
             continue
         (job_id, name, state, exit_code, submit_at, start_at, end_at,
@@ -320,6 +348,7 @@ def parse_accounting_jobs(output: str) -> list[dict[str, object]]:
             continue
         jobs.append({
             "job_id": job_id,
+            "_allocation_id": raw_job_id,
             "array_task_id": job_array_task_id(job_id),
             "name": name.strip() or job_id,
             "state": normalize_job_state(state),
@@ -350,7 +379,7 @@ def accounting_jobs_command(since: datetime, job_ids: tuple[str, ...] = (), user
         since = since.replace(tzinfo=timezone.utc)
     start = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     fields = (
-        "JobID,JobName,State,ExitCode,Submit,Start,End,ElapsedRaw,TimelimitRaw,Partition,"
+        "JobID,JobIDRaw,JobName,State,ExitCode,Submit,Start,End,ElapsedRaw,TimelimitRaw,Partition,"
         "NodeList,NNodes,NCPUS,AllocTRES,Reason,StdOut,StdErr,WorkDir"
     )
     command = f"TZ=UTC sacct --noheader --parsable2 --allocations --array --starttime={shlex.quote(start)} --format={fields}"
@@ -632,14 +661,21 @@ def collect_status(
             status.resource_error = previous.resource_error
             status.scheduling = deepcopy(previous.scheduling)
             status.capacity_updated_at = previous.capacity_updated_at
-        try:
-            if capacity:
+        if capacity:
+            try:
                 status.nodes = parse_node_status(sections["nodes"].output())
                 scheduler_section = sections["scheduler"]
                 status.scheduling = (
                     parse_scheduling_config(scheduler_section.stdout)
                     if scheduler_section.returncode == 0 else {}
                 )
+                status.partition_compute = rank_partitions(machine.name, status.nodes)
+            except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:
+                # Keep the basic sinfo partitions when node detail fails.
+                status.nodes = []
+                status.partition_compute = []
+                status.resource_error = str(exc)
+        try:
             if include_personal_details:
                 running_jobs = parse_jobs(sections["running"].output())
                 pending_jobs = parse_jobs(sections["pending"].output())
@@ -655,14 +691,12 @@ def collect_status(
                     if releases is not None:
                         node["next_release"] = releases.get(str(node["name"]))
                 status.user_jobs = [*running_jobs, *pending_jobs]
+                if not capacity and status.nodes:
+                    status.resource_error = None
             else:
                 status.user_jobs = []
-            if capacity:
-                status.partition_compute = rank_partitions(machine.name, status.nodes)
-        except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
-            # Preserve the basic sinfo partition data when detailed collection fails.
-            status.nodes = []
-            status.partition_compute = []
+        except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:
+            # A personal-job failure never invalidates the node inventory.
             status.user_jobs = []
             status.resource_error = str(exc)
         if include_jobs and capacity:

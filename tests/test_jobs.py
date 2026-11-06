@@ -1,11 +1,16 @@
 """Tests for the loopback-only personal jobs and log service."""
 
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+import subprocess
+import tempfile
+import threading
 from unittest.mock import patch
 
 from clusterwatcher.dashboard import is_loopback_host, serve
 from clusterwatcher.jobs import JobLogNotFound, JobService, MAX_LOG_TAIL_LINES, parse_since
-from clusterwatcher.models import ClusterStatus, Machine
+from clusterwatcher.models import AccountingSnapshot, ClusterStatus, Machine
 from clusterwatcher.slurm import accounting_jobs_command, parse_accounting_jobs
 from helpers import TimedTestCase
 
@@ -160,26 +165,64 @@ class JobServiceTests(TimedTestCase):
     @patch("clusterwatcher.jobs.run_remote")
     def test_explicit_path_outside_configured_root_is_refused(self, run_remote):
         machine = Machine("alpha", "alpha.example", "alice", job_log_roots=("/safe/logs",))
-        run_remote.return_value = "/secret/job.err\n/safe/logs\n"
+        run_remote.side_effect = RuntimeError("path is outside the configured job_log_roots")
         service = JobService([machine], 5, 15, lambda: [])
 
         with self.assertRaisesRegex(ValueError, "outside the configured"):
             service.log_tail("alpha", "10", explicit_path="/secret/job.err")
+        run_remote.assert_called_once()
+        self.assertIn("realpath -e", run_remote.call_args.args[2])
 
     @patch("clusterwatcher.jobs.run_remote")
     def test_log_tail_is_hard_capped_and_never_uses_cat(self, run_remote):
         machine = Machine("alpha", "alpha.example", "alice", job_log_roots=("/safe",))
         lines = "".join(f"line {number}\n" for number in range(MAX_LOG_TAIL_LINES + 1))
-        run_remote.side_effect = ["/safe/job.err\n/safe\n", lines]
+        run_remote.return_value = "__CW_LOG_PATH__/safe/job.err\x00" + lines
         service = JobService([machine], 5, 15, lambda: [])
 
         result = service.log_tail("alpha", "10", tail=999999, explicit_path="/safe/job.err")
 
         self.assertEqual(result["lines"], MAX_LOG_TAIL_LINES)
         self.assertTrue(result["truncated"])
-        tail_command = run_remote.call_args_list[1].args[2]
+        run_remote.assert_called_once()
+        tail_command = run_remote.call_args.args[2]
         self.assertIn(f"tail -n {MAX_LOG_TAIL_LINES + 1}", tail_command)
         self.assertNotIn("cat ", tail_command)
+
+    def test_backward_page_keeps_older_lines_when_file_is_short(self):
+        """A page offset can exceed the number of lines returned by tail."""
+        machine = Machine("alpha", "host", "alice", job_log_roots=("/safe",))
+        service = JobService([machine], 5, 15, lambda: [])
+        command = service._explicit_tail_command(machine, "/safe/job.log", 3, 5)
+        self.assertIn("tail -n 9", command)
+        self.assertIn("head -n -5", command)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log = root / "job.log"
+            log.write_text("".join(f"{number}\n" for number in range(7)), encoding="utf-8")
+            local_machine = Machine("alpha", "host", "alice", job_log_roots=(str(root),))
+            command = service._explicit_tail_command(local_machine, str(log), 3, 5)
+            result = subprocess.run(["sh", "-c", command], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.partition("\x00")[2], "0\n1\n")
+
+    def test_explicit_path_checks_symlink_target_before_reading(self):
+        """A symlink inside the allowed root cannot expose an outside log."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            safe = parent / "safe"
+            safe.mkdir()
+            secret = parent / "secret.log"
+            secret.write_text("private\n", encoding="utf-8")
+            link = safe / "linked.log"
+            link.symlink_to(secret)
+            machine = Machine("alpha", "host", "alice", job_log_roots=(str(safe),))
+            command = JobService._explicit_tail_command(machine, str(link), 10, 0)
+            result = subprocess.run(["sh", "-c", command], capture_output=True, text=True, check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("outside the configured job_log_roots", result.stderr)
+        self.assertNotIn("private", result.stdout)
 
     @patch("clusterwatcher.jobs.run_remote")
     @patch("clusterwatcher.jobs.collect_accounting_jobs")
@@ -197,9 +240,9 @@ class JobServiceTests(TimedTestCase):
         self.assertTrue(result["more_before"])
         self.assertNotIn("line 0\n", result["content"])
         command = run_remote.call_args.args[2]
-        self.assertIn("tac --", command)
-        self.assertIn(f"tail -n +{MAX_LOG_TAIL_LINES + 1}", command)
-        self.assertIn(f"head -n {MAX_LOG_TAIL_LINES + 1}", command)
+        self.assertNotIn("tac", command)
+        self.assertIn(f"tail -n {2 * MAX_LOG_TAIL_LINES + 1}", command)
+        self.assertIn(f"head -n -{MAX_LOG_TAIL_LINES}", command)
 
     @patch("clusterwatcher.jobs.run_remote", return_value="last line\n")
     @patch("clusterwatcher.jobs.collect_accounting_jobs")
@@ -212,6 +255,83 @@ class JobServiceTests(TimedTestCase):
 
         self.assertEqual(result["path"], "/work/alice/logs/job-10.err")
         self.assertEqual(result["content"], "last line\n")
+
+    @patch("clusterwatcher.jobs.run_remote", return_value="cached log\n")
+    @patch("clusterwatcher.jobs.collect_accounting_jobs")
+    def test_finished_log_uses_refreshed_accounting_and_caches_path(self, accounting, run_remote):
+        """Finished log opens should need only the tail SSH call."""
+        machine = Machine("alpha", "host", "alice")
+        row = accounting_line("10", stderr="logs/job-%j.err").replace("10|train", "10|17|train")
+        snapshot = AccountingSnapshot(parse_accounting_jobs(row), "fingerprint", "2026-09-22", "2026-09-22")
+        status = ClusterStatus("alpha", "host", "alice", accounting=snapshot)
+        service = JobService([machine], 5, 15, lambda: [status])
+
+        first = service.log_tail("alpha", "10")
+        status.accounting = None
+        second = service.log_tail("alpha", "10")
+
+        self.assertEqual(first["path"], "/work/alice/logs/job-17.err")
+        self.assertEqual(second["path"], first["path"])
+        self.assertEqual(run_remote.call_count, 2)
+        accounting.assert_not_called()
+
+    @patch("clusterwatcher.jobs.run_remote", return_value="older log\n")
+    @patch("clusterwatcher.jobs.collect_accounting_jobs")
+    def test_older_query_supplies_its_log_path_without_a_history_scan(self, accounting, run_remote):
+        """Opening an older queried job should reuse its accounting record."""
+        machine = Machine("alpha", "host", "alice")
+        accounting.return_value = parse_accounting_jobs(accounting_line("10"))
+        service = JobService([machine], 5, 15, lambda: [])
+
+        service.query(job_ids=("10",), since=SINCE)
+        log = service.log_tail("alpha", "10")
+
+        self.assertEqual(log["content"], "older log\n")
+        accounting.assert_called_once_with(machine, 5, SINCE, ("10",))
+        run_remote.assert_called_once()
+
+    def test_array_log_percent_j_uses_raw_allocation_id(self):
+        """An array task's display ID is not the numeric %j allocation ID."""
+        record = {"job_id": "123_4", "_allocation_id": "987", "name": "array"}
+
+        self.assertEqual(
+            JobService._expand_log_pattern("%j-%A_%a-%%.out", record),
+            "987-123_4-%.out",
+        )
+
+    @patch("clusterwatcher.jobs.collect_accounting_jobs")
+    def test_different_queries_do_not_wait_for_one_slow_cluster(self, accounting):
+        """A blocked accounting query must not hold the whole service lock."""
+        entered = threading.Event()
+        release = threading.Event()
+        machines = [Machine("slow", "slow", "alice"), Machine("fast", "fast", "alice")]
+        service = JobService(machines, 5, 15, lambda: [])
+
+        def collect(machine, *_args):
+            if machine.name == "slow":
+                entered.set()
+                release.wait(3)
+            return []
+
+        accounting.side_effect = collect
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            slow = pool.submit(service.query, ("slow",), (), "both", SINCE)
+            self.assertTrue(entered.wait(2))
+            try:
+                fast = pool.submit(service.query, ("fast",), (), "both", SINCE)
+                self.assertEqual(fast.result(timeout=2)["clusters"][0]["name"], "fast")
+            finally:
+                release.set()
+            self.assertEqual(slow.result(timeout=2)["clusters"][0]["name"], "slow")
+
+    @patch("clusterwatcher.jobs.collect_accounting_jobs")
+    def test_accounting_queries_for_clusters_run_concurrently(self, accounting):
+        """A multi-cluster request can overlap the two remote calls."""
+        barrier = threading.Barrier(2)
+        accounting.side_effect = lambda *_args: (barrier.wait(timeout=2), [])[1]
+        service = JobService([Machine("a", "a", "alice"), Machine("b", "b", "alice")], 5, 15, lambda: [])
+
+        self.assertEqual(len(service.query(since=SINCE)["clusters"]), 2)
 
     @patch("clusterwatcher.jobs.run_remote", return_value="")
     def test_cancel_is_user_scoped_validated_and_clears_cache(self, run_remote):

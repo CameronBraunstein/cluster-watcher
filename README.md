@@ -456,6 +456,13 @@ can also end tmux. SSH sessions can still close independently because
 of network loss, remote policy, or their configured `control_persist` idle
 limit. Use **Log in** to reopen one without restarting the service.
 
+If the named tmux session exists but its HTTP service is unreachable, **Start
+Server** offers **Restart Stale Session**. Confirming terminates only that
+named session and starts a fresh service; cancelling leaves it untouched. If
+the service becomes reachable while the prompt is open, the extension attaches
+without terminating the session. Cluster Status shows an SSH-session inspection
+error only when the HTTP service itself is reachable.
+
 For a terminal-only setup, run `tmux new -s cluster-watcher`, then run
 `cluster-watcher serve --jobs-api --no-browser` inside that session and
 detach with **Ctrl+B**, then **D**. VS Code will attach to it when opened.
@@ -1243,11 +1250,30 @@ curl --get --fail --silent \
 Parameters: `stream=out|err` (default `err`), `tail=N` (default 100, maximum
 2000), `before=N` (skip that many newest lines to page backward), and
 optional `path=/absolute/remote/path`, which must lie under the cluster's
-`job_log_roots`. The log is found through `scontrol show job` while the job is
-live and `sacct` afterwards. The response has `cluster`, `job_id`, `stream`,
+`job_log_roots`. Explicit paths are resolved, checked against those roots,
+and read in one SSH call. Live jobs use `scontrol show job`; completed jobs
+reuse cached `sacct` records when available, then fall back to a bounded
+24-hour accounting lookup. For array jobs, `%j` in a log pattern uses Slurm's
+raw allocation ID, while `%A` and `%a` use the array master and task IDs.
+Older pages use a bounded tail from EOF. The
+response has `cluster`, `job_id`, `stream`,
 resolved `path`, line count, `before`, `more_before`, `truncated` (an alias),
 and `content`. A queued job or missing file returns `404`, unsafe parameters
 `400`, and remote failures `502`.
+
+The jobs endpoint checks first-refresh readiness without copying the full node
+inventory. Independent job queries and per-cluster accounting calls can run in
+parallel; identical concurrent queries share one result. Job names containing
+`|` remain visible in live and accounting views. Slurm node ranges with a
+suffix or multiple bracket groups are expanded for per-node usage and release
+times. A failed personal-job refresh retains the most recent capacity snapshot.
+The session inventory checks configured machines concurrently.
+
+When bound to loopback, the HTTP service accepts only loopback `Host` headers
+(`localhost`, `127.0.0.1`, or `::1`) and rejects other names before serving any
+route. An HTTP proxy must preserve a loopback Host header. If explicitly bound
+to a public address without the jobs or command API, the public status routes
+remain available; session and write routes still require a loopback Host.
 
 #### Batch script
 
@@ -1633,6 +1659,8 @@ policy coverage), the extension unit and integration tests, and six
 standalone builds (Linux, macOS, Windows × x86-64, ARM64) using the shared
 [`build-standalone`](.github/actions/build-standalone/action.yml) action.
 Linux artifacts are smoke-tested in a glibc 2.17 container.
+Each build selects a managed Python interpreter for the target architecture;
+the Windows ARM64 build checks the interpreter is native before freezing it.
 
 To release, update the version in `pyproject.toml`, `vscode/package.json`,
 and `vscode/package-lock.json`, add a dated `vscode/CHANGELOG.md` entry, and

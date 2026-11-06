@@ -984,6 +984,28 @@ class ClusterWatcherTests(TimedTestCase):
 
         self.assertEqual(jobs[0]["gpus"], 1)
 
+    def test_job_parsing_keeps_pipes_in_names_and_expands_compound_nodes(self):
+        """A literal pipe in JobName must not hide jobs from the dashboard."""
+        from clusterwatcher.slurm import expand_hostlist, parse_jobs, parse_accounting_jobs
+
+        live = parse_jobs(
+            "42|train|phase2|RUNNING|gpu|r[1-2]n[01-02]-ib|4|8|gpu:2|"
+            "2026-09-21T10:00:00|2026-09-21T08:00:00|NULL|00:10:00|01:00:00|00:50:00|None|9\n"
+        )
+        self.assertEqual(live[0]["name"], "train|phase2")
+        self.assertEqual(live[0]["nodes"], [
+            "r1n01-ib", "r1n02-ib", "r2n01-ib", "r2n02-ib",
+        ])
+        self.assertEqual(expand_hostlist("node[1-2]-ib,node7"), ["node1-ib", "node2-ib", "node7"])
+        archived = parse_accounting_jobs(
+            "42|57|train|phase2|COMPLETED|0:0|2026-09-22T10:00:00|"
+            "2026-09-22T10:01:00|2026-09-22T10:02:00|60|60|gpu|"
+            "node[1-2]-ib|2|8|cpu=8|None|/logs/out|/logs/err|/work\n"
+        )
+        self.assertEqual(archived[0]["name"], "train|phase2")
+        self.assertEqual(archived[0]["nodes"], ["node1-ib", "node2-ib"])
+        self.assertEqual(archived[0]["_allocation_id"], "57")
+
     @patch("clusterwatcher.slurm.run_remote")
     def test_terminal_job_collection_uses_one_bounded_live_query(self, run_remote):
         """Avoid full node inventory calls when rendering only personal jobs."""

@@ -1,6 +1,7 @@
 """Policy layer for loopback-only remote command and SSH-session APIs."""
 
 from dataclasses import asdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import threading
 
@@ -32,10 +33,16 @@ class RemoteCommandService:
 
     def sessions(self) -> dict[str, object]:
         """Return availability and persistence estimates for every machine."""
+        machines = list(self.machines.values())
+        if len(machines) < 2:
+            statuses = [session_status(machine, self.ssh_timeout) for machine in machines]
+        else:
+            with ThreadPoolExecutor(max_workers=len(machines), thread_name_prefix="sessions") as pool:
+                statuses = list(pool.map(lambda machine: session_status(machine, self.ssh_timeout), machines))
         return {
             "schema_version": "1.0",
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "machines": [session_status(machine, self.ssh_timeout) for machine in self.machines.values()],
+            "machines": statuses,
         }
 
     def _open_machine(self, machine_name: str) -> Machine:

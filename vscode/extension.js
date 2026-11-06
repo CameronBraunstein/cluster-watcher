@@ -9,11 +9,11 @@ const { LOG_TAIL_LINES, logDocumentContent, logRequestPath, prependLogPage, virt
 const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = require('./events');
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
 const { RefreshCoordinator, RefreshFeedback, refreshResultMessage } = require('./refresh');
-const { hasServiceSession, serviceSessionName, startServiceSession } = require('./tmux');
+const { hasServiceSession, serviceSessionName, startOrRecoverServiceSession } = require('./tmux');
 const { isFailureGroup, jobRef, localTime, setDateFormat, renderJobs, renderJobsApiDisabled, renderLoading, renderStatus, renderWelcome, stateGroup } = require('./renderers');
 const {
   ExecutableValidationError, backgroundLoginArguments, cliArguments,
-  jobsApiDisabled, responseError, cliTerminalOptions, configurationError, resolveConfigPath,
+  jobsApiDisabled, responseError, cliTerminalOptions, configurationError, inspectionState, resolveConfigPath,
   persistentServiceCommand, runCli, serviceCommand, validateBackgroundCredentialSupport, validateExecutable,
   validatePersistentServiceSupport,
 } = require('./service');
@@ -225,7 +225,27 @@ class ServiceController {
       activity: 'Starting a persistent tmux service…', error: undefined, recentLines: [],
     });
     try {
-      await startServiceSession(sessionName, persistentServiceCommand(settings));
+      const session = await startOrRecoverServiceSession(
+        sessionName, persistentServiceCommand(settings),
+        () => this.client.isClusterWatcherService(),
+        async () => {
+          const choice = await vscode.window.showWarningMessage(
+            `The tmux session ${sessionName} exists, but ${settings.backendUrl} is not responding. `
+            + 'Restarting will terminate that session and any process inside it.',
+            { modal: true }, 'Restart Stale Session',
+          );
+          return choice === 'Restart Stale Session';
+        },
+      );
+      if (session.outcome === 'cancelled') {
+        this.publish({ state: 'error', activity: undefined, error: session.error.message });
+        return;
+      }
+      if (session.outcome === 'attached') {
+        this.publish({ state: 'attached', owned: false, activity: undefined, error: undefined });
+        await this.refresh();
+        return;
+      }
       this.startedSessionName = sessionName;
       await this.waitUntilReady(sessionName);
       if (this.disposed) return;
@@ -345,13 +365,9 @@ class ServiceController {
     this.onAvailabilityChange(reachable);
     const serviceInfo = reachable && serviceResult.value && typeof serviceResult.value === 'object'
       ? serviceResult.value : {};
-    if (inventoryResult.status === 'rejected') {
-      this.sessionsError = inventoryResult.reason?.message || String(inventoryResult.reason);
-      this.provider.updateServer(this.lifecycle, this.sessions, this.sessionsError, checkedAt);
-    } else {
-      this.sessions = inventoryResult.value;
-      this.sessionsError = undefined;
-    }
+    const inspection = inspectionState(reachable, inventoryResult);
+    this.sessions = inspection.sessions;
+    this.sessionsError = inspection.error;
     if (reachable) {
       this.publish({
         state: 'attached', owned: false,
