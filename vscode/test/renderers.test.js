@@ -11,10 +11,12 @@ test('first-collection loading views retain the Cluster Status service control',
 
   const status = renderLoading('Cluster Status', {}, false, { service: {
     state: 'attached', url: 'http://127.0.0.1:8080/', pid: 42,
+    recentLines: [{ stream: 'stderr', text: 'startup diagnostic' }],
   } });
   assert.match(status, /<div class="service-summary">.*?http:\/\/127\.0\.0\.1:8080\/.*?<\/div><p class="muted" role="status">Cluster Watcher is running\. Loading cluster status/s);
   assert.match(status, /data-command="clusterWatcher\.stopService"/);
   assert.doesNotMatch(status, /class="error"/);
+  assert.doesNotMatch(status, /Recent backend output|startup diagnostic/);
 
   const connecting = renderLoading('Cluster Status', {}, true);
   assert.match(connecting, /Connecting to the local Cluster Watcher service/);
@@ -171,6 +173,8 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /\.cluster-summary\{[^}]*display:inline-flex;flex-direction:column/);
   assert.match(html, /\.cluster-login-host\{[^}]*font-size:\.8em;font-weight:400/);
   assert.ok(html.lastIndexOf('class="configure-clusters"') > html.lastIndexOf('class="cluster-group"'));
+  assert.match(html, /<hr class="cluster-config-separator"><button class="configure-clusters"/);
+  assert.match(html, /\.cluster-config-separator\{[^}]*border-top:1px solid #fff/);
   assert.match(html, /<button class="configure-clusters" data-scroll-anchor="configure-clusters" type="button" data-command="clusterWatcher\.editConfig" data-args="\[\]">configure clusters\.\.\.<\/button>/);
   assert.match(html, /const statusAnchor = document\.querySelector\('\[data-scroll-anchor="configure-clusters"\]'\)/);
   assert.doesNotMatch(html, /## cluster_0 ##/);
@@ -210,14 +214,17 @@ test('matched fair-share factors have bars above GPU and node availability', () 
   const apuCard = cards.find((card) => card.includes('>apu</span>'));
   assert.match(gpuCard, /role="progressbar"[^>]*aria-valuenow="0\.725"/);
   assert.match(gpuCard, /class="fair-share-marker" style="left:72\.50%"/);
-  assert.match(gpuCard, /class="fair-share-label">0\.725000/);
+  assert.match(gpuCard, /<span class="fair-share-title">FairShare:<\/span><div class="fair-share-bars"><div class="fair-share-row"><div class="fair-share-track"/);
+  assert.doesNotMatch(gpuCard, /fair-share-label|0\.725000/);
   assert.match(gpuCard, /Account: gpu_a100_bs_default&#10;Visible rank: 1302\/4728/);
   assert.match(html, /\.fair-share-track\{[^}]*height:6px/);
+  assert.match(html, /\.partition-fair-share\{display:flex;align-items:flex-start/);
+  assert.match(html, /\.fair-share-bars\{[^}]*padding-top:3px/);
   assert.match(html, /\.fair-share-track\{[^}]*linear-gradient\(90deg,var\(--vscode-editorError-foreground\),var\(--vscode-descriptionForeground\) 50%,var\(--vscode-testing-iconPassed\)\)/);
   assert.ok(gpuCard.indexOf('FairShare:') < gpuCard.indexOf('GPUs:'));
   assert.ok(gpuCard.indexOf('GPUs:') < gpuCard.indexOf('Nodes:'));
   assert.doesNotMatch(apuCard, /gpu_a100_bs_default|unscoped/);
-  assert.match(apuCard, /class="fair-share-label">—/);
+  assert.match(apuCard, /class="fair-share-track unavailable"/);
   assert.match(apuCard, /No confirmed association match for this partition/);
   assert.match(html, /sshare unavailable/);
   assert.doesNotMatch(html, /Other fair-share associations|fair-share-card/);
@@ -232,8 +239,7 @@ test('two fair-share associations render as separate bars with separate hover de
   }] });
 
   assert.equal((html.match(/class="fair-share-track" role="progressbar"/g) || []).length, 2);
-  assert.match(html, /class="fair-share-label">0\.800000/);
-  assert.match(html, /class="fair-share-label">0\.250000/);
+  assert.doesNotMatch(html, /fair-share-label|0\.800000|0\.250000/);
   assert.match(html, /Account: lab&#10;Visible rank: 4\/100/);
   assert.match(html, /Account: other&#10;Visible rank: 50\/100/);
   assert.doesNotMatch(html, /Other fair-share associations/);
@@ -250,7 +256,8 @@ test('unscoped accounts matched through access rules appear on the partition car
     partitions: [{ name: 'gpu-v100', gpus: { total: 6 }, fair_share: [entry] }],
   }] });
 
-  assert.match(html, /class="fair-share-label">0\.998557/);
+  assert.match(html, /aria-valuenow="0\.998557"/);
+  assert.doesNotMatch(html, /fair-share-label/);
   assert.match(html, /Account: gpu_v100_bs_default&#10;Visible rank: 3\/4728&#10;Slurm partition: not specified&#10;Matched by: account hierarchy and QOS/);
   assert.doesNotMatch(html, /Other fair-share associations|No partition specified/);
 });
@@ -320,7 +327,7 @@ test('Cluster Status replaces logged-out session details with scoped login actio
   assert.equal((html.match(/>Log in<\/button>/g) || []).length, 1);
   assert.match(html, /Refreshing sessions…/);
   assert.match(html, /Could not inspect SSH sessions: temporary inspection error/);
-  assert.match(html, /<details class="cluster-diagnostics"><summary class="muted">Recent backend output<\/summary><pre class="service-output">stderr: diagnostic &lt;line&gt;<\/pre><\/details>/);
+  assert.doesNotMatch(html, /Recent backend output|cluster-diagnostics|service-output|diagnostic &lt;line&gt;/);
   assert.match(html, /\.cluster-login-actions\{display:flex;[^}]*flex-wrap:wrap/);
   assert.doesNotMatch(html, /<title>Server Status<\/title>|class="session-row"/);
 
@@ -597,12 +604,16 @@ test('offline Cluster Status owns the service control while My Jobs points to it
   assert.match(html, /No service found\. Use Cluster Status to start it\./);
   assert.doesNotMatch(html, /data-command="clusterWatcher\.(?:startService|runSetup|editConfig|openSettings)"/);
   assert.match(html, /ECONNREFUSED &lt;127\.0\.0\.1&gt;/);
-  const status = renderWelcome('Cluster Status', '', {}, { service: { state: 'offline' } });
+  const status = renderWelcome('Cluster Status', '', {}, { service: {
+    state: 'offline', recentLines: [{ stream: 'stderr', text: 'offline diagnostic' }],
+  } });
   assert.doesNotMatch(status, /Connection details/);
   assert.match(status, /class="service-toggle off"[^>]*data-command="clusterWatcher\.startService"/);
   assert.ok(status.indexOf('class="service-summary"') < status.indexOf('class="welcome"'));
   assert.equal((status.match(/data-command="clusterWatcher\.startService"/g) || []).length, 1);
+  assert.match(status, /<hr class="cluster-config-separator"><button class="configure-clusters"/);
   assert.match(status, /class="configure-clusters"[^>]*data-command="clusterWatcher\.editConfig"/);
+  assert.doesNotMatch(status, /Recent backend output|offline diagnostic/);
 });
 
 test('every card offers a compact script action for its job', () => {

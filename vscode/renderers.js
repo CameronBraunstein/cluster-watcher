@@ -173,7 +173,7 @@ function commandButtonAttributes(command, args = []) {
 
 /** Return the configuration action owned by the Cluster Status view. */
 function configureClustersButton() {
-  return `<button class="configure-clusters" data-scroll-anchor="configure-clusters" ${commandButtonAttributes('clusterWatcher.editConfig')}>configure clusters...</button>`;
+  return `<hr class="cluster-config-separator"><button class="configure-clusters" data-scroll-anchor="configure-clusters" ${commandButtonAttributes('clusterWatcher.editConfig')}>configure clusters...</button>`;
 }
 
 /**
@@ -301,10 +301,10 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 .launchability{display:flex;align-items:end;gap:2px;margin-left:auto;min-width:0}.launch-shape{display:grid;grid-template-rows:7px 9px;justify-items:center;gap:1px}.launch-count{color:var(--vscode-descriptionForeground);font-size:7px;line-height:7px}.launch-block{box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:9px;height:9px;border:1px solid color-mix(in srgb,var(--vscode-foreground) 24%,transparent);border-radius:2px;color:#fff;font-size:7px;font-weight:700;line-height:1;cursor:help}.launch-wait-0{background:#15803d}.launch-wait-1{background:#22c55e}.launch-wait-2{background:#eab308;color:#111}.launch-wait-3{background:#f97316}.launch-wait-4{background:#dc2626}.launch-blocked{background:#111}.launch-missing,.launch-pending{background:#777}.launch-unsupported{color:var(--vscode-descriptionForeground);background:repeating-linear-gradient(135deg,transparent 0 2px,color-mix(in srgb,var(--vscode-descriptionForeground) 25%,transparent) 2px 4px)}
 .job-id:hover,.job-id:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--vscode-focusBorder)}
 button.button{border:0;font:inherit;cursor:pointer}
-.service-summary{display:flex;align-items:center;gap:4px;margin:3px 0 5px;min-width:0;white-space:nowrap;font-size:.78em}.service-summary>strong{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}.service-url{box-sizing:border-box;display:block;flex:0 0 auto;max-width:calc(100% - 26px);min-width:0;margin:0;padding:0;overflow:hidden;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;text-decoration:underline;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 22px;width:22px;height:12px;margin:0;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:12px}.service-toggle:disabled{cursor:wait;opacity:.65}.cluster-login-actions{display:flex;flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end;gap:3px;margin-left:auto}.cluster-login-actions>.compact-action{box-sizing:border-box;max-width:100%;padding:2px 4px;font-size:.68em;line-height:1.3;white-space:normal;overflow-wrap:anywhere;text-align:left}.service-output{max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.72em}.cluster-diagnostics{margin-top:10px}.cluster-diagnostics>summary{cursor:pointer}
+.service-summary{display:flex;align-items:center;gap:4px;margin:3px 0 5px;min-width:0;white-space:nowrap;font-size:.78em}.service-summary>strong{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}.service-url{box-sizing:border-box;display:block;flex:0 0 auto;max-width:calc(100% - 26px);min-width:0;margin:0;padding:0;overflow:hidden;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;text-decoration:underline;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 22px;width:22px;height:12px;margin:0;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:12px}.service-toggle:disabled{cursor:wait;opacity:.65}.cluster-login-actions{display:flex;flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end;gap:3px;margin-left:auto}.cluster-login-actions>.compact-action{box-sizing:border-box;max-width:100%;padding:2px 4px;font-size:.68em;line-height:1.3;white-space:normal;overflow-wrap:anywhere;text-align:left}
 .service-setup-actions{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 8px}.service-setup-actions>.button{box-sizing:border-box;max-width:100%;padding:3px 5px;font-size:.78em;white-space:normal;text-align:left}
-.configure-clusters{display:inline-block;margin-top:6px;padding:0;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;font-size:.78em;text-align:left;text-decoration:none;cursor:pointer}.configure-clusters:hover{text-decoration:underline}
-.partition-fair-share{margin-top:5px}.fair-share-title{display:block;margin-bottom:2px;color:var(--vscode-descriptionForeground);font-size:.72em}.fair-share-bars{display:grid;gap:4px}.fair-share-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,max-content);align-items:center;column-gap:2px;min-width:0}.fair-share-track{box-sizing:border-box;position:relative;display:block;width:100%;height:6px;overflow:visible;border-radius:4px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed));cursor:help}.fair-share-marker{position:absolute;top:-3px;width:2px;height:12px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.fair-share-label{color:var(--vscode-foreground);font-size:.7em;font-variant-numeric:tabular-nums;white-space:nowrap}.fair-share-track.unavailable{background:color-mix(in srgb,var(--vscode-foreground) 10%,transparent)}
+.cluster-config-separator{height:0;margin:9px 0 5px;border:0;border-top:1px solid #fff}.configure-clusters{display:inline-block;margin:0;padding:0;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;font-size:.78em;text-align:left;text-decoration:none;cursor:pointer}.configure-clusters:hover{text-decoration:underline}
+.partition-fair-share{display:flex;align-items:flex-start;gap:0;margin-top:5px;font-size:.72em}.fair-share-title{box-sizing:border-box;flex:0 0 56px;width:56px;padding-right:2px;color:var(--vscode-descriptionForeground);white-space:nowrap}.fair-share-bars{display:grid;flex:1 1 auto;min-width:0;gap:4px;padding-top:3px}.fair-share-row{min-width:0}.fair-share-track{box-sizing:border-box;position:relative;display:block;width:100%;height:6px;overflow:visible;border-radius:4px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed));cursor:help}.fair-share-marker{position:absolute;top:-3px;width:2px;height:12px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.fair-share-track.unavailable{background:color-mix(in srgb,var(--vscode-foreground) 10%,transparent)}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
@@ -519,15 +519,6 @@ function serverNotices(server = {}) {
   return activity + error + sessionsError;
 }
 
-/** Render the bounded backend-output diagnostic formerly owned by Server Status. */
-function backendDiagnostics(service = {}) {
-  const output = (service.recentLines || [])
-    .map((line) => `${line.stream === 'stderr' ? 'stderr: ' : ''}${line.text}`).join('\n');
-  return output
-    ? `<details class="cluster-diagnostics"><summary class="muted">Recent backend output</summary><pre class="service-output">${escapeHtml(output)}</pre></details>`
-    : '';
-}
-
 /** Render startup progress without suggesting that the service is offline. */
 function renderLoading(title, freshness = {}, connecting = false, server = {}) {
   const subject = title === 'My Jobs' ? 'jobs' : 'cluster status';
@@ -535,7 +526,7 @@ function renderLoading(title, freshness = {}, connecting = false, server = {}) {
     ? `Connecting to the local Cluster Watcher service to load ${subject}…`
     : `Cluster Watcher is running. Loading ${subject}…`;
   const controls = title === 'Cluster Status'
-    ? serviceSummary(server.service) + serverNotices(server) + backendDiagnostics(server.service) : '';
+    ? serviceSummary(server.service) + serverNotices(server) : '';
   return document(title, `${controls}<p class="muted" role="status">${message}</p>`, freshness);
 }
 
@@ -559,7 +550,7 @@ function renderJobsApiDisabled(title, command, freshness = {}) {
  */
 function renderWelcome(title, detail, freshness = {}, server = {}) {
   const controls = title === 'Cluster Status'
-    ? serviceSummary(server.service) + serverNotices(server) + backendDiagnostics(server.service) : '';
+    ? serviceSummary(server.service) + serverNotices(server) : '';
   const guidance = title === 'Cluster Status' ? 'No service found.' : 'No service found. Use Cluster Status to start it.';
   const body = `${controls}<div class="welcome"><p class="muted" role="status">${guidance}</p>`
     + (detail ? `<details class="welcome-detail"><summary class="muted">Connection details</summary><p class="error">${escapeHtml(detail)}</p></details>` : '')
@@ -920,7 +911,6 @@ function fairShareBar(entry) {
   const rank = Number(entry.rank), total = Number(entry.total);
   if (entry.factor == null || !Number.isFinite(factor) || factor < 0 || factor > 1
       || !Number.isInteger(rank) || !Number.isInteger(total) || rank < 1 || total < rank) return '';
-  const label = factor.toFixed(6);
   const details = [
     `Account: ${entry.account}`,
     `Visible rank: ${rank}/${total}`,
@@ -929,14 +919,14 @@ function fairShareBar(entry) {
     'Higher factors favor jobs; they do not predict start time.',
   ].join('\n');
   const tooltip = escapeHtml(details).replace(/\n/g, '&#10;');
-  return `<div class="fair-share-row"><div class="fair-share-track" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${factor}" aria-label="${tooltip}" data-fast-tooltip="${tooltip}"><i class="fair-share-marker" style="left:${(factor * 100).toFixed(2)}%"></i></div><span class="fair-share-label">${label}</span></div>`;
+  return `<div class="fair-share-row"><div class="fair-share-track" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${factor}" aria-label="${tooltip}" data-fast-tooltip="${tooltip}"><i class="fair-share-marker" style="left:${(factor * 100).toFixed(2)}%"></i></div></div>`;
 }
 
 /** Put each matched factor above the GPU and node availability bars. */
 function partitionFairShare(entries, error = null) {
   const bars = (Array.isArray(entries) ? entries : []).map(fairShareBar).filter(Boolean).join('');
   const explanation = escapeHtml(error || 'No confirmed association match for this partition.').replace(/\n/g, '&#10;');
-  const unavailable = `<div class="fair-share-row"><div class="fair-share-track unavailable" aria-label="${explanation}" data-fast-tooltip="${explanation}"></div><span class="fair-share-label">—</span></div>`;
+  const unavailable = `<div class="fair-share-row"><div class="fair-share-track unavailable" aria-label="${explanation}" data-fast-tooltip="${explanation}"></div></div>`;
   return `<div class="partition-fair-share"><span class="fair-share-title">FairShare:</span><div class="fair-share-bars">${bars || unavailable}</div></div>`;
 }
 
@@ -1025,7 +1015,7 @@ function renderStatus(payload, disclosures = {}, freshness = {}, server = {}) {
   }
   const content = clusters.join('') || '<p>No clusters returned.</p>';
   const body = serviceSummary(server.service) + serverNotices(server) + content
-    + configureClustersButton() + backendDiagnostics(server.service);
+    + configureClustersButton();
   return document('Cluster Status', body, freshness);
 }
 

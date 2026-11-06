@@ -140,6 +140,10 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   );
   const views = new Map(manifest.contributes.views.clusterWatcher.map((view) => [view.id, view]));
   assert.equal(views.size, 4);
+  assert.deepEqual(manifest.contributes.views.clusterWatcher.map((view) => view.id), [
+    'clusterWatcher.status', 'clusterWatcher.jobs',
+    'clusterWatcher.statusOffline', 'clusterWatcher.jobsOffline',
+  ]);
   for (const kind of ['jobs', 'status']) {
     assert.equal(views.get(`clusterWatcher.${kind}`).when, 'clusterWatcher.serviceAvailable');
     assert.deepEqual(
@@ -154,7 +158,6 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
     { command: 'clusterWatcher.refreshJobsBusy', when: 'view == clusterWatcher.jobs && clusterWatcher.refreshingJobs', group: 'navigation@1' },
     { command: 'clusterWatcher.refreshStatus', when: 'view == clusterWatcher.status && !clusterWatcher.refreshingStatus', group: 'navigation@1' },
     { command: 'clusterWatcher.refreshStatusBusy', when: 'view == clusterWatcher.status && clusterWatcher.refreshingStatus', group: 'navigation@1' },
-    { command: 'clusterWatcher.runSetup', when: 'view == clusterWatcher.status || view == clusterWatcher.statusOffline', group: '2_configuration@1' },
   ]);
   assert.deepEqual(manifest.contributes.menus.commandPalette, [
     { command: 'clusterWatcher.refreshJobsBusy', when: 'false' },
@@ -162,6 +165,7 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   ]);
   assert.match(manifest.contributes.menus['editor/title'][0].when, /cluster-watcher-log/);
   const commands = new Map(manifest.contributes.commands.map((command) => [command.command, command]));
+  assert.ok(commands.has('clusterWatcher.runSetup'));
   assert.equal(commands.get('clusterWatcher.refresh').icon, '$(refresh)');
   assert.equal(commands.get('clusterWatcher.refreshJobs').icon, '$(refresh)');
   assert.equal(commands.get('clusterWatcher.refreshJobsBusy').icon, '$(sync~spin)');

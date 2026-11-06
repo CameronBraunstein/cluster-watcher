@@ -411,7 +411,8 @@ cluster-watcher serve --jobs-api
 
 ### VS Code sidebar
 
-The extension adds a Cluster Watcher icon to the Activity Bar with two views.
+The extension adds a Cluster Watcher icon to the Activity Bar with two views:
+**Cluster Status** above **My Jobs**.
 It is a thin client for the service above and has no SSH or Slurm code of its
 own.
 
@@ -419,9 +420,9 @@ own.
 switch to collapsed, compact offline placeholders. Expand **Cluster Status** to
 use its always-visible server toggle; **Start Server** beside the off switch
 explains its action. **My Jobs** points to that control instead of duplicating
-it. **Run setup wizard** remains in the **Cluster Status** title menu. The
-**configure clusters...** link below the
-cluster cards opens that file; configuration and settings commands remain
+it. **Run setup wizard** remains in the Command Palette. The
+**configure clusters...** link below the cluster cards, separated by a thin
+white line, opens that file; configuration and settings commands remain
 available from VS Code's Command Palette.
 The placeholders disappear when the service responds, and the live job and
 cluster views return. On Linux and macOS, **Start Server** launches
@@ -503,11 +504,11 @@ unchanged job card rather than jumping to the top of **My Jobs**.
 Each cluster is a collapsible group of permanently expanded, compact partition
 cards ordered by compute rank. Each partition card shows the fair-share factor
 of every user/account association that Slurm explicitly ties to the partition
-*or* whose account and QOS pass that partition's access rules. **FairShare**
-appears as a compact bar above the **GPUs:** and **Nodes:** availability bars.
+*or* whose account and QOS pass that partition's access rules. **FairShare:**
+appears beside a compact bar above the **GPUs:** and **Nodes:** availability bars.
 It has the same thickness as those availability bars and uses the pending-job
 priority scale from red through neutral to green; a marker identifies the
-factor's position from 0–1, with the exact value beside it. Each matched
+factor's position from 0–1. The decimal value is not shown. Each matched
 association gets its own bar. Hover a bar to see its account, rank among
 *all visible associations on that cluster*, Slurm partition scope, and how
 the association was matched. Higher factors are more favorable; rank 1 has

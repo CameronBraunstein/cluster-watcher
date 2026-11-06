@@ -115,27 +115,27 @@
     "views": {
       "clusterWatcher": [
         {
-          "id": "clusterWatcher.jobs",
-          "name": "My Jobs",
-          "type": "webview",
-          "when": "clusterWatcher.serviceAvailable"
-        },
-        {
           "id": "clusterWatcher.status",
           "name": "Cluster Status",
           "type": "webview",
           "when": "clusterWatcher.serviceAvailable"
         },
         {
-          "id": "clusterWatcher.jobsOffline",
+          "id": "clusterWatcher.jobs",
           "name": "My Jobs",
+          "type": "webview",
+          "when": "clusterWatcher.serviceAvailable"
+        },
+        {
+          "id": "clusterWatcher.statusOffline",
+          "name": "Cluster Status",
           "type": "webview",
           "when": "!clusterWatcher.serviceAvailable",
           "visibility": "collapsed"
         },
         {
-          "id": "clusterWatcher.statusOffline",
-          "name": "Cluster Status",
+          "id": "clusterWatcher.jobsOffline",
+          "name": "My Jobs",
           "type": "webview",
           "when": "!clusterWatcher.serviceAvailable",
           "visibility": "collapsed"
@@ -173,11 +173,6 @@
           "command": "clusterWatcher.refreshStatusBusy",
           "when": "view == clusterWatcher.status && clusterWatcher.refreshingStatus",
           "group": "navigation@1"
-        },
-        {
-          "command": "clusterWatcher.runSetup",
-          "when": "view == clusterWatcher.status || view == clusterWatcher.statusOffline",
-          "group": "2_configuration@1"
         }
       ],
       "editor/title": [

@@ -1,6 +1,6 @@
 # Cluster Watcher for VS Code
 
-This extension adds **My Jobs** and **Cluster Status** views
+This extension adds **Cluster Status** above **My Jobs**
 to the Activity Bar. It is a thin client for the loopback APIs provided by
 `cluster-watcher serve`; the Python application remains responsible for
 configuration, SSH, MFA, Slurm queries, and refresh scheduling.
@@ -8,8 +8,8 @@ configuration, SSH, MFA, Slurm queries, and refresh scheduling.
 When no backend service is found, **My Jobs** and **Cluster Status** become
 collapsed offline placeholders. Cluster Status retains its service switch,
 which is labeled **Start Server** while off. **Run setup wizard** remains in
-the Cluster Status title menu at all times. The
-**configure clusters...** link beneath the cluster cards opens the
+the Command Palette. A thin white line separates the cluster cards from the
+**configure clusters...** link, which opens the
 configuration file; configuration and settings commands remain in the Command
 Palette. Successful backend responses restore the live views. You can still
 expand an offline placeholder manually.
@@ -168,8 +168,8 @@ prepends one more bounded page until the complete remote file is loaded.
 
 When the service is not reachable, the collapsed jobs and cluster placeholders
 contain no duplicate startup buttons. **Run setup wizard** runs `cluster-watcher setup`
-in a terminal, and the Cluster Status title menu keeps that action available
-even when a TOML already exists. **Edit configuration** opens the file reported
+in a terminal and remains available in the Command Palette even when a TOML
+already exists. **Edit configuration** opens the file reported
 by `cluster-watcher config --path` in an editor tab; if missing, it offers the
 wizard. Saving the configuration from VS Code validates it immediately (via
 `cluster-watcher list`) and reports any error; restart the service to apply it.
@@ -269,8 +269,8 @@ session lifetime. Every logged-out interactive machine replaces both of those
 details with **Log in**. A machine with
 `credential_group = "site"` also has **Log into all machines on site**; the
 first action targets only that machine, while the second reuses the shared
-password for all closed group members. Recent backend output and session
-inspection errors also appear in Cluster Status, so there is no separate Server
+password for all closed group members. Session inspection errors also appear in
+Cluster Status, so there is no separate Server
 Status view. Stopping an attached local service asks
 for confirmation, warns that other connected clients will be disconnected,
 and then requests a graceful shutdown from the backend.
