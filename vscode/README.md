@@ -8,8 +8,8 @@ configuration, SSH, MFA, Slurm queries, and refresh scheduling.
 When no backend service is found, **My Jobs** and **Cluster Status** become
 collapsed offline placeholders. Cluster Status retains its service switch,
 which is labeled **Start Server** while off. **Run setup wizard** remains in
-the Command Palette. A thin white line separates the cluster cards from the
-**configure clusters...** link, which opens the
+the Command Palette. A thin gray line separates the cluster cards from the
+service toggle and dashboard URL, followed by **configure clusters...**, which opens the
 configuration file; configuration and settings commands remain in the Command
 Palette. Successful backend responses restore the live views. You can still
 expand an offline placeholder manually.
@@ -111,8 +111,8 @@ priority <rank> / <your pending>` on separate lines, or hover the **Priority**
 label to the left of the bar for a reminder that lower rank numbers are better
 and a short scheduling caveat. The marker visualizes the global rank and falls
 back to the user rank only when global data is unavailable. If no wait estimate exists, the
-gauge moves into the always-visible
-summary and becomes as thick as a normal progress bar. It has no directional
+gauge appears in the collapsed summary and becomes as thick as a normal
+progress bar; opening the card moves it into the expanded details. It has no directional
 arrows and is omitted when no useful comparison is possible.
 Finished, failed, cancelled, and other non-running/non-pending cards show the
 archive-box icon on the compact card, just left of progress. Running and
@@ -274,7 +274,8 @@ Cluster Status, so there is no separate Server
 Status view. Stopping an attached local service asks
 for confirmation, warns that other connected clients will be disconnected,
 and then requests a graceful shutdown from the backend.
-**configure clusters...** appears below the cluster cards and opens the
+Below a thin gray divider, the service toggle and dashboard URL appear before
+**configure clusters...**. That link opens the
 selected `clusters.toml` without moving the Cluster Status scroll position (or
 offers setup if the file does not exist).
 The extension starts the service in a detached `tmux` session on its host, so

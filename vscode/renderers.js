@@ -171,9 +171,9 @@ function commandButtonAttributes(command, args = []) {
   return `type="button" data-command="${escapeHtml(command)}" data-args="${escapeHtml(JSON.stringify(args))}"`;
 }
 
-/** Return the configuration action owned by the Cluster Status view. */
-function configureClustersButton() {
-  return `<hr class="cluster-config-separator"><button class="configure-clusters" data-scroll-anchor="configure-clusters" ${commandButtonAttributes('clusterWatcher.editConfig')}>configure clusters...</button>`;
+/** Render the Cluster Status footer with service controls above configuration. */
+function clusterFooter(service = {}) {
+  return `<hr class="cluster-config-separator">${serviceSummary(service)}<button class="configure-clusters" data-scroll-anchor="configure-clusters" ${commandButtonAttributes('clusterWatcher.editConfig')}>configure clusters...</button>`;
 }
 
 /**
@@ -296,14 +296,14 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 .card[open] .name{white-space:normal;overflow-wrap:anywhere}
 .progress-message{display:block;max-width:100%;font-size:.72em;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
 .dependency-icon{display:inline-block;margin-left:2px;font-family:system-ui,sans-serif;font-weight:700;cursor:help}.dependency-icon.waiting{font-weight:400}.dependency-icon.satisfied{color:var(--vscode-testing-iconPassed)}.dependency-icon.failed{color:var(--vscode-errorForeground)}
-.priority-context{display:flex;align-items:center;gap:5px;margin-top:6px;min-width:0}.priority-gauge{display:flex;align-items:center;flex:1 1 auto;min-width:54px;max-width:150px;cursor:help}.priority-track{position:relative;display:block;flex:1 1 auto;height:4px;border-radius:3px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed))}.priority-marker{position:absolute;top:-3px;width:2px;height:10px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.priority-prominent{margin-top:5px}.priority-prominent .priority-track{height:6px}.priority-prominent .priority-marker{top:-3px;height:12px}.priority-help{color:var(--vscode-descriptionForeground);font-size:.8em;cursor:help}
+.priority-context{display:flex;align-items:center;gap:5px;margin-top:6px;min-width:0}.priority-gauge{display:flex;align-items:center;flex:1 1 auto;min-width:54px;max-width:150px;cursor:help}.priority-track{position:relative;display:block;flex:1 1 auto;height:4px;border-radius:3px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed))}.priority-marker{position:absolute;top:-3px;width:2px;height:10px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.priority-prominent{margin-top:5px}.priority-prominent .priority-track{height:6px}.priority-prominent .priority-marker{top:-3px;height:12px}.card[open] .card-summary-progress>.priority-prominent{display:none}.priority-help{color:var(--vscode-descriptionForeground);font-size:.8em;cursor:help}
 .partition-card{padding:5px;container-type:inline-size}.partition-title{align-items:center;flex-wrap:wrap;gap:4px 7px}.partition-title>.name{flex:0 1 auto;margin-right:auto}.partition-title>.launchability{flex:0 0 auto;margin-left:0}.partition-specs{display:block;margin-top:3px;font-size:.72em;white-space:normal;overflow-wrap:anywhere}.gpu-model,.vram-spec,.thread-spec{cursor:help}.partition-availability{display:flex;align-items:center;gap:0;margin-top:4px;font-size:.72em}.partition-availability-label{box-sizing:border-box;flex:0 0 36px;width:36px;padding-right:2px;color:var(--vscode-descriptionForeground);text-align:left;white-space:nowrap}.partition-availability>.availability-cell{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,max-content);column-gap:2px;flex:1 1 auto;min-width:0}.partition-availability .availability-cell>.availability{width:100%;min-width:0}.partition-availability .availability-count{width:max-content;min-width:min(var(--availability-count-width),45cqw);max-width:100%;overflow:hidden;text-overflow:ellipsis}.times dd>.availability-cell{justify-content:flex-end}
 .launchability{display:flex;align-items:end;gap:2px;margin-left:auto;min-width:0}.launch-shape{display:grid;grid-template-rows:7px 9px;justify-items:center;gap:1px}.launch-count{color:var(--vscode-descriptionForeground);font-size:7px;line-height:7px}.launch-block{box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:9px;height:9px;border:1px solid color-mix(in srgb,var(--vscode-foreground) 24%,transparent);border-radius:2px;color:#fff;font-size:7px;font-weight:700;line-height:1;cursor:help}.launch-wait-0{background:#15803d}.launch-wait-1{background:#22c55e}.launch-wait-2{background:#eab308;color:#111}.launch-wait-3{background:#f97316}.launch-wait-4{background:#dc2626}.launch-blocked{background:#111}.launch-missing,.launch-pending{background:#777}.launch-unsupported{color:var(--vscode-descriptionForeground);background:repeating-linear-gradient(135deg,transparent 0 2px,color-mix(in srgb,var(--vscode-descriptionForeground) 25%,transparent) 2px 4px)}
 .job-id:hover,.job-id:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--vscode-focusBorder)}
 button.button{border:0;font:inherit;cursor:pointer}
 .service-summary{display:flex;align-items:center;gap:4px;margin:3px 0 5px;min-width:0;white-space:nowrap;font-size:.78em}.service-summary>strong{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}.service-url{box-sizing:border-box;display:block;flex:0 0 auto;max-width:calc(100% - 26px);min-width:0;margin:0;padding:0;overflow:hidden;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;text-decoration:underline;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 22px;width:22px;height:12px;margin:0;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:12px}.service-toggle:disabled{cursor:wait;opacity:.65}.cluster-login-actions{display:flex;flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end;gap:3px;margin-left:auto}.cluster-login-actions>.compact-action{box-sizing:border-box;max-width:100%;padding:2px 4px;font-size:.68em;line-height:1.3;white-space:normal;overflow-wrap:anywhere;text-align:left}
 .service-setup-actions{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 8px}.service-setup-actions>.button{box-sizing:border-box;max-width:100%;padding:3px 5px;font-size:.78em;white-space:normal;text-align:left}
-.cluster-config-separator{height:0;margin:9px 0 5px;border:0;border-top:1px solid #fff}.configure-clusters{display:inline-block;margin:0;padding:0;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;font-size:.78em;text-align:left;text-decoration:none;cursor:pointer}.configure-clusters:hover{text-decoration:underline}
+.cluster-config-separator{height:0;margin:9px 0 5px;border:0;border-top:1px solid color-mix(in srgb,var(--vscode-foreground) 40%,transparent)}.configure-clusters{display:inline-block;margin:0;padding:0;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;font-size:.78em;text-align:left;text-decoration:none;cursor:pointer}.configure-clusters:hover{text-decoration:underline}
 .partition-fair-share{display:flex;align-items:flex-start;gap:0;margin-top:5px;font-size:.72em}.fair-share-title{box-sizing:border-box;flex:0 0 56px;width:56px;padding-right:2px;color:var(--vscode-descriptionForeground);white-space:nowrap}.fair-share-bars{display:grid;flex:1 1 auto;min-width:0;gap:4px;padding-top:3px}.fair-share-row{min-width:0}.fair-share-track{box-sizing:border-box;position:relative;display:block;width:100%;height:6px;overflow:visible;border-radius:4px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed));cursor:help}.fair-share-marker{position:absolute;top:-3px;width:2px;height:12px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.fair-share-track.unavailable{background:color-mix(in srgb,var(--vscode-foreground) 10%,transparent)}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
 (() => {
@@ -486,7 +486,7 @@ function renderMessage(title, message, action = '', freshness = {}) {
   return document(title, `<p class="error">${escapeHtml(message)}</p>${action}`, freshness);
 }
 
-/** Render the shared service toggle and dashboard URL shown atop Cluster Status. */
+/** Render the shared service toggle and dashboard URL in Cluster Status. */
 function serviceSummary(service = {}) {
   const state = String(service.state || 'offline').toLowerCase();
   const labels = {
@@ -526,8 +526,9 @@ function renderLoading(title, freshness = {}, connecting = false, server = {}) {
     ? `Connecting to the local Cluster Watcher service to load ${subject}…`
     : `Cluster Watcher is running. Loading ${subject}…`;
   const controls = title === 'Cluster Status'
-    ? serviceSummary(server.service) + serverNotices(server) : '';
-  return document(title, `${controls}<p class="muted" role="status">${message}</p>`, freshness);
+    ? serverNotices(server) : '';
+  const footer = title === 'Cluster Status' ? clusterFooter(server.service) : '';
+  return document(title, `${controls}<p class="muted" role="status">${message}</p>${footer}`, freshness);
 }
 
 /**
@@ -545,16 +546,16 @@ function renderJobsApiDisabled(title, command, freshness = {}) {
 
 /**
  * Render a compact offline notice in My Jobs or Cluster Status. Service
- * startup lives atop Cluster Status; ``detail`` remains available in a
+ * startup lives in Cluster Status; ``detail`` remains available in a
  * collapsed diagnostic section.
  */
 function renderWelcome(title, detail, freshness = {}, server = {}) {
   const controls = title === 'Cluster Status'
-    ? serviceSummary(server.service) + serverNotices(server) : '';
+    ? serverNotices(server) : '';
   const guidance = title === 'Cluster Status' ? 'No service found.' : 'No service found. Use Cluster Status to start it.';
   const body = `${controls}<div class="welcome"><p class="muted" role="status">${guidance}</p>`
     + (detail ? `<details class="welcome-detail"><summary class="muted">Connection details</summary><p class="error">${escapeHtml(detail)}</p></details>` : '')
-    + `</div>${title === 'Cluster Status' ? configureClustersButton() : ''}`;
+    + `</div>${title === 'Cluster Status' ? clusterFooter(server.service) : ''}`;
   return document(title, body, freshness);
 }
 
@@ -688,7 +689,7 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
   const noEstimatePriority = priority && progressSpec(job, asOf).expected == null
     && pendingExplanation(job) === 'no estimate available'
     ? jobPriorityGauge(job, priorityJobs, true) : '';
-  const expandedPriority = noEstimatePriority ? '' : priority;
+  const expandedPriority = priority;
   const idBadge = `<span class="badge job-id${ending ? ' ending' : ''}" role="button" tabindex="0" data-copy="${escapeHtml(identifier)}" title="${escapeHtml(identifier)}${ending ? ' · ending' : ''} — click to copy">${escapeHtml(identifier)}</span>`;
   return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary><span class="card-summary-title" data-full-name="${escapeHtml(hoverText)}"><span class="name">${escapeHtml(name)}</span></span><span class="card-summary-progress">${quickArchive ? archiveAction : ''}${jobProgress(job, asOf, Date.now(), noEstimatePriority)}${idBadge}</span></summary><div class="card-body"><div class="muted card-meta" title="${escapeHtml(metadata)}">${escapeHtml(metadata)}</div>${expandedPriority}<dl class="times">${lifecycleRows(job, asOf)}${dependencyLinks(job, jobs)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
 }
@@ -1014,8 +1015,7 @@ function renderStatus(payload, disclosures = {}, freshness = {}, server = {}) {
     clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${summary}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(cluster.resource_error)}</p>` : ''}${cards}</details>`);
   }
   const content = clusters.join('') || '<p>No clusters returned.</p>';
-  const body = serviceSummary(server.service) + serverNotices(server) + content
-    + configureClustersButton();
+  const body = serverNotices(server) + content + clusterFooter(server.service);
   return document('Cluster Status', body, freshness);
 }
 

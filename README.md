@@ -420,9 +420,10 @@ own.
 switch to collapsed, compact offline placeholders. Expand **Cluster Status** to
 use its always-visible server toggle; **Start Server** beside the off switch
 explains its action. **My Jobs** points to that control instead of duplicating
-it. **Run setup wizard** remains in the Command Palette. The
-**configure clusters...** link below the cluster cards, separated by a thin
-white line, opens that file; configuration and settings commands remain
+it. **Run setup wizard** remains in the Command Palette. Below the cluster
+cards, a thin gray divider precedes the server toggle and URL, followed by
+**configure clusters...**, which opens that file. Configuration and settings
+commands remain
 available from VS Code's Command Palette.
 The placeholders disappear when the service responds, and the live job and
 cluster views return. On Linux and macOS, **Start Server** launches
@@ -572,12 +573,12 @@ summary shows the active physical SSH login node beneath the cluster name and
 job-ratio bar, which is useful when a configured login-node pool fails over.
 Cluster disclosures use the browser's same native marker as the My Jobs groups,
 so their triangles have exactly the same size.
-At the top of the view, the service toggle and linked local dashboard URL remain
-available while cluster data is loading and while the backend is offline.
+Below the divider, the service toggle remains available while cluster data is
+loading or the backend is offline. The dashboard URL appears when it is running.
 
 #### Integrated service and SSH status
 
-The service control now lives at the top of **Cluster Status**. Its compact line
+The service control lives in the **Cluster Status** footer. Its compact line
 puts a small start/stop toggle on the left and preserves the linked local
 dashboard URL at the sidebar's minimum width. Both tmux and independently
 started services show only the dashboard URL, without a redundant status label.
@@ -893,7 +894,7 @@ resource-compatible jobs. It is not a guaranteed launch order, probability,
 or start-time forecast: QOS and scheduling tiers, reservations, resource fit,
 and backfill can all change which job starts. The gauge normally sits in the
 expanded card; without a start estimate it replaces that message in the
-summary.
+collapsed summary. Opening the card moves the gauge into the expanded details.
 Partitions deliberately do not show `PriorityJobFactor`, because that policy
 component is not a meaningful measure of availability to the user.
 

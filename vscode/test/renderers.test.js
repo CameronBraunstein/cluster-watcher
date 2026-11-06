@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, renderLoading, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
 
-test('first-collection loading views retain the Cluster Status service control', () => {
+test('first-collection loading views place service controls in the Cluster Status footer', () => {
   const jobs = renderLoading('My Jobs');
   assert.match(jobs, /role="status">Cluster Watcher is running\. Loading jobs/);
   assert.doesNotMatch(jobs, /class="service-summary"|class="error"/);
@@ -13,7 +13,7 @@ test('first-collection loading views retain the Cluster Status service control',
     state: 'attached', url: 'http://127.0.0.1:8080/', pid: 42,
     recentLines: [{ stream: 'stderr', text: 'startup diagnostic' }],
   } });
-  assert.match(status, /<div class="service-summary">.*?http:\/\/127\.0\.0\.1:8080\/.*?<\/div><p class="muted" role="status">Cluster Watcher is running\. Loading cluster status/s);
+  assert.match(status, /role="status">Cluster Watcher is running\. Loading cluster status…<\/p><hr class="cluster-config-separator"><div class="service-summary">.*?http:\/\/127\.0\.0\.1:8080\/.*?<\/div><button class="configure-clusters"/s);
   assert.match(status, /data-command="clusterWatcher\.stopService"/);
   assert.doesNotMatch(status, /class="error"/);
   assert.doesNotMatch(status, /Recent backend output|startup diagnostic/);
@@ -173,8 +173,8 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /\.cluster-summary\{[^}]*display:inline-flex;flex-direction:column/);
   assert.match(html, /\.cluster-login-host\{[^}]*font-size:\.8em;font-weight:400/);
   assert.ok(html.lastIndexOf('class="configure-clusters"') > html.lastIndexOf('class="cluster-group"'));
-  assert.match(html, /<hr class="cluster-config-separator"><button class="configure-clusters"/);
-  assert.match(html, /\.cluster-config-separator\{[^}]*border-top:1px solid #fff/);
+  assert.match(html, /<hr class="cluster-config-separator"><div class="service-summary">.*?<\/div><button class="configure-clusters"/s);
+  assert.match(html, /\.cluster-config-separator\{[^}]*border-top:1px solid color-mix\(in srgb,var\(--vscode-foreground\) 40%,transparent\)/);
   assert.match(html, /<button class="configure-clusters" data-scroll-anchor="configure-clusters" type="button" data-command="clusterWatcher\.editConfig" data-args="\[\]">configure clusters\.\.\.<\/button>/);
   assert.match(html, /const statusAnchor = document\.querySelector\('\[data-scroll-anchor="configure-clusters"\]'\)/);
   assert.doesNotMatch(html, /## cluster_0 ##/);
@@ -274,7 +274,7 @@ test('long availability fractions keep their complete value available on hover',
   assert.match(html, /aria-label="2 of 7 free" title="2\/7 Free">2\/7 Free<\/span>/);
 });
 
-test('Cluster Status puts the service toggle and dashboard URL before cluster cards', () => {
+test('Cluster Status puts the service toggle and dashboard URL below the divider', () => {
   const html = renderStatus({ clusters: [
     { name: 'cluster_0', reachable: true, partitions: [] },
   ] }, {}, {}, { service: {
@@ -284,7 +284,9 @@ test('Cluster Status puts the service toggle and dashboard URL before cluster ca
   assert.match(html, /class="service-toggle on"[^>]*data-command="clusterWatcher\.stopService"[^>]*aria-label="Stop service"/);
   assert.match(html, /<div class="service-summary"><button class="service-toggle on"[^>]*><\/button><button class="service-url"[^>]*data-command="clusterWatcher\.openDashboard"[^>]*>http:\/\/127\.0\.0\.1:8080\/<\/button><\/div>/);
   assert.match(html, /data-fast-tooltip="Process: 1234&#10;Started: [^"]+"/);
-  assert.ok(html.indexOf('class="service-summary"') < html.indexOf('class="cluster-group"'));
+  assert.ok(html.indexOf('class="cluster-group"') < html.indexOf('class="cluster-config-separator"'));
+  assert.ok(html.indexOf('class="cluster-config-separator"') < html.indexOf('class="service-summary"'));
+  assert.ok(html.indexOf('class="service-summary"') < html.indexOf('class="configure-clusters"'));
   assert.doesNotMatch(html, /class="service-url"[^>]*href="#"/);
 
   const stopped = renderStatus({ clusters: [] }, {}, {}, { service: { state: 'offline' } });
@@ -554,8 +556,16 @@ test('pending cards show a labeled relative-priority gauge only in expanded cont
   const noEstimateSummary = noEstimateCard.match(/<summary.*?<\/summary>/s)[0];
   assert.match(noEstimateSummary, /priority-context priority-prominent/);
   assert.doesNotMatch(noEstimateCard, /no estimate available/);
-  assert.equal((noEstimateCard.match(/class="priority-gauge"/g) || []).length, 1);
+  assert.equal((noEstimateCard.match(/class="priority-gauge"/g) || []).length, 2);
+  assert.match(noEstimateCard, /<\/summary><div class="card-body">.*?<span class="priority-context"><span class="priority-help"/s);
   assert.match(noEstimateHtml, /\.priority-prominent \.priority-track\{height:6px\}/);
+  assert.match(noEstimateHtml, /\.card\[open\] \.card-summary-progress>\.priority-prominent\{display:none\}/);
+  const expanded = renderJobs({ jobs: [
+    { ...low, expected_start_at: null },
+    { ...high, expected_start_at: null },
+  ] }, { [`card:active:${jobKey(low)}`]: true });
+  assert.match(expanded, /data-job-ref="c\/1" open><summary>/);
+  assert.match(expanded, /data-job-ref="c\/1" open>.*?<\/summary><div class="card-body">.*?class="priority-context"/s);
 });
 
 test('partition launchability uses absolute configurable wait buckets, not priority factors', () => {
@@ -609,9 +619,10 @@ test('offline Cluster Status owns the service control while My Jobs points to it
   } });
   assert.doesNotMatch(status, /Connection details/);
   assert.match(status, /class="service-toggle off"[^>]*data-command="clusterWatcher\.startService"/);
-  assert.ok(status.indexOf('class="service-summary"') < status.indexOf('class="welcome"'));
+  assert.ok(status.indexOf('class="welcome"') < status.indexOf('class="cluster-config-separator"'));
+  assert.ok(status.indexOf('class="cluster-config-separator"') < status.indexOf('class="service-summary"'));
   assert.equal((status.match(/data-command="clusterWatcher\.startService"/g) || []).length, 1);
-  assert.match(status, /<hr class="cluster-config-separator"><button class="configure-clusters"/);
+  assert.match(status, /<hr class="cluster-config-separator"><div class="service-summary">.*?<\/div><button class="configure-clusters"/s);
   assert.match(status, /class="configure-clusters"[^>]*data-command="clusterWatcher\.editConfig"/);
   assert.doesNotMatch(status, /Recent backend output|offline diagnostic/);
 });
