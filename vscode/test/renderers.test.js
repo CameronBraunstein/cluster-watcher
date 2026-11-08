@@ -173,7 +173,7 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /\.cluster-summary\{[^}]*display:inline-flex;flex-direction:column/);
   assert.match(html, /<dialog class="sessions-dialog" aria-labelledby="sessions-dialog-title">/);
   assert.match(html, /class="sessions-dialog-text" tabindex="0">No SSH sessions are available\./);
-  assert.match(html, /class="sessions-dialog-header"><button class="sessions-dialog-close" type="button" data-close-sessions aria-label="Close SSH sessions">×<\/button><h2/);
+  assert.match(html, /class="sessions-dialog-header"><button class="sessions-dialog-close" type="button" data-close-sessions aria-label="Close SSH Sessions">×<\/button><h2/);
   assert.doesNotMatch(html, /data-copy-sessions|sessions-dialog-actions|>Close<\/button>/);
   assert.match(html, /\.sessions-dialog-text\{[^}]*user-select:text/);
   assert.match(html, /sessionsDialog\.showModal\(\)/);
@@ -224,7 +224,7 @@ test('matched fair-share factors have bars above GPU and node availability', () 
   assert.match(gpuCard, /class="fair-share-marker" style="left:72\.50%"/);
   assert.match(gpuCard, /<span class="fair-share-title">FairShare:<\/span><div class="fair-share-bars"><div class="fair-share-row"><div class="fair-share-track"/);
   assert.doesNotMatch(gpuCard, /fair-share-label|0\.725000/);
-  assert.match(gpuCard, /Account: gpu_a100_bs_default&#10;Visible rank: 1302\/4728/);
+  assert.match(gpuCard, /gpu_a100_bs_default: 1302\/4728/);
   assert.match(html, /\.fair-share-track\{[^}]*height:6px/);
   assert.match(html, /\.partition-fair-share\{display:flex;align-items:flex-start/);
   assert.match(html, /\.fair-share-bars\{[^}]*padding-top:3px/);
@@ -251,8 +251,8 @@ test('two fair-share associations share one track with separate markers and hove
   assert.match(html, /class="fair-share-marker" style="left:80\.00%"/);
   assert.match(html, /class="fair-share-marker" style="left:25\.00%"/);
   assert.doesNotMatch(html, /fair-share-label|0\.800000|0\.250000/);
-  assert.match(html, /Account: lab&#10;Visible rank: 4\/100/);
-  assert.match(html, /Account: other&#10;Visible rank: 50\/100/);
+  assert.match(html, /lab: 4\/100/);
+  assert.match(html, /other: 50\/100/);
   assert.doesNotMatch(html, /Other fair-share associations/);
 });
 
@@ -269,7 +269,7 @@ test('unscoped accounts matched through access rules appear on the partition car
 
   assert.match(html, /aria-valuenow="0\.998557"/);
   assert.doesNotMatch(html, /fair-share-label/);
-  assert.match(html, /Account: gpu_v100_bs_default&#10;Visible rank: 3\/4728&#10;Slurm partition: not specified&#10;Matched by: account hierarchy and QOS/);
+  assert.match(html, /gpu_v100_bs_default: 3\/4728/);
   assert.doesNotMatch(html, /Other fair-share associations|No partition specified/);
 });
 
@@ -992,4 +992,53 @@ test('session popup separates each entry and fits its content with minimal botto
   assert.match(html, /\.sessions-dialog-text\{[^}]*border-top:1px solid color-mix/);
   assert.match(html, /\.sessions-dialog-text:last-of-type\{padding-bottom:0\}/);
   assert.match(html, /\.sessions-dialog\{[^}]*height:fit-content;min-height:0;max-height:calc\(100vh - 8px\)/);
+});
+
+test('each fair-share marker has only its own account and rank tooltip', () => {
+  const html = renderStatus({ clusters: [{ name: 'cluster_a', reachable: true, partitions: [{
+    name: 'gpu', gpus: { total: 0 }, fair_share: [
+      { account: 'account_a', factor: 0.8, rank: 2, total: 10 },
+      { account: 'account_b', factor: 0.3, rank: 7, total: 10 },
+    ],
+  }] }] });
+  const tooltips = [...html.matchAll(/class="fair-share-marker"[^>]*data-fast-tooltip="([^"]*)"/g)]
+    .map((match) => match[1]);
+  assert.ok(tooltips.every((text) => !/Account:|Visible rank:|&#10;/.test(text)));
+  assert.deepEqual(tooltips, ['account_a: 2/10',
+    'account_b: 7/10']);
+  for (const track of html.matchAll(/<div class="fair-share-track[^>]*>/g)) {
+    assert.doesNotMatch(track[0], /data-fast-tooltip=|title=/);
+  }
+  assert.match(html, /\.fair-share-marker:hover\{outline:1px solid var\(--vscode-focusBorder\)\}/);
+  assert.doesNotMatch(html, /Startup dry run|Matched by:/);
+});
+
+test('fair-share marker tooltips escape account names and cover single and missing associations', () => {
+  const html = renderStatus({ clusters: [{ name: 'cluster_a', reachable: true, partitions: [{
+    name: 'gpu', gpus: { total: 0 }, fair_share: [
+      { account: '<project>"', factor: 0.5, rank: 1, total: 2 },
+    ],
+  }, { name: 'cpu', gpus: { total: 0 }, fair_share: [] }] }] });
+  assert.match(html, /data-fast-tooltip="&lt;project&gt;&quot;: 1\/2"/);
+  assert.equal((html.match(/class="fair-share-marker"/g) || []).length, 1);
+  for (const track of html.matchAll(/<div class="fair-share-track[^>]*>/g)) {
+    assert.doesNotMatch(track[0], /data-fast-tooltip=|title=/);
+  }
+});
+
+test('account hover boxes fit their text and constrain long names to the visible sidebar', () => {
+  const html = renderStatus({ clusters: [] });
+  const styles = html.match(/\.fast-tooltip\{([^}]*)\}/)[1];
+  assert.match(styles, /box-sizing:border-box;width:max-content/);
+  assert.match(styles, /max-width:min\(220px,calc\(100vw - 8px\)\)/);
+  assert.match(styles, /overflow-wrap:anywhere/);
+  assert.match(html, /const viewportWidth = document\.documentElement\.clientWidth/);
+  assert.match(html, /fastTooltip\.style\.maxWidth = Math\.max\(0, Math\.min\(220, viewportWidth - 8\)\)/);
+  assert.match(html, /viewportWidth - tooltipBounds\.width - 4/);
+  assert.match(html, /addEventListener\('resize', hideFastTooltip\)/);
+});
+
+test('SSH Sessions popup title capitalizes Sessions', () => {
+  const html = renderStatus({ clusters: [] });
+  assert.match(html, /<h2 id="sessions-dialog-title">SSH Sessions<\/h2>/);
 });

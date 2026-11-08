@@ -510,15 +510,25 @@ appears beside a compact bar above the **GPUs:** and **Nodes:** availability bar
 It has the same thickness as those availability bars and uses the pending-job
 priority scale from red through neutral to green; a marker identifies the
 factor's position from 0–1. The decimal value is not shown. Each matched
-association gets a marker on the same bar. Hover the bar to see each account and its rank among
-*all visible associations on that cluster*, Slurm partition scope, and how
-the association was matched. Higher factors are more favorable; rank 1 has
+association gets a marker on the same bar. Hover an individual marker to
+highlight it and see `account_name: rank/total` on one line, with the rank
+measured among all visible associations on that cluster. Hover boxes fit their
+text and stay within the sidebar; long account names wrap when needed. The overall bar has no hover tooltip. Higher factors are more favorable; rank 1 has
 the highest factor and ties share a rank. This is not a rank
 within that partition's pending queue or a start-time promise: age, QOS,
 reservations, resource fit, and site submission policy also affect scheduling.
 Slurm uses the association of the account a job is submitted under (the default
 account if none is specified), with an optional partition-specific association.
-It does not combine the displayed factors across accounts for one job. See
+It does not combine the displayed factors across accounts for one job or
+automatically select the highest marker. For example, if `account_a` has factor
+0.8 and `account_b` has factor 0.3, a job submitted under `account_b` uses that
+association's 0.3, rather than 0.8 or their average. Site submission policies
+can assign or override accounts. FairShare displays every matching association
+without attempting to infer a submission account or running startup dry runs.
+For a pending job,
+`scontrol show job JOB_ID` shows its account and QOS, and `sprio -j JOB_ID -l`
+shows its priority components when the multifactor priority plugin is enabled.
+A higher fair-share factor alone does not guarantee an earlier start. See
 [Slurm accounting](https://slurm.schedmd.com/accounting.html) and
 [multifactor priority](https://slurm.schedmd.com/priority_multifactor.html).
 
@@ -535,7 +545,8 @@ descends from its `AllowAccounts=gpu_v100` parent and its QOS is allowed there.
 The matching is conservative: unknown ancestry/QOS or restricted Unix groups
 leave the association unmatched. The interface omits unmatched associations;
 they remain in the snapshot API. A partition without a confirmed match shows
-an em dash instead of a marker and value, with any mapping error on hover. If an administrator changes access rules,
+an unavailable track instead of an account marker; mapping errors remain in
+the API and accessible labels. If an administrator changes access rules,
 restart the service to recollect them. Fair-share *factors* change over time,
 so `sshare` is still queried at most once every ten minutes (five-second
 limit). The browser dashboard follows the same rule.
@@ -592,7 +603,7 @@ toggle says **Stop service** on hover; the gray/off toggle says **Start service*
 and has **Start Server** beside it.
 
 Cluster Status shows reusable SSH-session state; there is no separate Server
-Status view. **view sessions...** above **configure clusters...** opens a
+Status view. **view sessions...** above **configure clusters...** opens the **SSH Sessions** popup, a
 selectable dialog inside Cluster Status that spans nearly the full view width, with one scrollbar and an **×** close
 button close to the upper-left edge. Each entry shows `name: username@node`
 followed by `🕒 HH:MM left` on the next line (hours and minutes). Popup text uses the gray **My Jobs** update color at a slightly larger size,

@@ -238,10 +238,16 @@ block for its exact one-hour-job estimate, expected start, or Slurm error, and
 hover the GPU model for its full name. VRAM and thread hover text explicitly
 labels those amounts. When the partition name and complete launchability strip
 do not fit together, the strip wraps intact and flush left onto a second line.
-Thin gray lines separate clusters. Each partition has one FairShare track;
-when several account associations match, each has its own marker and hover
-details. Slurm applies the factor for the account used by a submitted job,
-not an average of the markers.
+Thin gray lines separate clusters. Each partition has one FairShare track
+with a marker for every matching account association. Hover an individual
+marker to highlight it and see `account_name: rank/total`. Hover boxes fit
+their text and stay within the sidebar, wrapping long account names when needed. The
+background track has no hover tooltip. FairShare does not run startup dry
+runs or attempt to choose a submission account. Slurm uses the association
+for the account a job is submitted under, rather than averaging the markers.
+To inspect an actual pending job, use `scontrol show job JOB_ID` for its
+account/QOS and `sprio -j JOB_ID -l` for its priority components (with the
+multifactor priority plugin).
 
 **Free GPUs** precedes a green/red bar with its `idle/total` fraction;
 hover the bar for a node-only state breakdown (zero-count categories are
@@ -266,7 +272,8 @@ off, and its hover says
 to the toggle; there is no duplicate start button. A running tmux service shows
 the URL without the redundant “Running in the background” label. Hover the URL
 for the backend process ID and start time. Cluster headings show the cluster
-name and job-ratio bar without the login node. **view sessions...** opens a
+name and job-ratio bar without the login node. **view sessions...** opens the
+**SSH Sessions** popup, a
 selectable dialog in Cluster Status that spans nearly the full view width, with a single scrollbar and an **×** close
 button close to the upper-left edge. Entries show `name: username@node`
 followed by `🕒 HH:MM left` on the next line (hours and minutes). Popup text uses the gray **My Jobs** update color at a slightly larger size,
