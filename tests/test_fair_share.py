@@ -31,9 +31,9 @@ class FairShareTests(TimedTestCase):
         self.assertEqual(partition_associations(summary, "apu"), [])
 
     def test_user_scoped_sshare_tree_preserves_real_account_ancestry(self):
-        """Recover INF parent records hidden from ordinary sacctmgr queries."""
-        command = account_tree_command("cbraunst")
-        self.assertIn("sshare --users=cbraunst", command)
+        """Recover site parent records hidden from ordinary sacctmgr queries."""
+        command = account_tree_command("alice")
+        self.assertIn("sshare --users=alice", command)
         self.assertNotIn("--Users", command)
         self.assertIn("--parsable2", command)
         self.assertIn("--users='alice;echo bad'", account_tree_command("alice;echo bad"))
@@ -42,18 +42,18 @@ class FairShareTests(TimedTestCase):
             " gpu_v100|||\n"
             "  gpu_v100_bs|||\n"
             "   gpu_v100_bs_default|||\n"
-            "    gpu_v100_bs_default|cbraunst||0.998561\n"
+            "    gpu_v100_bs_default|alice||0.998561\n"
             "   gpu_v100_bs_prio|||\n"
             "  gpu_v100_other|||\n"
             "   gpu_v100_other_default|||\n"
-            "    gpu_v100_other_default|cbraunst||0.983556\n"
+            "    gpu_v100_other_default|alice||0.983556\n"
         )
         self.assertEqual(tree["gpu_v100_bs_default"], "gpu_v100_bs")
         self.assertEqual(tree["gpu_v100_bs"], "gpu_v100")
         self.assertEqual(tree["gpu_v100_other_default"], "gpu_v100_other")
         self.assertEqual(tree["gpu_v100_other"], "gpu_v100")
         self.assertEqual(tree["gpu_v100"], "root")
-        self.assertNotIn("cbraunst", tree)
+        self.assertNotIn("alice", tree)
 
     def test_tree_rejects_missing_ancestors_and_truncated_names(self):
         self.assertEqual(parse_account_tree(
@@ -90,7 +90,7 @@ class FairShareTests(TimedTestCase):
         self.assertIn("not visible", parse_fair_share("lab|bob|0.5\n", "alice")["error"])
 
     def test_account_ancestry_and_partition_qos_map_unscoped_associations(self):
-        """INF-style subaccounts map without guessing from their names."""
+        """Site-style subaccounts map without guessing from their names."""
         self.assertIn("scontrol show partition --oneliner", PARTITION_RULES_COMMAND)
         self.assertIn("ParentName,QOS", ACCOUNT_RULES_COMMAND)
         partitions = parse_partition_rules(

@@ -83,13 +83,13 @@ test('background login opts into stdin credentials without a shell command', () 
     executable: 'cluster-watcher', configPath: '/home/alice/clusters.toml',
     backendUrl: 'http://127.0.0.1:8080/', sshTimeoutSeconds: 15, refreshSeconds: 15,
   };
-  assert.deepEqual(backgroundLoginArguments(settings, 'viper'), [
-    'login', 'viper', '--only', '--timeout', '15', '--credential-stdin-json',
+  assert.deepEqual(backgroundLoginArguments(settings, 'cluster_a'), [
+    'login', 'cluster_a', '--only', '--timeout', '15', '--credential-stdin-json',
   ]);
-  assert.deepEqual(backgroundLoginArguments(settings, 'viper', true), [
-    'login', 'viper', '--timeout', '15', '--credential-stdin-json',
+  assert.deepEqual(backgroundLoginArguments(settings, 'cluster_a', true), [
+    'login', 'cluster_a', '--timeout', '15', '--credential-stdin-json',
   ]);
-  assert.deepEqual(cliArguments(settings, backgroundLoginArguments(settings, 'viper')).slice(0, 2), [
+  assert.deepEqual(cliArguments(settings, backgroundLoginArguments(settings, 'cluster_a')).slice(0, 2), [
     '--config', '/home/alice/clusters.toml',
   ]);
 });
@@ -183,7 +183,7 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   assert.match(extensionSource, /registerWebviewViewProvider\('clusterWatcher\.jobsOffline', offlineJobsProvider\)/);
   assert.match(extensionSource, /registerWebviewViewProvider\('clusterWatcher\.statusOffline', offlineStatusProvider\)/);
   assert.match(extensionSource, /setContext', 'clusterWatcher\.serviceAvailable', available/);
-  assert.match(extensionSource, /view\.onDidDispose\(\(\) => \{ if \(this\.view === view\) this\.view = undefined; \}\)/);
+  assert.match(extensionSource, /view\.onDidDispose\(\(\) => \{\s*if \(this\.view === view\) this\.view = undefined;\s*this\.sessionDialogOpen = false;\s*\}\)/);
   assert.match(extensionSource, /coordinator\.refreshJobs\(\)/);
   assert.match(extensionSource, /coordinator\.refreshStatus\(\)/);
   assert.match(extensionSource, /Promise\.all\(\[coordinator\.refreshStatus\(\), coordinator\.refreshServer\(\)\]\)/);
@@ -192,6 +192,10 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   assert.match(extensionSource, /client\.post\('\/api\/v1\/shutdown', \{\}, 5000\)/);
   assert.match(extensionSource, /this\.client\.serviceInfo\(\)/);
   assert.match(extensionSource, /this\.client\.sessionInfo\(\)/);
+  assert.doesNotMatch(extensionSource, /clusterWatcher\.viewSessions|sessionQuickPickItems/);
+  assert.match(extensionSource, /message\?\.type === 'sessionsDialog'/);
+  assert.match(extensionSource, /if \(!message\.open\) this\.renderCurrent\(\)/);
+  assert.doesNotMatch(extensionSource, /copySessions/);
   assert.doesNotMatch(extensionSource, /runCli\(settings, \['sessions'/);
   assert.match(extensionSource, /serviceInfo\.started_at/);
   assert.match(extensionSource, /Other dashboards and clients using it will be disconnected/);

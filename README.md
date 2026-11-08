@@ -309,12 +309,12 @@ serve the same cluster:
 
 ```toml
 [[machine]]
-name = "viper"
+name = "cluster_a"
 host = [
-    "viper12i.mpcdf.mpg.de",
-    "viper13i.mpcdf.mpg.de",
+    "login12.example.org",
+    "login13.example.org",
 ]
-username = "cbraunst"
+username = "alice"
 interactive_auth = true
 control_persist = "8h"
 ```
@@ -510,12 +510,17 @@ appears beside a compact bar above the **GPUs:** and **Nodes:** availability bar
 It has the same thickness as those availability bars and uses the pending-job
 priority scale from red through neutral to green; a marker identifies the
 factor's position from 0–1. The decimal value is not shown. Each matched
-association gets its own bar. Hover a bar to see its account, rank among
+association gets a marker on the same bar. Hover the bar to see each account and its rank among
 *all visible associations on that cluster*, Slurm partition scope, and how
 the association was matched. Higher factors are more favorable; rank 1 has
 the highest factor and ties share a rank. This is not a rank
 within that partition's pending queue or a start-time promise: age, QOS,
 reservations, resource fit, and site submission policy also affect scheduling.
+Slurm uses the association of the account a job is submitted under (the default
+account if none is specified), with an optional partition-specific association.
+It does not combine the displayed factors across accounts for one job. See
+[Slurm accounting](https://slurm.schedmd.com/accounting.html) and
+[multifactor priority](https://slurm.schedmd.com/priority_multifactor.html).
 
 On the first successful connection after the server starts, Cluster Watcher
 collects `scontrol show partition` access rules, `sacctmgr show assoc` user
@@ -557,8 +562,8 @@ so their right edges line up in a roomy sidebar. On a tight sidebar, a longer
 fraction takes space from only its own bar. At very narrow widths, an
 abbreviated fraction reveals its complete value on hover.
 
-If a cluster's interactive SSH session closes, its summary replaces both the
-job-ratio bar and SSH endpoint with **Log in**. A cluster in a
+If a cluster's interactive SSH session closes, its summary replaces the
+job-ratio bar with **Log in**. A cluster in a
 `credential_group` also shows **Log into all machines on `<group>`**. The first
 action targets only that cluster; the second reuses the shared password for
 all closed group members. Password/OTP requests appear as masked VS Code input
@@ -569,8 +574,8 @@ running jobs fill it in blue and pending jobs in red. Hover shows the exact
 counts, and the track stays empty when neither kind exists. The **configure
 clusters...** link at the end of Cluster Status opens the selected
 `clusters.toml`; if it is missing, the extension offers the setup wizard. Each
-summary shows the active physical SSH login node beneath the cluster name and
-job-ratio bar, which is useful when a configured login-node pool fails over.
+summary shows only the cluster name and job-ratio bar. Thin gray lines
+separate cluster groups. The active login node is available in the session dialog.
 Cluster disclosures use the browser's same native marker as the My Jobs groups,
 so their triangles have exactly the same size.
 Below the divider, the service toggle remains available while cluster data is
@@ -586,10 +591,23 @@ Hovering the URL shows the service process ID and start time. The green/on
 toggle says **Stop service** on hover; the gray/off toggle says **Start service**
 and has **Start Server** beside it.
 
-Cluster Status also owns the bounded recent login diagnostic tail and reusable
-SSH-session state; there is no separate Server Status view. A logged-in cluster
-shows `username@host` below its name and job bar. Hover it for the approximate
-remaining reusable-session lifetime. A logged-out interactive cluster shows
+Cluster Status shows reusable SSH-session state; there is no separate Server
+Status view. **view sessions...** above **configure clusters...** opens a
+selectable dialog inside Cluster Status that spans nearly the full view width, with one scrollbar and an **×** close
+button close to the upper-left edge. Each entry shows `name: username@node`
+followed by `🕒 HH:MM left` on the next line (hours and minutes). Popup text uses the gray **My Jobs** update color at a slightly larger size,
+with a larger **×** close control. Cluster and login names share one line as
+`name: username@node`, without extra indentation. Long account names wrap
+within the login address instead of moving the whole address below the colon. Cluster Status partition
+cards and My Jobs cards have square corners. Black side borders and
+inner padding give the text breathing room. While the popup is open, the
+background scrollbar is hidden and the sole visible scrollbar scrolls sessions.
+Sessions follow the machine order in `clusters.toml`. Gray lines separate the
+popup heading and each session. The popup height fits
+its content and stays centered, with minimal space below the last session and a viewport height
+limit for scrolling long lists. Cluster headings and their gray dividers use
+compact spacing.
+A logged-out interactive cluster shows
 the scoped login actions described above instead. Its **Refresh** action checks
 the capacity snapshot, service process, and SSH-session inventory together.
 Stopping an attached service

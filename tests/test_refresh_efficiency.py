@@ -170,7 +170,7 @@ class CapacityCadenceTests(TimedTestCase):
 
     @patch("clusterwatcher.slurm.run_batch")
     def test_access_rules_are_collected_once_and_map_live_factors(self, run_batch):
-        """Cache INF-style hierarchy and partition policy across fast polls."""
+        """Cache Site-style hierarchy and partition policy across fast polls."""
         run_batch.return_value = {
             name: Section("", "", 0)
             for name in ("sinfo", "nodes", "scheduler", "running", "pending",
@@ -225,7 +225,7 @@ class CapacityCadenceTests(TimedTestCase):
 
     @patch("clusterwatcher.slurm.run_batch")
     def test_user_only_assoc_rows_use_sshare_account_tree(self, run_batch):
-        """INF hides account associations but exposes their exact tree in sshare."""
+        """Site hides account associations but exposes their exact tree in sshare."""
         run_batch.return_value = {
             name: Section("", "", 0)
             for name in ("sinfo", "nodes", "scheduler", "running", "pending",

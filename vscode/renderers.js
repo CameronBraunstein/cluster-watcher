@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const { escapeHtml, formatDuration } = require('./format');
+const { sessionDialogEntries } = require('./sessions');
 const {
   DEFAULT_WAIT_THRESHOLDS_MINUTES, launchabilityStrip, waitCell, waitColorIndex,
 } = require('./launchability');
@@ -171,9 +172,17 @@ function commandButtonAttributes(command, args = []) {
   return `type="button" data-command="${escapeHtml(command)}" data-args="${escapeHtml(JSON.stringify(args))}"`;
 }
 
+/** Render session details with one scroll container and a top-left close control. */
+function sessionsDialog(inventory) {
+  const entries = sessionDialogEntries(inventory);
+  const content = (entries.length ? entries : ['No SSH sessions are available.'])
+    .map((text) => `<pre class="sessions-dialog-text" tabindex="0">${escapeHtml(text)}</pre>`).join('');
+  return `<dialog class="sessions-dialog" aria-labelledby="sessions-dialog-title"><div class="sessions-dialog-header"><button class="sessions-dialog-close" type="button" data-close-sessions aria-label="Close SSH sessions">×</button><h2 id="sessions-dialog-title">SSH sessions</h2></div>${content}</dialog>`;
+}
+
 /** Render the Cluster Status footer with service controls above configuration. */
-function clusterFooter(service = {}) {
-  return `<hr class="cluster-config-separator">${serviceSummary(service)}<button class="configure-clusters" data-scroll-anchor="configure-clusters" ${commandButtonAttributes('clusterWatcher.editConfig')}>configure clusters...</button>`;
+function clusterFooter(service = {}, sessions) {
+  return `<hr class="cluster-config-separator">${serviceSummary(service)}<button class="view-sessions" type="button" data-open-sessions>view sessions...</button><button class="configure-clusters" data-scroll-anchor="configure-clusters" ${commandButtonAttributes('clusterWatcher.editConfig')}>configure clusters...</button>${sessionsDialog(sessions)}`;
 }
 
 /**
@@ -290,7 +299,7 @@ function archiveIcon() {
 function document(title, body, freshness = {}) {
   const nonce = crypto.randomBytes(16).toString('base64');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group,.cluster-group{margin:9px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:7px;min-width:0}.cluster-summary{box-sizing:border-box;display:inline-flex;flex-direction:column;gap:2px;width:calc(100% - 16px);min-width:0;vertical-align:top}.cluster-summary-main{display:flex;align-items:center;gap:7px;min-width:0}.cluster-summary-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cluster-login-host{overflow:hidden;color:var(--vscode-descriptionForeground);font-size:.8em;font-weight:400;line-height:1.2;text-overflow:ellipsis;white-space:nowrap;cursor:help}.cluster-job-track{display:flex;flex:1 1 70px;max-width:140px;min-width:40px;height:6px;margin-left:auto;overflow:hidden;border-radius:4px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent);cursor:help}.cluster-job-running,.cluster-job-pending{display:block;height:100%}.cluster-job-running{background:var(--vscode-progressBar-background)}.cluster-job-pending{background:var(--vscode-editorError-foreground)}.card{border:1px solid var(--vscode-panel-border);border-radius:5px;margin:3px 0;background:var(--vscode-sideBar-background);min-width:0}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none;min-width:0}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card-summary-title[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:0;top:calc(100% + 2px);max-width:calc(100% - 14px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open]) .card-summary-title[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{position:relative;display:flex;min-width:0}.card-summary-progress{display:flex;align-items:center;gap:5px;min-width:0}.card-summary-progress>:not(.job-id){flex:1 1 auto;min-width:0}.card-summary-progress>.job-id{flex:0 0 auto;font-size:.72em}.card:not([open]) .card-summary-progress>.job-id{display:none}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0;max-width:100%}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px;min-width:0}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta{min-width:0;white-space:normal;overflow-wrap:anywhere}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:2px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0;cursor:help}.availability-count{font-variant-numeric:tabular-nums;white-space:nowrap}.available{background:var(--vscode-testing-iconPassed)}.fast-tooltip{position:fixed;z-index:100;display:none;max-width:220px;padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));outline:1px solid #fff;border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:pre-line;pointer-events:none}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em;min-width:0}.times dt{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd{margin:0;min-width:0;white-space:normal;text-align:right}.times dd.dependency-value{overflow-wrap:anywhere}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px;min-width:0}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
+body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group{margin:9px 0}.cluster-group{margin:4px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:3px;min-width:0}.cluster-summary{box-sizing:border-box;display:inline-flex;flex-direction:column;gap:2px;width:calc(100% - 16px);min-width:0;vertical-align:top}.cluster-summary-main{display:flex;align-items:center;gap:7px;min-width:0}.cluster-summary-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cluster-job-track{display:flex;flex:1 1 70px;max-width:140px;min-width:40px;height:6px;margin-left:auto;overflow:hidden;border-radius:4px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent);cursor:help}.cluster-job-running,.cluster-job-pending{display:block;height:100%}.cluster-job-running{background:var(--vscode-progressBar-background)}.cluster-job-pending{background:var(--vscode-editorError-foreground)}.card{border:1px solid var(--vscode-panel-border);border-radius:0;margin:3px 0;background:var(--vscode-sideBar-background);min-width:0}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none;min-width:0}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card-summary-title[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:0;top:calc(100% + 2px);max-width:calc(100% - 14px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open]) .card-summary-title[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{position:relative;display:flex;min-width:0}.card-summary-progress{display:flex;align-items:center;gap:5px;min-width:0}.card-summary-progress>:not(.job-id){flex:1 1 auto;min-width:0}.card-summary-progress>.job-id{flex:0 0 auto;font-size:.72em}.card:not([open]) .card-summary-progress>.job-id{display:none}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0;max-width:100%}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px;min-width:0}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta{min-width:0;white-space:normal;overflow-wrap:anywhere}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:2px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0;cursor:help}.availability-count{font-variant-numeric:tabular-nums;white-space:nowrap}.available{background:var(--vscode-testing-iconPassed)}.fast-tooltip{position:fixed;z-index:100;display:none;max-width:220px;padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));outline:1px solid #fff;border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:pre-line;pointer-events:none}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em;min-width:0}.times dt{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd{margin:0;min-width:0;white-space:normal;text-align:right}.times dd.dependency-value{overflow-wrap:anywhere}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px;min-width:0}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
 .card-summary-progress>.summary-archive-action{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;padding:2px 3px;line-height:1.4}
 .card-summary-title[data-full-name]::after{outline:1px solid #fff}
 .card[open] .name{white-space:normal;overflow-wrap:anywhere}
@@ -303,12 +312,31 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 button.button{border:0;font:inherit;cursor:pointer}
 .service-summary{display:flex;align-items:center;gap:4px;margin:3px 0 5px;min-width:0;white-space:nowrap;font-size:.78em}.service-summary>strong{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}.service-url{box-sizing:border-box;display:block;flex:0 0 auto;max-width:calc(100% - 26px);min-width:0;margin:0;padding:0;overflow:hidden;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;text-decoration:underline;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 22px;width:22px;height:12px;margin:0;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:12px}.service-toggle:disabled{cursor:wait;opacity:.65}.cluster-login-actions{display:flex;flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end;gap:3px;margin-left:auto}.cluster-login-actions>.compact-action{box-sizing:border-box;max-width:100%;padding:2px 4px;font-size:.68em;line-height:1.3;white-space:normal;overflow-wrap:anywhere;text-align:left}
 .service-setup-actions{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 8px}.service-setup-actions>.button{box-sizing:border-box;max-width:100%;padding:3px 5px;font-size:.78em;white-space:normal;text-align:left}
-.cluster-config-separator{height:0;margin:9px 0 5px;border:0;border-top:1px solid color-mix(in srgb,var(--vscode-foreground) 40%,transparent)}.configure-clusters{display:inline-block;margin:0;padding:0;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;font-size:.78em;text-align:left;text-decoration:none;cursor:pointer}.configure-clusters:hover{text-decoration:underline}
+.cluster-config-separator{height:0;margin:9px 0 5px;border:0;border-top:1px solid color-mix(in srgb,var(--vscode-foreground) 40%,transparent)}.view-sessions,.configure-clusters{display:block;margin:4px 0 0;padding:0;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;font-size:.78em;text-align:left;text-decoration:none;cursor:pointer}.view-sessions:hover,.configure-clusters:hover{text-decoration:underline}
 .partition-fair-share{display:flex;align-items:flex-start;gap:0;margin-top:5px;font-size:.72em}.fair-share-title{box-sizing:border-box;flex:0 0 56px;width:56px;padding-right:2px;color:var(--vscode-descriptionForeground);white-space:nowrap}.fair-share-bars{display:grid;flex:1 1 auto;min-width:0;gap:4px;padding-top:3px}.fair-share-row{min-width:0}.fair-share-track{box-sizing:border-box;position:relative;display:block;width:100%;height:6px;overflow:visible;border-radius:4px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed));cursor:help}.fair-share-marker{position:absolute;top:-3px;width:2px;height:12px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.fair-share-track.unavailable{background:color-mix(in srgb,var(--vscode-foreground) 10%,transparent)}
+.cluster-group+.cluster-group{border-top:1px solid color-mix(in srgb,var(--vscode-foreground) 35%,transparent);padding-top:4px}
+.sessions-dialog{box-sizing:border-box;width:calc(100vw - 16px);max-width:none;inset:50% auto auto 50%;transform:translate(-50%,-50%);margin:0;height:fit-content;min-height:0;max-height:calc(100vh - 8px);overflow:auto;padding:4px 8px;border:1px solid var(--vscode-panel-border);border-left:6px solid #000;border-right:6px solid #000;border-radius:6px;background:var(--vscode-editorWidget-background,var(--vscode-sideBar-background));color:var(--vscode-descriptionForeground);font-size:.82em;box-shadow:0 8px 28px #0008}html:has(.sessions-dialog[open]){overflow:hidden}.sessions-dialog::backdrop{background:#0009}.sessions-dialog-header{display:flex;align-items:center;gap:8px;margin-bottom:4px}.sessions-dialog h2{margin:0;font-size:1em}.sessions-dialog-close{padding:0 2px;border:0;background:none;color:inherit;font:inherit;font-size:1.6em;cursor:pointer}.sessions-dialog-text{margin:0;padding:6px 0;border-top:1px solid color-mix(in srgb,var(--vscode-foreground) 35%,transparent);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-all;user-select:text;font:inherit;line-height:1.5}.sessions-dialog-text:last-of-type{padding-bottom:0}
 </style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
   const savedViewport = api.getState() || {};
+  const sessionsDialog = document.querySelector('.sessions-dialog');
+  if (sessionsDialog) {
+    const saveDialogState = (open) => {
+      api.setState({ ...(api.getState() || {}), sessionsOpen: open });
+      api.postMessage({ type: 'sessionsDialog', open });
+    };
+    document.querySelector('[data-open-sessions]')?.addEventListener('click', () => {
+      sessionsDialog.showModal();
+      saveDialogState(true);
+    });
+    document.querySelector('[data-close-sessions]')?.addEventListener('click', () => sessionsDialog.close());
+    sessionsDialog.addEventListener('close', () => saveDialogState(false));
+    if (savedViewport.sessionsOpen) {
+      sessionsDialog.showModal();
+      api.postMessage({ type: 'sessionsDialog', open: true });
+    }
+  }
   const savedScrollY = Number(savedViewport.scrollY) || 0;
   const statusAnchor = document.querySelector('[data-scroll-anchor="configure-clusters"]');
   let restoringScroll = true;
@@ -509,13 +537,18 @@ function serviceSummary(service = {}) {
   return `<div class="service-summary">${toggle}${summaryText}</div>`;
 }
 
+/** Remove SSH user prefixes from Cluster Status diagnostics. */
+function withoutSshUsernames(message) {
+  return String(message || '').replace(/\b[A-Za-z0-9_.-]+@(?=[A-Za-z0-9_.-]+)/g, '');
+}
+
 /** Render current service/session errors without duplicating cluster cards. */
 function serverNotices(server = {}) {
   const service = server.service || {};
-  const activity = service.activity ? `<p class="muted">${escapeHtml(service.activity)}</p>` : '';
-  const error = service.error ? `<p class="error">${escapeHtml(service.error)}</p>` : '';
+  const activity = service.activity ? `<p class="muted">${escapeHtml(withoutSshUsernames(service.activity))}</p>` : '';
+  const error = service.error ? `<p class="error">${escapeHtml(withoutSshUsernames(service.error))}</p>` : '';
   const sessionsError = server.sessionsError
-    ? `<p class="error">Could not inspect SSH sessions: ${escapeHtml(server.sessionsError)}</p>` : '';
+    ? `<p class="error">Could not inspect SSH sessions: ${escapeHtml(withoutSshUsernames(server.sessionsError))}</p>` : '';
   return activity + error + sessionsError;
 }
 
@@ -527,7 +560,7 @@ function renderLoading(title, freshness = {}, connecting = false, server = {}) {
     : `Cluster Watcher is running. Loading ${subject}…`;
   const controls = title === 'Cluster Status'
     ? serverNotices(server) : '';
-  const footer = title === 'Cluster Status' ? clusterFooter(server.service) : '';
+  const footer = title === 'Cluster Status' ? clusterFooter(server.service, server.sessions) : '';
   return document(title, `${controls}<p class="muted" role="status">${message}</p>${footer}`, freshness);
 }
 
@@ -555,7 +588,7 @@ function renderWelcome(title, detail, freshness = {}, server = {}) {
   const guidance = title === 'Cluster Status' ? 'No service found.' : 'No service found. Use Cluster Status to start it.';
   const body = `${controls}<div class="welcome"><p class="muted" role="status">${guidance}</p>`
     + (detail ? `<details class="welcome-detail"><summary class="muted">Connection details</summary><p class="error">${escapeHtml(detail)}</p></details>` : '')
-    + `</div>${title === 'Cluster Status' ? clusterFooter(server.service) : ''}`;
+    + `</div>${title === 'Cluster Status' ? clusterFooter(server.service, server.sessions) : ''}`;
   return document(title, body, freshness);
 }
 
@@ -906,26 +939,39 @@ function partitionCard(partition, pending, asOf, thresholds, shareError = null) 
   return `<article class="card partition-card${partition.aggregate ? ' aggregate' : ''}" style="--availability-count-width:${countWidth}ch"><div class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${launchability}</div><div class="muted partition-specs">${partitionSpecs(partition, profile)}</div>${partitionFairShare(partition.fair_share, shareError)}<div class="partition-availability"><span class="partition-availability-label">GPUs:</span>${availabilityBar(idleGpus, gpuTotal, gpuAvailabilityTitle(partition))}</div><div class="partition-availability"><span class="partition-availability-label">Nodes:</span>${availabilityBar(nodeCounts.idle, nodeCounts.total, availabilityTitle(partition))}</div></article>`;
 }
 
-/** Render one association's 0–1 factor bar with rank and account on hover. */
-function fairShareBar(entry) {
+/** Return whether a Slurm association has a displayable fair-share factor. */
+function validFairShare(entry) {
   const factor = Number(entry.factor);
   const rank = Number(entry.rank), total = Number(entry.total);
-  if (entry.factor == null || !Number.isFinite(factor) || factor < 0 || factor > 1
-      || !Number.isInteger(rank) || !Number.isInteger(total) || rank < 1 || total < rank) return '';
-  const details = [
+  return entry.factor != null && Number.isFinite(factor) && factor >= 0 && factor <= 1
+    && Number.isInteger(rank) && Number.isInteger(total) && rank >= 1 && total >= rank;
+}
+
+/** Describe one association without implying that Slurm combines accounts. */
+function fairShareDetails(entry) {
+  return [
     `Account: ${entry.account}`,
-    `Visible rank: ${rank}/${total}`,
+    `Visible rank: ${entry.rank}/${entry.total}`,
     `Slurm partition: ${entry.partition || 'not specified'}`,
     `Matched by: ${entry.mapping_source === 'account_qos' ? 'account hierarchy and QOS' : 'explicit association partition'}`,
     'Higher factors favor jobs; they do not predict start time.',
   ].join('\n');
-  const tooltip = escapeHtml(details).replace(/\n/g, '&#10;');
-  return `<div class="fair-share-row"><div class="fair-share-track" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${factor}" aria-label="${tooltip}" data-fast-tooltip="${tooltip}"><i class="fair-share-marker" style="left:${(factor * 100).toFixed(2)}%"></i></div></div>`;
 }
 
-/** Put each matched factor above the GPU and node availability bars. */
+/** Draw one track with one marker per eligible account association. */
+function fairShareBar(entries) {
+  if (!entries.length) return '';
+  const tooltip = escapeHtml(entries.map(fairShareDetails).join('\n\n')).replace(/\n/g, '&#10;');
+  const role = entries.length === 1
+    ? `role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${Number(entries[0].factor)}"`
+    : 'role="img"';
+  const markers = entries.map((entry) => `<i class="fair-share-marker" style="left:${(Number(entry.factor) * 100).toFixed(2)}%"></i>`).join('');
+  return `<div class="fair-share-row"><div class="fair-share-track" ${role} aria-label="${tooltip}" data-fast-tooltip="${tooltip}">${markers}</div></div>`;
+}
+
+/** Put all eligible account factors on one track above the availability bars. */
 function partitionFairShare(entries, error = null) {
-  const bars = (Array.isArray(entries) ? entries : []).map(fairShareBar).filter(Boolean).join('');
+  const bars = fairShareBar((Array.isArray(entries) ? entries : []).filter(validFairShare));
   const explanation = escapeHtml(error || 'No confirmed association match for this partition.').replace(/\n/g, '&#10;');
   const unavailable = `<div class="fair-share-row"><div class="fair-share-track unavailable" aria-label="${explanation}" data-fast-tooltip="${explanation}"></div></div>`;
   return `<div class="partition-fair-share"><span class="fair-share-title">FairShare:</span><div class="fair-share-bars">${bars || unavailable}</div></div>`;
@@ -965,25 +1011,12 @@ function clusterLoginActions(cluster, session) {
   return `<span class="cluster-login-actions">${buttons.join('')}</span>`;
 }
 
-/** Render one cluster heading with active-session details or login actions. */
+/** Render one cluster heading with its job ratio or login actions. */
 function clusterSummary(cluster, session) {
   const clusterName = escapeHtml(cluster.name);
   const loggedOut = clusterLoggedOut(cluster, session);
-  const host = String(session?.host || cluster.host || '').trim();
-  const username = String(session?.username || '').trim();
-  const endpoint = username && host ? `${username}@${host}` : host;
-  let remaining = '';
-  if (session?.session_open && session.control_persist_seconds == null) remaining = 'no idle limit';
-  else if (session?.session_open && session.estimated_remaining_seconds != null) remaining = `about ${formatDuration(session.estimated_remaining_seconds)} left`;
-  else if (session?.session_open) remaining = 'remaining time unknown';
-  const hostLabel = endpoint
-    ? `SSH session: ${endpoint}${remaining ? `\nReusable session: ${remaining}` : ''}` : '';
-  const hostTooltip = escapeHtml(hostLabel).replace(/\n/g, '&#10;');
-  const loginHost = host
-    ? `<span class="cluster-login-host" aria-label="${hostTooltip}" data-fast-tooltip="${hostTooltip}">${escapeHtml(endpoint)}</span>`
-    : '';
   const status = loggedOut ? clusterLoginActions(cluster, session) : clusterJobRatio(cluster.user_jobs);
-  return `<span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">${clusterName}</span>${status}</span>${loggedOut ? '' : loginHost}</span>`;
+  return `<span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">${clusterName}</span>${status}</span></span>`;
 }
 
 /**
@@ -1005,17 +1038,17 @@ function renderStatus(payload, disclosures = {}, freshness = {}, server = {}) {
     const disclosureKey = escapeHtml(rawKey);
     const open = openAttribute(disclosures, rawKey, true);
     if (!cluster.reachable) {
-      clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${summary}</summary><p class="error">${escapeHtml(cluster.error || 'Cluster is unreachable')}</p></details>`);
+      clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${summary}</summary><p class="error">${escapeHtml(withoutSshUsernames(cluster.error || 'Cluster is unreachable'))}</p></details>`);
       continue;
     }
     // No probe round has finished for this cluster yet (they start with the service).
     const pending = !cluster.wait_estimates_updated_at;
     const partitions = [...(cluster.partitions || [])].sort((left, right) => (Number(left.rank) || 9999) - (Number(right.rank) || 9999) || String(left.name).localeCompare(String(right.name)));
     const cards = partitions.map((partition) => partitionCard(partition, pending, asOf, thresholds, cluster.fair_share?.mapping_error || cluster.fair_share?.error)).join('');
-    clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${summary}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(cluster.resource_error)}</p>` : ''}${cards}</details>`);
+    clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${summary}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(withoutSshUsernames(cluster.resource_error))}</p>` : ''}${cards}</details>`);
   }
   const content = clusters.join('') || '<p>No clusters returned.</p>';
-  const body = serverNotices(server) + content + clusterFooter(server.service);
+  const body = serverNotices(server) + content + clusterFooter(server.service, server.sessions);
   return document('Cluster Status', body, freshness);
 }
 

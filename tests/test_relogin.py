@@ -53,17 +53,17 @@ class LoginTargetTests(TimedTestCase):
         connection = connect.return_value
         connect.side_effect = [OSError("connection refused"), connection]
         machine = Machine(
-            "viper", "viper12.example", "alice", interactive_auth=True,
-            hosts=("viper12.example", "viper13.example"),
+            "cluster_a", "login12.example", "alice", interactive_auth=True,
+            hosts=("login12.example", "login13.example"),
         )
         with patch.dict("clusterwatcher.ssh._selected_hosts", {}, clear=True):
             selected = select_login_machine(machine, 7)
 
-        self.assertEqual(selected.host, "viper13.example")
-        self.assertEqual(selected.candidate_hosts, ("viper13.example",))
+        self.assertEqual(selected.host, "login13.example")
+        self.assertEqual(selected.candidate_hosts, ("login13.example",))
         self.assertEqual(
             [call.args[0] for call in connect.call_args_list],
-            [("viper12.example", 22), ("viper13.example", 22)],
+            [("login12.example", 22), ("login13.example", 22)],
         )
         connection.close.assert_called_once_with()
 

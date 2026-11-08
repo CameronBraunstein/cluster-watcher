@@ -602,17 +602,17 @@ class ClusterWatcherTests(TimedTestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "clusters.toml"
             path.write_text(
-                '[[machine]]\nname="viper"\n'
-                'host=["viper12i.example", "viper13i.example"]\n'
+                '[[machine]]\nname="cluster_a"\n'
+                'host=["login12.example", "login13.example"]\n'
                 'username="alice"\n'
             )
 
             machine = load_config(path)[0]
 
-        self.assertEqual(machine.host, "viper12i.example")
-        self.assertEqual(machine.candidate_hosts, ("viper12i.example", "viper13i.example"))
+        self.assertEqual(machine.host, "login12.example")
+        self.assertEqual(machine.candidate_hosts, ("login12.example", "login13.example"))
         command = ssh_command(machine, 5, "true")
-        self.assertIn("alice@viper12i.example", command)
+        self.assertIn("alice@login12.example", command)
 
     def test_login_node_pool_configuration_rejects_obsolete_or_invalid_values(self):
         """Reject malformed pools and explain the superseded plural spelling."""
@@ -626,7 +626,7 @@ class ClusterWatcherTests(TimedTestCase):
         for routing, message in invalid:
             with self.subTest(routing=routing), tempfile.TemporaryDirectory() as directory:
                 path = Path(directory) / "clusters.toml"
-                path.write_text(f'[[machine]]\nname="viper"\nusername="alice"\n{routing}')
+                path.write_text(f'[[machine]]\nname="cluster_a"\nusername="alice"\n{routing}')
                 with self.assertRaisesRegex(ValueError, message):
                     load_config(path)
 

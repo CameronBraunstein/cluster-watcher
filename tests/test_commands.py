@@ -64,15 +64,15 @@ class RemoteCommandTests(TimedTestCase):
             subprocess.CompletedProcess([], 0, stdout="", stderr="Master running (pid=99)"),
         ]
         machine = Machine(
-            "viper", "viper12.example", "alice", interactive_auth=True,
-            hosts=("viper12.example", "viper13.example"),
+            "cluster_a", "login12.example", "alice", interactive_auth=True,
+            hosts=("login12.example", "login13.example"),
         )
         with patch.dict("clusterwatcher.ssh._selected_hosts", {}, clear=True):
             status = session_status(machine)
 
         self.assertTrue(status["session_open"])
-        self.assertEqual(status["host"], "viper13.example")
-        self.assertEqual(status["hosts"], ["viper12.example", "viper13.example"])
+        self.assertEqual(status["host"], "login13.example")
+        self.assertEqual(status["hosts"], ["login12.example", "login13.example"])
 
     @patch("clusterwatcher.ssh._mark_activity")
     @patch("clusterwatcher.ssh.subprocess.run")
@@ -83,8 +83,8 @@ class RemoteCommandTests(TimedTestCase):
             subprocess.CompletedProcess([], 0, stdout="still ready\n", stderr=""),
         ]
         machine = Machine(
-            "viper", "viper12.example", "alice",
-            hosts=("viper12.example", "viper13.example"),
+            "cluster_a", "login12.example", "alice",
+            hosts=("login12.example", "login13.example"),
         )
         with patch.dict("clusterwatcher.ssh._selected_hosts", {}, clear=True):
             self.assertEqual(run_remote(machine, 5, "sinfo"), "ready\n")
@@ -92,7 +92,7 @@ class RemoteCommandTests(TimedTestCase):
 
         targets = [call.args[0][-2] for call in run.call_args_list]
         self.assertEqual(targets, [
-            "alice@viper12.example", "alice@viper13.example", "alice@viper13.example",
+            "alice@login12.example", "alice@login13.example", "alice@login13.example",
         ])
 
     @patch("clusterwatcher.ssh._mark_activity")
@@ -100,8 +100,8 @@ class RemoteCommandTests(TimedTestCase):
     def test_non_failover_remote_operation_is_never_replayed(self, run, _activity):
         run.return_value = subprocess.CompletedProcess([], 255, stdout="", stderr="connection lost")
         machine = Machine(
-            "viper", "viper12.example", "alice",
-            hosts=("viper12.example", "viper13.example"),
+            "cluster_a", "login12.example", "alice",
+            hosts=("login12.example", "login13.example"),
         )
 
         with self.assertRaisesRegex(RuntimeError, "connection lost"):

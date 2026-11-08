@@ -419,11 +419,16 @@ class SidebarProvider {
     this.showingData = false;
     this.updatedAt = undefined;
     this.checkedAt = undefined;
+    /** Keep the copyable session dialog stable across background refreshes. */
+    this.sessionDialogOpen = false;
   }
 
   resolveWebviewView(view) {
     this.view = view;
-    view.onDidDispose(() => { if (this.view === view) this.view = undefined; });
+    view.onDidDispose(() => {
+      if (this.view === view) this.view = undefined;
+      this.sessionDialogOpen = false;
+    });
     // Freshness is rendered below the native heading, not beside its title.
     this.view.description = undefined;
     // Command URIs stay disabled: buttons post a message and receive() enforces WEBVIEW_COMMANDS.
@@ -463,6 +468,9 @@ class SidebarProvider {
       }
     } else if (message?.type === 'disclosure' && typeof message.key === 'string') {
       this.disclosures[message.key] = Boolean(message.open);
+    } else if (this.kind === 'status' && message?.type === 'sessionsDialog' && typeof message.open === 'boolean') {
+      this.sessionDialogOpen = message.open;
+      if (!message.open) this.renderCurrent();
     } else if (message?.type === 'copy' && typeof message.text === 'string') {
       void vscode.env.clipboard.writeText(message.text).then(
         () => vscode.window.setStatusBarMessage(`Copied job ID ${message.text}`, 2500),
@@ -506,7 +514,7 @@ class SidebarProvider {
     ]);
     if (renderKey(next) === renderKey(this.server)) return;
     this.server = next;
-    if (this.kind !== 'status' || !this.view) return;
+    if (this.kind !== 'status' || !this.view || this.sessionDialogOpen) return;
     if (this.loadingState || (!this.hasSuccessfulData && !this.errorState)) {
       this.view.webview.html = renderLoading(this.title(), this.freshness(), !this.loadingState, this.server);
     } else if (this.errorState?.kind === 'offline') {
@@ -520,11 +528,21 @@ class SidebarProvider {
     this.loadingState = true;
     this.errorState = undefined;
     this.showingData = false;
-    if (this.view) this.view.webview.html = renderLoading(this.title(), this.freshness(), false, this.server);
+    if (this.view && !this.sessionDialogOpen) this.view.webview.html = renderLoading(this.title(), this.freshness(), false, this.server);
+  }
+
+  /** Redraw the current Cluster Status state after its session dialog closes. */
+  renderCurrent() {
+    if (!this.view) return;
+    if (this.loadingState || (!this.hasSuccessfulData && !this.errorState)) {
+      this.view.webview.html = renderLoading(this.title(), this.freshness(), !this.loadingState, this.server);
+    } else if (this.errorState?.kind === 'offline') {
+      this.view.webview.html = renderWelcome(this.title(), this.errorState.detail, this.freshness(), this.server);
+    } else this.render();
   }
 
   render() {
-    if (!this.view || !this.payload) return;
+    if (!this.view || !this.payload || this.sessionDialogOpen) return;
     this.showingData = true;
     this.view.webview.html = renderStatus(this.payload, this.disclosures, this.freshness(), this.server);
   }
@@ -534,7 +552,7 @@ class SidebarProvider {
     this.showingData = false;
     const detail = error instanceof Error ? error.message : String(error);
     this.errorState = { kind: 'offline', detail };
-    if (!this.view) return;
+    if (!this.view || this.sessionDialogOpen) return;
     this.view.webview.html = renderWelcome(this.title(), detail, this.freshness(), this.server);
   }
 

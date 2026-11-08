@@ -9,7 +9,8 @@ When no backend service is found, **My Jobs** and **Cluster Status** become
 collapsed offline placeholders. Cluster Status retains its service switch,
 which is labeled **Start Server** while off. **Run setup wizard** remains in
 the Command Palette. A thin gray line separates the cluster cards from the
-service toggle and dashboard URL, followed by **configure clusters...**, which opens the
+service toggle and dashboard URL, followed by **view sessions...** and
+**configure clusters...**, which opens the
 configuration file; configuration and settings commands remain in the Command
 Palette. Successful backend responses restore the live views. You can still
 expand an offline placeholder manually.
@@ -237,6 +238,10 @@ block for its exact one-hour-job estimate, expected start, or Slurm error, and
 hover the GPU model for its full name. VRAM and thread hover text explicitly
 labels those amounts. When the partition name and complete launchability strip
 do not fit together, the strip wraps intact and flush left onto a second line.
+Thin gray lines separate clusters. Each partition has one FairShare track;
+when several account associations match, each has its own marker and hover
+details. Slurm applies the factor for the account used by a submitted job,
+not an average of the markers.
 
 **Free GPUs** precedes a green/red bar with its `idle/total` fraction;
 hover the bar for a node-only state breakdown (zero-count categories are
@@ -260,13 +265,23 @@ off, and its hover says
 **Stop service** or **Start service**. When off, **Start Server** appears next
 to the toggle; there is no duplicate start button. A running tmux service shows
 the URL without the redundant “Running in the background” label. Hover the URL
-for the backend process ID and start time. The view also shows bounded recent
-login diagnostic output and an
-Open/Closed card for every reusable SSH session with its approximate remaining
-idle lifetime. A logged-in cluster shows its `username@host` endpoint beneath
-the cluster name and job-ratio bar; hovering it shows the approximate remaining
-session lifetime. Every logged-out interactive machine replaces both of those
-details with **Log in**. A machine with
+for the backend process ID and start time. Cluster headings show the cluster
+name and job-ratio bar without the login node. **view sessions...** opens a
+selectable dialog in Cluster Status that spans nearly the full view width, with a single scrollbar and an **×** close
+button close to the upper-left edge. Entries show `name: username@node`
+followed by `🕒 HH:MM left` on the next line (hours and minutes). Popup text uses the gray **My Jobs** update color at a slightly larger size,
+with a larger **×** close control. Cluster and login names share one line as
+`name: username@node`, without extra indentation. Long account names wrap
+within the login address instead of moving the whole address below the colon. Cluster Status partition
+cards and My Jobs cards have square corners. Black side borders and
+inner padding give the text breathing room. While the popup is open, the
+background scrollbar is hidden and the sole visible scrollbar scrolls sessions.
+Sessions follow the machine order in `clusters.toml`. Gray lines separate the
+popup heading and each session. The popup height fits
+its content and stays centered, with minimal space below the last session and a viewport height
+limit for scrolling long lists. Cluster headings and their gray dividers use
+compact spacing. Every
+logged-out interactive machine replaces the job ratio with **Log in**. A machine with
 `credential_group = "site"` also has **Log into all machines on site**; the
 first action targets only that machine, while the second reuses the shared
 password for all closed group members. Session inspection errors also appear in

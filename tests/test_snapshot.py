@@ -177,13 +177,13 @@ class SnapshotTests(TimedTestCase):
     def test_snapshot_identifies_pool_and_active_physical_node(self):
         """Expose routing metadata without replacing the compatible host field."""
         status = example_status()
-        status.host = "viper13.example"
-        status.hosts = ("viper12.example", "viper13.example")
+        status.host = "login13.example"
+        status.hosts = ("login12.example", "login13.example")
 
         cluster = build_snapshot([status], "2026-09-22T10:00:00+00:00", 15)["clusters"][0]
 
-        self.assertEqual(cluster["host"], "viper13.example")
-        self.assertEqual(cluster["hosts"], ["viper12.example", "viper13.example"])
+        self.assertEqual(cluster["host"], "login13.example")
+        self.assertEqual(cluster["hosts"], ["login12.example", "login13.example"])
 
     def test_snapshot_exposes_only_the_users_fair_share_summary(self):
         status = example_status()

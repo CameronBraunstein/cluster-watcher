@@ -13,7 +13,7 @@ test('first-collection loading views place service controls in the Cluster Statu
     state: 'attached', url: 'http://127.0.0.1:8080/', pid: 42,
     recentLines: [{ stream: 'stderr', text: 'startup diagnostic' }],
   } });
-  assert.match(status, /role="status">Cluster Watcher is running\. Loading cluster status…<\/p><hr class="cluster-config-separator"><div class="service-summary">.*?http:\/\/127\.0\.0\.1:8080\/.*?<\/div><button class="configure-clusters"/s);
+  assert.match(status, /role="status">Cluster Watcher is running\. Loading cluster status…<\/p><hr class="cluster-config-separator"><div class="service-summary">.*?http:\/\/127\.0\.0\.1:8080\/.*?<\/div><button class="view-sessions" type="button" data-open-sessions>view sessions\.\.\.<\/button><button class="configure-clusters"/s);
   assert.match(status, /data-command="clusterWatcher\.stopService"/);
   assert.doesNotMatch(status, /class="error"/);
   assert.doesNotMatch(status, /Recent backend output|startup diagnostic/);
@@ -166,14 +166,22 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary><span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">cluster_0<\/span><span class="cluster-job-track" role="img" aria-label="3 running, 1 pending"/);
   assert.match(html, /class="cluster-job-running" style="width:75%"/);
   assert.match(html, /class="cluster-job-pending" style="width:25%"/);
-  assert.match(html, /<span class="cluster-login-host" aria-label="SSH session: login-02\.example" data-fast-tooltip="SSH session: login-02\.example">login-02\.example<\/span><\/span><\/summary>/);
+  assert.doesNotMatch(html, /class="cluster-login-host"|login-02\.example/);
   assert.match(html, /\.cluster-job-running\{background:var\(--vscode-progressBar-background\)\}/);
   assert.match(html, /\.cluster-job-pending\{background:var\(--vscode-editorError-foreground\)\}/);
   assert.doesNotMatch(html, /\.cluster-group(?:\[open\])?>summary::before/);
   assert.match(html, /\.cluster-summary\{[^}]*display:inline-flex;flex-direction:column/);
-  assert.match(html, /\.cluster-login-host\{[^}]*font-size:\.8em;font-weight:400/);
+  assert.match(html, /<dialog class="sessions-dialog" aria-labelledby="sessions-dialog-title">/);
+  assert.match(html, /class="sessions-dialog-text" tabindex="0">No SSH sessions are available\./);
+  assert.match(html, /class="sessions-dialog-header"><button class="sessions-dialog-close" type="button" data-close-sessions aria-label="Close SSH sessions">×<\/button><h2/);
+  assert.doesNotMatch(html, /data-copy-sessions|sessions-dialog-actions|>Close<\/button>/);
+  assert.match(html, /\.sessions-dialog-text\{[^}]*user-select:text/);
+  assert.match(html, /sessionsDialog\.showModal\(\)/);
+  assert.match(html, /sessionsOpen: open/);
+  assert.doesNotMatch(html, /copySessions/);
   assert.ok(html.lastIndexOf('class="configure-clusters"') > html.lastIndexOf('class="cluster-group"'));
-  assert.match(html, /<hr class="cluster-config-separator"><div class="service-summary">.*?<\/div><button class="configure-clusters"/s);
+  assert.match(html, /<hr class="cluster-config-separator"><div class="service-summary">.*?<\/div><button class="view-sessions" type="button" data-open-sessions>view sessions\.\.\.<\/button><button class="configure-clusters"/s);
+  assert.match(html, /\.cluster-group\+\.cluster-group\{border-top:1px solid color-mix\(in srgb,var\(--vscode-foreground\) 35%,transparent\);padding-top:4px\}/);
   assert.match(html, /\.cluster-config-separator\{[^}]*border-top:1px solid color-mix\(in srgb,var\(--vscode-foreground\) 40%,transparent\)/);
   assert.match(html, /<button class="configure-clusters" data-scroll-anchor="configure-clusters" type="button" data-command="clusterWatcher\.editConfig" data-args="\[\]">configure clusters\.\.\.<\/button>/);
   assert.match(html, /const statusAnchor = document\.querySelector\('\[data-scroll-anchor="configure-clusters"\]'\)/);
@@ -195,7 +203,7 @@ test('cluster job ratio remains empty when no jobs are running or pending', () =
 
 test('matched fair-share factors have bars above GPU and node availability', () => {
   const html = renderStatus({ clusters: [
-    { name: 'viper', reachable: true, fair_share: {
+    { name: 'cluster_a', reachable: true, fair_share: {
       associations: [
         { account: 'gpu_a100_bs_default', partition: 'gpu_a100', factor: 0.725, rank: 1302, total: 4728 },
         { account: 'unscoped', partition: null, factor: 0.5, rank: 9, total: 20 },
@@ -204,7 +212,7 @@ test('matched fair-share factors have bars above GPU and node availability', () 
       { name: 'gpu_a100', gpus: { total: 0 }, fair_share: [{ account: 'gpu_a100_bs_default', partition: 'gpu_a100', factor: 0.725, rank: 1302, total: 4728 }] },
       { name: 'apu', gpus: { total: 0 }, fair_share: [] },
     ] },
-    { name: 'raven', reachable: true, fair_share: {
+    { name: 'cluster_b', reachable: true, fair_share: {
       associations: [], error: 'sshare unavailable',
     }, partitions: [{ name: 'gpu', gpus: { total: 0 } }] },
   ] });
@@ -230,15 +238,18 @@ test('matched fair-share factors have bars above GPU and node availability', () 
   assert.doesNotMatch(html, /Other fair-share associations|fair-share-card/);
 });
 
-test('two fair-share associations render as separate bars with separate hover details', () => {
+test('two fair-share associations share one track with separate markers and hover details', () => {
   const entry = { account: 'lab', partition: 'gpu', factor: 0.8, rank: 4, total: 100 };
   const second = { account: 'other', partition: 'gpu', factor: 0.25, rank: 50, total: 100 };
-  const html = renderStatus({ clusters: [{ name: 'inf', reachable: true,
+  const html = renderStatus({ clusters: [{ name: 'cluster_d', reachable: true,
     fair_share: { associations: [entry, second] },
     partitions: [{ name: 'gpu', gpus: { total: 0 }, fair_share: [entry, second] }],
   }] });
 
-  assert.equal((html.match(/class="fair-share-track" role="progressbar"/g) || []).length, 2);
+  assert.equal((html.match(/class="fair-share-track" role="img"/g) || []).length, 1);
+  assert.equal((html.match(/class="fair-share-marker"/g) || []).length, 2);
+  assert.match(html, /class="fair-share-marker" style="left:80\.00%"/);
+  assert.match(html, /class="fair-share-marker" style="left:25\.00%"/);
   assert.doesNotMatch(html, /fair-share-label|0\.800000|0\.250000/);
   assert.match(html, /Account: lab&#10;Visible rank: 4\/100/);
   assert.match(html, /Account: other&#10;Visible rank: 50\/100/);
@@ -251,7 +262,7 @@ test('unscoped accounts matched through access rules appear on the partition car
     rank: 3, total: 4728, matched_partitions: ['gpu-v100'], mapping_source: 'account_qos',
   };
   const html = renderStatus({ clusters: [{
-    name: 'inf', reachable: true,
+    name: 'cluster_d', reachable: true,
     fair_share: { associations: [entry] },
     partitions: [{ name: 'gpu-v100', gpus: { total: 6 }, fair_share: [entry] }],
   }] });
@@ -304,13 +315,13 @@ test('Cluster Status puts the service toggle and dashboard URL below the divider
 test('Cluster Status replaces logged-out session details with scoped login actions', () => {
   const html = renderStatus({ clusters: [
     { name: 'open', host: 'old.example', reachable: true, user_jobs: { running: 2, pending: 1 }, partitions: [] },
-    { name: 'closed', host: 'b.example', reachable: false, login_required: true, error: 'Permission denied', user_jobs: { running: 9, pending: 4 }, partitions: [] },
+    { name: 'closed', host: 'b.example', reachable: false, login_required: true, error: 'alice@b.example: Permission denied', user_jobs: { running: 9, pending: 4 }, partitions: [] },
   ] }, {}, {}, {
     service: {
       state: 'attached', url: 'http://127.0.0.1:8080/', activity: 'Refreshing sessions…',
       recentLines: [{ stream: 'stderr', text: 'diagnostic <line>' }],
     },
-    sessionsError: 'temporary inspection error',
+    sessionsError: 'alice@b.example: temporary inspection error',
     sessions: { machines: [
       { name: 'open', username: 'alice', host: 'a.example', session_open: true, interactive_auth: true, control_persist_seconds: 3600, estimated_remaining_seconds: 28740 },
       { name: 'closed', username: 'alice', host: 'b.example', session_open: false, interactive_auth: true, credential_group: 'shared-site', error: 'No master' },
@@ -321,14 +332,17 @@ test('Cluster Status replaces logged-out session details with scoped login actio
   const closed = summaryFor('closed');
 
   assert.match(open, /class="cluster-job-track"[^>]*aria-label="2 running, 1 pending"/);
-  assert.match(open, /class="cluster-login-host" aria-label="SSH session: alice@a\.example&#10;Reusable session: about 7h 59m left"[^>]*>alice@a\.example<\/span>/);
+  assert.doesNotMatch(open, /cluster-login-host|a\.example|alice/);
+  assert.match(html, /open: alice@a\.example\n🕒 07:59 left/);
+  assert.doesNotMatch(open, /alice@/);
   assert.doesNotMatch(open, /clusterWatcher\.login/);
   assert.match(closed, /data-command="clusterWatcher\.login" data-args="\[&quot;closed&quot;,false\]">Log in<\/button>/);
   assert.match(closed, /data-command="clusterWatcher\.login" data-args="\[&quot;closed&quot;,true\]">Log into all machines on shared-site<\/button>/);
   assert.doesNotMatch(closed, /cluster-job-track|cluster-login-host|alice@b\.example/);
+  assert.match(html, /b\.example: Permission denied/);
   assert.equal((html.match(/>Log in<\/button>/g) || []).length, 1);
   assert.match(html, /Refreshing sessions…/);
-  assert.match(html, /Could not inspect SSH sessions: temporary inspection error/);
+  assert.match(html, /Could not inspect SSH sessions: b\.example: temporary inspection error/);
   assert.doesNotMatch(html, /Recent backend output|cluster-diagnostics|service-output|diagnostic &lt;line&gt;/);
   assert.match(html, /\.cluster-login-actions\{display:flex;[^}]*flex-wrap:wrap/);
   assert.doesNotMatch(html, /<title>Server Status<\/title>|class="session-row"/);
@@ -338,6 +352,14 @@ test('Cluster Status replaces logged-out session details with scoped login actio
   ] });
   assert.match(fallback, /data-command="clusterWatcher\.login" data-args="\[&quot;fallback&quot;,false\]">Log in<\/button>/);
   assert.equal((fallback.match(/clusterWatcher\.login/g) || []).length, 1);
+});
+
+test('session dialog escapes SSH account text before placing it in the webview', () => {
+  const html = renderStatus({ clusters: [] }, {}, {}, { sessions: { machines: [
+    { name: 'test', username: '<img src=x>', host: 'login.example', session_open: true },
+  ] } });
+  assert.match(html, /test: &lt;img src=x&gt;@login\.example/);
+  assert.doesNotMatch(html, /test: <img src=x>/);
 });
 
 test('availability tooltips group restrictive Slurm states and omit zero counts', () => {
@@ -409,7 +431,7 @@ test('remembered disclosure choices override default open/closed state', () => {
 
   const status = renderStatus({ clusters: [{ name: 'cluster_0', host: 'login.example', reachable: false }] }, { 'cluster:cluster_0': false });
   assert.match(status, /data-disclosure-key="cluster:cluster_0"><summary><span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">cluster_0<\/span>/);
-  assert.match(status, /class="cluster-login-host"[^>]*>login\.example<\/span>/);
+  assert.doesNotMatch(status, /class="cluster-login-host"|login\.example/);
 });
 
 test('openAttribute falls back to the renderer default', () => {
@@ -622,7 +644,7 @@ test('offline Cluster Status owns the service control while My Jobs points to it
   assert.ok(status.indexOf('class="welcome"') < status.indexOf('class="cluster-config-separator"'));
   assert.ok(status.indexOf('class="cluster-config-separator"') < status.indexOf('class="service-summary"'));
   assert.equal((status.match(/data-command="clusterWatcher\.startService"/g) || []).length, 1);
-  assert.match(status, /<hr class="cluster-config-separator"><div class="service-summary">.*?<\/div><button class="configure-clusters"/s);
+  assert.match(status, /<hr class="cluster-config-separator"><div class="service-summary">.*?<\/div><button class="view-sessions" type="button" data-open-sessions>view sessions\.\.\.<\/button><button class="configure-clusters"/s);
   assert.match(status, /class="configure-clusters"[^>]*data-command="clusterWatcher\.editConfig"/);
   assert.doesNotMatch(status, /Recent backend output|offline diagnostic/);
 });
@@ -905,4 +927,69 @@ test('wait cells show … until the first probe round finishes', () => {
   const done = renderStatus({ clusters: [{ name: 'cluster_0', reachable: true, wait_estimates_updated_at: '2026-10-06T16:00:00Z', partitions: [partition] }] });
   assert.match(done, /data-fast-tooltip="1 GPU · 1h job: not probed"/);
   assert.match(done, /data-fast-tooltip="16 GPUs · 1h job: exceeds the partition&#39;s 8 GPUs"/);
+});
+
+test('session dialog scrolls only its outer container', () => {
+  const html = renderStatus({ clusters: [] });
+  assert.match(html, /\.sessions-dialog\{[^}]*max-height:calc\(100vh - 8px\);overflow:auto/);
+  const textStyles = html.match(/\.sessions-dialog-text\{([^}]*)\}/)[1];
+  assert.doesNotMatch(textStyles, /(?:^|;)overflow:|max-height:/);
+  assert.match(textStyles, /white-space:pre-wrap;overflow-wrap:anywhere/);
+  assert.match(html, /querySelector\('\[data-close-sessions\]'\).*sessionsDialog\.close\(\)/);
+});
+
+test('cluster spacing is compact and the sessions popup stays wide and fits its content', () => {
+  const html = renderStatus({ clusters: [] });
+  assert.match(html, /\.cluster-group\{margin:4px 0\}/);
+  assert.match(html, /\.cluster-group>summary\{margin-bottom:3px/);
+  assert.match(html, /\.sessions-dialog\{[^}]*width:calc\(100vw - 16px\);max-width:none;inset:50% auto auto 50%;transform:translate\(-50%,-50%\);margin:0;height:fit-content/);
+  assert.match(html, /\.sessions-dialog\{[^}]*padding:4px 8px/);
+  assert.match(html, /\.sessions-dialog-close\{padding:0 2px/);
+});
+
+test('session popup keeps update text color and hides background scrolling only while open', () => {
+  const html = renderStatus({ clusters: [] });
+  const freshness = html.match(/\.view-freshness\{([^}]*)\}/)[1];
+  const dialog = html.match(/\.sessions-dialog\{([^}]*)\}/)[1];
+  for (const property of ['color']) {
+    const value = new RegExp(`(?:^|;)${property}:([^;}]*)`);
+    assert.equal(dialog.match(value)[1], freshness.match(value)[1]);
+  }
+  assert.match(dialog, /border-left:6px solid #000;border-right:6px solid #000/);
+  assert.match(html, /html:has\(\.sessions-dialog\[open\]\)\{overflow:hidden\}/);
+  assert.match(html, /\.sessions-dialog-text\{[^}]*font:inherit;line-height/);
+});
+
+test('sidebar content cards have square corners and session text and close control are larger', () => {
+  const html = renderStatus({ clusters: [] });
+  assert.match(html, /\.card\{[^}]*border-radius:0;/);
+  const dialog = html.match(/\.sessions-dialog\{([^}]*)\}/)[1];
+  const freshness = html.match(/\.view-freshness\{([^}]*)\}/)[1];
+  assert.equal(dialog.match(/font-size:([^;}]*)/)[1], '.82em');
+  assert.ok(parseFloat(dialog.match(/font-size:([^;}]*)/)[1])
+    > parseFloat(freshness.match(/font-size:([^;}]*)/)[1]));
+  assert.match(html, /\.sessions-dialog-close\{[^}]*font-size:1\.6em;/);
+});
+
+test('long session addresses fill the heading line before wrapping within the account', () => {
+  const html = renderStatus({ clusters: [] }, {}, {}, { sessions: { machines: [{
+    name: 'cluster_a', username: 'alice', host: 'login12.research.example.org',
+    session_open: true, control_persist_seconds: 7200, estimated_remaining_seconds: 3900,
+  }] } });
+  assert.match(html, /cluster_a: alice@login12\.research\.example\.org\n🕒 01:05 left/);
+  assert.match(html, /\.sessions-dialog-text\{[^}]*word-break:break-all;/);
+});
+
+test('session popup separates each entry and fits its content with minimal bottom spacing', () => {
+  const html = renderStatus({ clusters: [] }, {}, {}, { sessions: { machines: [
+    { name: 'cluster_a', username: 'alice', host: 'login1.example.org' },
+    { name: 'cluster_b', username: 'bob', host: 'login2.example.org' },
+  ] } });
+  const popup = html.match(/<dialog class="sessions-dialog"[^>]*>(.*?)<\/dialog>/s)[1];
+  assert.equal((popup.match(/class="sessions-dialog-text"/g) || []).length, 2);
+  assert.match(popup, /<\/h2><\/div><pre class="sessions-dialog-text"/);
+  assert.match(popup, /cluster_a: alice@login1\.example\.org\nclosed<\/pre><pre[^>]*>cluster_b: bob@login2\.example\.org/);
+  assert.match(html, /\.sessions-dialog-text\{[^}]*border-top:1px solid color-mix/);
+  assert.match(html, /\.sessions-dialog-text:last-of-type\{padding-bottom:0\}/);
+  assert.match(html, /\.sessions-dialog\{[^}]*height:fit-content;min-height:0;max-height:calc\(100vh - 8px\)/);
 });
