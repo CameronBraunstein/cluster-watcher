@@ -1286,8 +1286,11 @@ and read in one SSH call. Live jobs use `scontrol show job`; completed jobs
 reuse cached `sacct` records when available, then fall back to a bounded
 24-hour accounting lookup. For array jobs, `%j` in a log pattern uses Slurm's
 raw allocation ID, while `%A` and `%a` use the array master and task IDs.
-Older pages use a bounded tail from EOF. The
-response has `cluster`, `job_id`, `stream`,
+Older pages use a bounded tail from EOF and a page-sized POSIX `awk` buffer
+to skip the newest lines, including when the file is shorter than the requested
+offset. Log commands support GNU/Linux and macOS/BSD utilities without GNU-only
+`realpath -e` or negative `head` counts. Symlink targets and configured roots
+are canonicalized and checked before explicit-path reads. The response has `cluster`, `job_id`, `stream`,
 resolved `path`, line count, `before`, `more_before`, `truncated` (an alias),
 and `content`. A queued job or missing file returns `404`, unsafe parameters
 `400`, and remote failures `502`.

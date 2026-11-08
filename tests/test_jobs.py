@@ -3,6 +3,9 @@
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import os
+import shlex
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -171,7 +174,8 @@ class JobServiceTests(TimedTestCase):
         with self.assertRaisesRegex(ValueError, "outside the configured"):
             service.log_tail("alpha", "10", explicit_path="/secret/job.err")
         run_remote.assert_called_once()
-        self.assertIn("realpath -e", run_remote.call_args.args[2])
+        self.assertIn("realpath ", run_remote.call_args.args[2])
+        self.assertNotIn("realpath -e", run_remote.call_args.args[2])
 
     @patch("clusterwatcher.jobs.run_remote")
     def test_log_tail_is_hard_capped_and_never_uses_cat(self, run_remote):
@@ -195,7 +199,7 @@ class JobServiceTests(TimedTestCase):
         service = JobService([machine], 5, 15, lambda: [])
         command = service._explicit_tail_command(machine, "/safe/job.log", 3, 5)
         self.assertIn("tail -n 9", command)
-        self.assertIn("head -n -5", command)
+        self.assertIn("awk -v skip=5 -v limit=4", command)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             log = root / "job.log"
@@ -205,6 +209,47 @@ class JobServiceTests(TimedTestCase):
             result = subprocess.run(["sh", "-c", command], capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.partition("\x00")[2], "0\n1\n")
+
+    def test_log_pages_work_with_bsd_style_utilities(self):
+        """Exercise explicit and Slurm-resolved paths without GNU-only options."""
+        realpath = shutil.which("realpath")
+        head = shutil.which("head")
+        self.assertIsNotNone(realpath)
+        self.assertIsNotNone(head)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / "tools"
+            tools.mkdir()
+            wrappers = {
+                "realpath": f'case "$1" in -*) echo "realpath: illegal option" >&2; exit 1;; esac\nexec {shlex.quote(realpath)} "$@"\n',
+                "head": f'case "$2" in -*) echo "head: illegal line count" >&2; exit 1;; esac\nexec {shlex.quote(head)} "$@"\n',
+            }
+            for name, script in wrappers.items():
+                executable = tools / name
+                executable.write_text("#!/bin/sh\n" + script, encoding="utf-8")
+                executable.chmod(0o755)
+            environment = {**os.environ, "PATH": str(tools) + os.pathsep + os.environ.get("PATH", "")}
+            log = root / "job's $literal.log"
+            log.write_text("".join(f"{number}\n" for number in range(7)), encoding="utf-8")
+            machine = Machine("alpha", "host", "alice", job_log_roots=(str(root),))
+            service = JobService([machine], 5, 15, lambda: [])
+
+            def local_remote(_machine, _timeout, command):
+                """Run the generated SSH payload using simulated BSD command options."""
+                result = subprocess.run(["sh", "-c", command], env=environment,
+                                        capture_output=True, text=True, check=False)
+                if result.returncode:
+                    raise RuntimeError(result.stderr)
+                return result.stdout
+
+            with patch("clusterwatcher.jobs.run_remote", side_effect=local_remote), patch.object(
+                service, "_resolve_job_log_path", return_value=str(log),
+            ):
+                for explicit in (None, str(log)):
+                    for before, expected in ((0, "4\n5\n6\n"), (1, "3\n4\n5\n"), (4, "0\n1\n2\n"), (5, "0\n1\n"), (7, ""), (20, "")):
+                        with self.subTest(explicit=explicit is not None, before=before):
+                            page = service.log_tail("alpha", "10", tail=3, before=before, explicit_path=explicit)
+                            self.assertEqual(page["content"], expected)
 
     def test_explicit_path_checks_symlink_target_before_reading(self):
         """A symlink inside the allowed root cannot expose an outside log."""
@@ -224,6 +269,49 @@ class JobServiceTests(TimedTestCase):
         self.assertIn("outside the configured job_log_roots", result.stderr)
         self.assertNotIn("private", result.stdout)
 
+    def test_explicit_path_accepts_canonical_root_aliases_but_rejects_sibling_prefixes(self):
+        """Portable canonicalization preserves both allowed links and root boundaries."""
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            safe = parent / "safe"
+            safe.mkdir()
+            alias = parent / "root-alias"
+            alias.symlink_to(safe, target_is_directory=True)
+            log = safe / "job.log"
+            log.write_text("allowed\n", encoding="utf-8")
+            link = safe / "linked.log"
+            link.symlink_to(log)
+            sibling = parent / "safe-other"
+            sibling.mkdir()
+            outside = sibling / "job.log"
+            outside.write_text("private\n", encoding="utf-8")
+            machine = Machine("alpha", "host", "alice", job_log_roots=(str(alias),))
+            for path, allowed in ((link, True), (outside, False), (parent / "missing.log", False)):
+                with self.subTest(path=path.name, allowed=allowed):
+                    command = JobService._explicit_tail_command(machine, str(path), 10, 0)
+                    result = subprocess.run(["sh", "-c", command], capture_output=True, text=True, check=False)
+                    if allowed:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(result.stdout.partition("\x00")[2], "allowed\n")
+                        self.assertIn(str(log.resolve()), result.stdout)
+                    else:
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertEqual(result.stdout, "")
+
+    def test_backward_page_preserves_blank_lines_before_unterminated_final_line(self):
+        """POSIX paging counts blank and unterminated records like tail/head do."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log = root / "job.log"
+            log.write_text("\nfirst\n\nlast", encoding="utf-8")
+            machine = Machine("alpha", "host", "alice", job_log_roots=(str(root),))
+            for before, expected in ((0, "\nfirst\n\nlast"), (1, "\nfirst\n\n"), (4, "")):
+                with self.subTest(before=before):
+                    command = JobService._explicit_tail_command(machine, str(log), 4, before)
+                    result = subprocess.run(["sh", "-c", command], capture_output=True, text=True, check=False)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.partition("\x00")[2], expected)
+
     @patch("clusterwatcher.jobs.run_remote")
     @patch("clusterwatcher.jobs.collect_accounting_jobs")
     def test_log_tail_loads_one_bounded_older_page(self, accounting, run_remote):
@@ -242,7 +330,7 @@ class JobServiceTests(TimedTestCase):
         command = run_remote.call_args.args[2]
         self.assertNotIn("tac", command)
         self.assertIn(f"tail -n {2 * MAX_LOG_TAIL_LINES + 1}", command)
-        self.assertIn(f"head -n -{MAX_LOG_TAIL_LINES}", command)
+        self.assertIn(f"awk -v skip={MAX_LOG_TAIL_LINES}", command)
 
     @patch("clusterwatcher.jobs.run_remote", return_value="last line\n")
     @patch("clusterwatcher.jobs.collect_accounting_jobs")

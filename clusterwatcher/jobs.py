@@ -37,6 +37,28 @@ class JobLogNotFound(RuntimeError):
     """Indicate that a job has no readable log file yet."""
 
 
+def _tail_page_command(path_argument: str, tail: int, before: int) -> str:
+    """Read a bounded EOF-relative page with GNU or BSD shell utilities.
+
+    ``path_argument`` must already be a quoted shell argument, including
+    ``\"$resolved\"`` when authorization resolves the path remotely. Read
+    only the required suffix with tail, then retain at most ``tail + 1``
+    lines in POSIX awk to discard the newest ``before`` lines. The extra
+    line lets the caller detect another older page. Unlike negative head
+    counts, this also works on macOS and when the file is shorter than the
+    requested suffix. Memory usage depends on page size, not page offset.
+    """
+    command = f"tail -n {before + tail + 1} -- {path_argument}"
+    if before:
+        command += (
+            f" | awk -v skip={before} -v limit={tail + 1} "
+            "'NR <= limit { lines[NR] = $0 } "
+            "END { count = NR - skip; if (count > limit) count = limit; "
+            "for (i = 1; i <= count; i++) print lines[i] }'"
+        )
+    return command
+
+
 def parse_since(value: str | None, now: datetime | None = None) -> datetime:
     """Parse an ISO-8601 lower bound, defaulting to the preceding 24 hours."""
     current = now or datetime.now(timezone.utc)
@@ -378,16 +400,13 @@ class JobService:
             if explicit_path is not None:
                 command = self._explicit_tail_command(machine, path, tail, before)
             elif before:
-                # GNU tail seeks backward from EOF for regular files. Limit
-                # its output, then discard the already loaded newest lines.
-                # The remaining extra line is the older-page sentinel.
                 quoted_path = shlex.quote(path)
                 command = (
                     f"test -r {quoted_path} || {{ echo 'Log file is not readable' >&2; exit 1; }}; "
-                    f"tail -n {before + tail + 1} -- {quoted_path} | head -n -{before}"
+                    + _tail_page_command(quoted_path, tail, before)
                 )
             else:
-                command = f"tail -n {tail + 1} -- {shlex.quote(path)}"
+                command = _tail_page_command(shlex.quote(path), tail, before)
             output = run_remote(machine, self.timeout, command)
             if explicit_path is not None:
                 canonical, separator, output = output.partition("\x00")
@@ -419,18 +438,22 @@ class JobService:
 
     @staticmethod
     def _explicit_tail_command(machine: Machine, path: str, tail: int, before: int) -> str:
-        """Canonicalize, authorize, and read a log in one remote shell call."""
+        """Canonicalize, authorize, and read a log using GNU or BSD utilities.
+
+        Plain realpath resolves symlinks on both platforms. Readability and
+        root-existence checks retain strict existing-path behavior without
+        GNU's ``-e`` option. Every input path is absolute, so it cannot be
+        interpreted as a command option even without an option separator.
+        """
         roots = " ".join(shlex.quote(root) for root in machine.job_log_roots)
-        page = (
-            f"tail -n {before + tail + 1} -- \"$resolved\" | head -n -{before}"
-            if before else f"tail -n {tail + 1} -- \"$resolved\""
-        )
+        page = _tail_page_command('"$resolved"', tail, before)
         return (
-            f"resolved=$(realpath -e -- {shlex.quote(path)}) || exit 1; "
+            f"resolved=$(realpath {shlex.quote(path)}) || exit 1; "
             "test -r \"$resolved\" || { echo 'Log file is not readable' >&2; exit 1; }; "
             "allowed=0; "
             f"for root in {roots}; do "
-            "canonical_root=$(realpath -e -- \"$root\") || exit 1; "
+            "canonical_root=$(realpath \"$root\") || exit 1; "
+            "test -e \"$canonical_root\" || { echo 'realpath: configured log root does not exist' >&2; exit 1; }; "
             "if test \"$canonical_root\" = /; then allowed=1; continue; fi; "
             "case \"$resolved\" in \"$canonical_root\"|\"$canonical_root\"/*) allowed=1;; esac; "
             "done; "
