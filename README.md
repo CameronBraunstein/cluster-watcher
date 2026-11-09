@@ -1705,14 +1705,22 @@ missing runtime libraries.
 Each build selects a managed Python interpreter for the target architecture;
 the Windows ARM64 build checks the interpreter is native before freezing it.
 
-To release, update the version in `pyproject.toml`, `vscode/package.json`,
-and `vscode/package-lock.json`, add a dated `vscode/CHANGELOG.md` entry, and
-push a tag:
+To release, add notes under **Unreleased** in `vscode/CHANGELOG.md`, commit
+your changes, and run the release script from a clean default branch with
+GitHub CLI authenticated:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+scripts/release.sh patch
+# Or choose minor, major, or an explicit X.Y.Z version.
 ```
+
+The script runs local tests, updates the Python and extension versions and
+dates the changelog, commits and pushes, and waits for CI on that exact commit
+before pushing an annotated version tag. It then waits for the Release
+workflow, including Marketplace publishing. `--yes` accepts its push/tag
+prompts for an already authorized release; `--dry-run` previews the bump
+without committing or publishing. If CI fails before tagging, fix and commit
+the issue, then resume with the same explicit version.
 
 [`release.yml`](.github/workflows/release.yml) checks the tag against both
 versions, builds and smoke-tests all six executables, runs the extension

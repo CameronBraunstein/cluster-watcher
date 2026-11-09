@@ -4,6 +4,20 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
+- Show account-specific FairShare markers with compact `account: rank/total`
+  tooltips and keep hover boxes within narrow sidebars.
+- Add a centered SSH Sessions popup with configuration-order entries, compact
+  clock labels, gray separators, and one scrollbar. Tighten Cluster Status
+  spacing and use square corners for partition and job cards.
+- Support persistent tmux-backed services, scoped re-login actions, and
+  failover between configured login nodes.
+- Reduce repeated capacity, accounting, and association queries while keeping
+  status and personal job refreshes independent.
+- Fix backward log paging and explicit-path symlink checks on macOS/BSD while
+  preserving bounded reads and configured log-root restrictions.
+- Build Linux executables inside the glibc 2.17 compatibility container and
+  verify them in a fresh container; select native interpreters for ARM64 builds.
+
 ## 0.2.0 - 2026-10-13
 
 - Archiving or restoring a job now preserves the **My Jobs** viewport instead
