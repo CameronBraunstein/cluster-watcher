@@ -4,6 +4,8 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
+## 0.2.1 - 2026-11-09
+
 - Show account-specific FairShare markers with compact `account: rank/total`
   tooltips and keep hover boxes within narrow sidebars.
 - Add a centered SSH Sessions popup with configuration-order entries, compact
