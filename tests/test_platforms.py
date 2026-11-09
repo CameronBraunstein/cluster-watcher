@@ -4,7 +4,12 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
+import shutil
+import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 from unittest.mock import patch
 
@@ -96,6 +101,79 @@ class PlatformTests(TimedTestCase):
         action = (root / ".github" / "actions" / "build-standalone" / "action.yml").read_text(encoding="utf-8")
         self.assertEqual(action.count("UV_PYTHON_ARCH: ${{ inputs.python-arch }}"), 2)
         self.assertIn("sysconfig.get_platform()", action)
+
+    def test_linux_freezing_uses_the_glibc_baseline_instead_of_host_libraries(self):
+        """Prevent modern runner libgcc from leaking into glibc 2.17 releases."""
+        root = Path(__file__).parents[1]
+        action = (root / ".github/actions/build-standalone/action.yml").read_text(encoding="utf-8")
+        steps = {
+            match[1]: match[2]
+            for match in re.finditer(r"    - name: ([^\n]+)\n(.*?)(?=\n    - |\Z)", action, re.S)
+        }
+        linux = steps["Build on Linux with glibc 2.17"]
+        self.assertIn("if: runner.os == 'Linux'", linux)
+        self.assertIn('"quay.io/pypa/manylinux2014_${LINUX_ARCH}"', linux)
+        self.assertIn("docker run --rm -e ARTIFACT", linux)
+        self.assertIn("bash -euo pipefail -c '", linux)
+        self.assertIn('/opt/python/cp312-cp312/bin/python -m pip install "uv==0.13.5"', linux)
+        self.assertIn("/opt/python/cp312-cp312/bin/uv python install 3.12", linux)
+        self.assertIn("--managed-python /tmp/cluster-watcher-build", linux)
+        self.assertIn("/tmp/cluster-watcher-build/bin/python -m PyInstaller", linux)
+        self.assertIn("--workpath /tmp/cluster-watcher-pyinstaller", linux)
+        self.assertIn('"dist/$ARTIFACT" --config clusters.example.toml list', linux)
+        self.assertNotIn("/opt/python/cp312-cp312/bin/python -m PyInstaller", linux)
+        self.assertIn("if: runner.os == 'macOS'", steps["Build on macOS"])
+        self.assertIn("if: runner.os == 'Windows'", steps["Build on Windows"])
+        self.assertIn("uses: astral-sh/setup-uv@v6\n      if: runner.os != 'Linux'", action)
+
+    def test_linux_compatibility_smoke_test_has_a_fresh_container(self):
+        """Verify artifacts also start without build-time-installed dependencies."""
+        root = Path(__file__).parents[1]
+        action = (root / ".github/actions/build-standalone/action.yml").read_text(encoding="utf-8")
+        smoke = action.split("    - name: Prove Linux compatibility with glibc 2.17\n", 1)[1]
+        smoke = smoke.split("\n    - name:", 1)[0]
+        self.assertIn("if: runner.os == 'Linux'", smoke)
+        self.assertIn("docker run --rm", smoke)
+        self.assertIn('"quay.io/pypa/manylinux2014_${{ inputs.linux-arch }}"', smoke)
+        self.assertIn('"dist/${{ inputs.artifact }}" --config clusters.example.toml list', smoke)
+        self.assertNotIn("pip install", smoke)
+        self.assertNotIn(".build-venv", smoke)
+
+    @unittest.skipUnless(os.name == "posix", "Linux build shell runs on POSIX hosts")
+    def test_linux_build_invokes_the_native_container_for_both_architectures(self):
+        """Execute the action's outer shell with Docker simulated, without downloads."""
+        root = Path(__file__).parents[1]
+        action = (root / ".github/actions/build-standalone/action.yml").read_text(encoding="utf-8")
+        block = action.split("    - name: Build on Linux with glibc 2.17\n", 1)[1]
+        block = block.split("\n    - name:", 1)[0]
+        script = textwrap.dedent(block.split("      run: |\n", 1)[1])
+        bash = shutil.which("bash")
+        self.assertIsNotNone(bash)
+        with tempfile.TemporaryDirectory() as directory:
+            docker = Path(directory) / "docker"
+            capture = "import json,sys; print(json.dumps(sys.argv[1:]))"
+            docker.write_text(
+                f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -c {shlex.quote(capture)} \"$@\"\n",
+                encoding="utf-8",
+            )
+            docker.chmod(0o755)
+            for architecture in ("x86_64", "aarch64"):
+                with self.subTest(architecture=architecture):
+                    environment = {
+                        **os.environ, "PATH": directory + os.pathsep + os.environ.get("PATH", ""),
+                        "ARTIFACT": f"cluster-watcher-linux-{architecture}", "LINUX_ARCH": architecture,
+                    }
+                    result = subprocess.run([bash, "-euo", "pipefail", "-c", script],
+                                            env=environment, capture_output=True, text=True, check=False)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    arguments = json.loads(result.stdout)
+                    self.assertIn(f"quay.io/pypa/manylinux2014_{architecture}", arguments)
+                    self.assertIn(f"{Path.cwd()}:/work", arguments)
+                    self.assertIn("ARTIFACT", arguments)
+                    container_script = arguments[-1]
+                    parsed = subprocess.run([bash, "-n", "-c", container_script],
+                                            capture_output=True, text=True, check=False)
+                    self.assertEqual(parsed.returncode, 0, parsed.stderr)
 
     def test_windows_key_transport_uses_direct_noninteractive_ssh(self):
         machine = Machine("cluster", "login.example", "alice", port=2222)

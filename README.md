@@ -1677,10 +1677,17 @@ python3 -m PyInstaller --noconfirm --clean cluster-watcher.spec
 
 Artifacts are named `cluster-watcher-<os>-<architecture>` (`.exe` on
 Windows), for example `cluster-watcher-macos-aarch64`. PyInstaller is not a
-cross-compiler, so CI builds each target natively. Linux release builds use a
-python-build-standalone interpreter (via `uv`) targeting glibc 2.17, and CI
-checks each one starts in a `manylinux2014` container; a local build inherits
-your Python's glibc requirement. The target still needs `ssh`. Passwords and
+cross-compiler, so CI builds each target natively. Linux release builds run
+entirely inside the matching `manylinux2014` container using a `uv`-managed
+CPython 3.12 interpreter and a container-local build environment. The image's
+static Python bootstraps `uv`; the managed interpreter provides the shared
+`libpython` required by PyInstaller. This keeps both Python
+and libraries collected by PyInstaller on the glibc 2.17 baseline; using an
+older interpreter on a newer host alone is insufficient. A second, fresh
+container smoke-tests the executable without the build environment. macOS
+and Windows use a managed Python interpreter via `uv`. A local build outside
+these containers inherits its Python and system-library requirements.
+The target still needs `ssh`. Passwords and
 OTPs are never embedded: a frozen build re-enters itself as the OpenSSH
 askpass client. Bundled builds read optional `[[profile]]` entries from the
 same `clusters.toml` used for machine connections.
@@ -1692,7 +1699,9 @@ requests: the Python suite on 3.11–3.13 (Linux, plus macOS and native-Windows
 policy coverage), the extension unit and integration tests, and six
 standalone builds (Linux, macOS, Windows × x86-64, ARM64) using the shared
 [`build-standalone`](.github/actions/build-standalone/action.yml) action.
-Linux artifacts are smoke-tested in a glibc 2.17 container.
+Linux artifacts are built and smoke-tested in glibc 2.17 containers; the final
+smoke test uses a fresh container so build-installed dependencies cannot mask
+missing runtime libraries.
 Each build selects a managed Python interpreter for the target architecture;
 the Windows ARM64 build checks the interpreter is native before freezing it.
 

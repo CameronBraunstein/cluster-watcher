@@ -16,12 +16,39 @@ runs:
   using: composite
   steps:
     - uses: astral-sh/setup-uv@v6
+      if: runner.os != 'Linux'
       with:
         # UV_PYTHON_ARCH is supported from uv 0.12.22 onward.
         version: "0.13.5"
 
-    - name: Build on Linux or macOS
-      if: runner.os != 'Windows'
+    - name: Build on Linux with glibc 2.17
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.artifact }}
+        LINUX_ARCH: ${{ inputs.linux-arch }}
+      run: |
+        # Freeze inside the compatibility baseline too: an older Python alone
+        # cannot prevent PyInstaller from collecting newer host system libraries.
+        docker run --rm -e ARTIFACT -v "$PWD:/work" -w /work \
+          "quay.io/pypa/manylinux2014_${LINUX_ARCH}" \
+          bash -euo pipefail -c '
+            # manylinux CPython is static; bootstrap uv with it, then freeze
+            # using managed Python, which includes the required shared libpython.
+            /opt/python/cp312-cp312/bin/python -m pip install "uv==0.13.5"
+            export UV_PYTHON_INSTALL_DIR=/tmp/cluster-watcher-python
+            /opt/python/cp312-cp312/bin/uv python install 3.12
+            /opt/python/cp312-cp312/bin/uv venv --python 3.12 --managed-python /tmp/cluster-watcher-build
+            /opt/python/cp312-cp312/bin/uv pip install --python /tmp/cluster-watcher-build "pyinstaller>=6.0,<7"
+            /tmp/cluster-watcher-build/bin/python -m PyInstaller --noconfirm --clean \
+              --workpath /tmp/cluster-watcher-pyinstaller cluster-watcher.spec
+            test -x "dist/$ARTIFACT"
+            "dist/$ARTIFACT" --help
+            "dist/$ARTIFACT" --config clusters.example.toml list
+          '
+
+    - name: Build on macOS
+      if: runner.os == 'macOS'
       shell: bash
       env:
         UV_PYTHON_ARCH: ${{ inputs.python-arch }}
