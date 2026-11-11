@@ -4,6 +4,8 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
+## 0.2.2 - 2026-11-11
+
 - Separate dependency-held jobs into **Depending** across the terminal, web,
   and VS Code boards. Show running, pending, and depending activity in cluster
   summaries, with segment-specific counts and GPU-hour estimates.
