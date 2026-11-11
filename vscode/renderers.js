@@ -68,14 +68,23 @@ function hasFailedDependency(job) {
   return expression.includes('?') ? clauses.every(failed) : clauses.some(failed);
 }
 
+/** Identify a queued job whose Slurm dependency is still present. */
+function waitsForDependency(job) {
+  if (stateGroup(job.state) !== 'PENDING') return false;
+  const dependency = String(job.dependency || '').trim();
+  return (dependency && !['(null)', 'NULL', 'None', 'N/A'].includes(dependency))
+    || /^dependency(?:\s*:|$)/i.test(String(job.reason || '').trim());
+}
+
 /** Map a complete job record onto its visible card group. */
 function jobGroup(job) {
-  return hasFailedDependency(job) ? 'FAILED_DEPENDENCY' : stateGroup(job.state);
+  if (hasFailedDependency(job)) return 'FAILED_DEPENDENCY';
+  return waitsForDependency(job) ? 'DEPENDING' : stateGroup(job.state);
 }
 
 /** Return whether the job has not launched and therefore lacks logs/timestamps. */
 function isQueuedGroup(group) {
-  return group === 'PENDING' || group === 'FAILED_DEPENDENCY';
+  return group === 'PENDING' || group === 'DEPENDING' || group === 'FAILED_DEPENDENCY';
 }
 
 /** Return a pending job's rank position among visible peers on its cluster. */
@@ -262,7 +271,7 @@ function pendingExplanation(job) {
 /** Render state-appropriate elapsed/wait progress that the webview keeps current. */
 function jobProgress(job, asOf, now = Date.now(), noEstimatePriority = '') {
   const spec = progressSpec(job, asOf);
-  if (jobGroup(job) === 'FAILED_DEPENDENCY' || (spec.group === 'PENDING' && spec.expected == null)) {
+  if (['DEPENDING', 'FAILED_DEPENDENCY'].includes(jobGroup(job)) || (spec.group === 'PENDING' && spec.expected == null)) {
     const explanation = pendingExplanation(job);
     if (explanation === 'no estimate available' && noEstimatePriority) return noEstimatePriority;
     return `<span class="muted progress-message">${explanation}</span>`;
@@ -301,6 +310,8 @@ function document(title, body, freshness = {}) {
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
 body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group{margin:9px 0}.cluster-group{margin:4px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:3px;min-width:0}.cluster-summary{box-sizing:border-box;display:inline-flex;flex-direction:column;gap:2px;width:calc(100% - 16px);min-width:0;vertical-align:top}.cluster-summary-main{display:flex;align-items:center;gap:7px;min-width:0}.cluster-summary-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cluster-job-track{display:flex;flex:1 1 70px;max-width:140px;min-width:40px;height:6px;margin-left:auto;overflow:hidden;border-radius:4px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent);cursor:help}.cluster-job-running,.cluster-job-pending{display:block;height:100%}.cluster-job-running{background:var(--vscode-progressBar-background)}.cluster-job-pending{background:var(--vscode-editorError-foreground)}.card{border:1px solid var(--vscode-panel-border);border-radius:0;margin:3px 0;background:var(--vscode-sideBar-background);min-width:0}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none;min-width:0}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card-summary-title[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:0;top:calc(100% + 2px);max-width:calc(100% - 14px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open]) .card-summary-title[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{position:relative;display:flex;min-width:0}.card-summary-progress{display:flex;align-items:center;gap:5px;min-width:0}.card-summary-progress>:not(.job-id){flex:1 1 auto;min-width:0}.card-summary-progress>.job-id{flex:0 0 auto;font-size:.72em}.card:not([open]) .card-summary-progress>.job-id{display:none}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0;max-width:100%}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px;min-width:0}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta{min-width:0;white-space:normal;overflow-wrap:anywhere}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:2px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0;cursor:help}.availability-count{font-variant-numeric:tabular-nums;white-space:nowrap}.available{background:var(--vscode-testing-iconPassed)}.fast-tooltip{position:fixed;z-index:100;display:none;box-sizing:border-box;width:max-content;max-width:min(220px,calc(100vw - 8px));overflow-wrap:anywhere;padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));outline:1px solid #fff;border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:pre-line;pointer-events:none}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em;min-width:0}.times dt{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd{margin:0;min-width:0;white-space:normal;text-align:right}.times dd.dependency-value{overflow-wrap:anywhere}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px;min-width:0}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
 .card-summary-progress>.summary-archive-action{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;padding:2px 3px;line-height:1.4}
+.cluster-job-running{background:#2563eb}.cluster-job-pending{background:#dc2626}.cluster-job-depending{display:block;height:100%;background:#6b1026}
+.cluster-job-track{height:10px}.cluster-job-track>button{display:block;height:100%;min-width:0;margin:0;padding:0;border:0;cursor:pointer}.cluster-job-track>button:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:-2px}
 .card-summary-title[data-full-name]::after{outline:1px solid #fff}
 .card[open] .name{white-space:normal;overflow-wrap:anywhere}
 .progress-message{display:block;max-width:100%;font-size:.72em;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
@@ -373,7 +384,14 @@ button.button{border:0;font:inherit;cursor:pointer}
   window.addEventListener('load', () => {
     restoringScroll = true;
     restoreScroll();
-    requestAnimationFrame(() => { restoringScroll = false; });
+    requestAnimationFrame(() => {
+      restoreScroll();
+      requestAnimationFrame(() => {
+        restoreScroll();
+        restoringScroll = false;
+        api.postMessage({ type: 'ready' });
+      });
+    });
   }, { once: true });
   let scrollFrame;
   window.addEventListener('scroll', () => {
@@ -441,8 +459,14 @@ button.button{border:0;font:inherit;cursor:pointer}
   setInterval(tick, 5000);
   // A not-modified check still prompts an immediate local progress update.
   window.addEventListener('message', (event) => {
-    if (event.data?.type !== 'checked') return;
-    tick();
+    if (event.data?.type === 'checked') tick();
+    if (event.data?.type !== 'jumpGroup') return;
+    const group = event.data.group;
+    const target = [...document.querySelectorAll('details.job-group[data-disclosure-key]')]
+      .find((details) => details.dataset.disclosureKey === 'group:active:' + group);
+    if (!target) { api.postMessage({ type: 'missingGroup', group }); return; }
+    if (!target.open) { target.open = true; remember(target); }
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   document.addEventListener('click', (event) => {
     const button = event.target.closest('[data-command]');
@@ -703,7 +727,7 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
   const resources = `${nodes} node · ${Number(job.gpus) || 0} GPU · ${Number(job.cpus) || 0} CPU`;
   const archiveCommand = archived ? 'clusterWatcher.restoreJob' : 'clusterWatcher.archiveJob';
   const key = jobKey(job);
-  const quickArchive = !archived && !['RUNNING', 'PENDING'].includes(jobGroup(job));
+  const quickArchive = !archived && !['RUNNING', 'PENDING', 'DEPENDING'].includes(jobGroup(job));
   const archiveAction = archived
     ? `<a class="button compact-action" role="button" ${commandAttributes(archiveCommand, [key])} title="Restore job">Restore</a>`
     : `<a class="button compact-action archive-action${quickArchive ? ' summary-archive-action' : ''}" role="button" ${commandAttributes(archiveCommand, [key])} title="Archive job" aria-label="Archive job">${archiveIcon()}</a>`;
@@ -737,13 +761,13 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
  */
 function renderJobs(payload, disclosures = {}, cancelling = new Set(), freshness = {}) {
   const asOf = Date.parse(payload.generated_at || '') || Date.now();
-  const ranks = new Map(['RUNNING', 'PENDING', 'FAILED_DEPENDENCY', 'COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED', 'OTHER'].map((name, index) => [name, index]));
+  const ranks = new Map(['RUNNING', 'PENDING', 'DEPENDING', 'FAILED_DEPENDENCY', 'COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED', 'OTHER'].map((name, index) => [name, index]));
   const jobs = [...(payload.jobs || [])].sort((left, right) => {
     const groupDifference = ranks.get(jobGroup(left)) - ranks.get(jobGroup(right));
     if (groupDifference) return groupDifference;
     return String(right.submit_at || right.submit_time || '').localeCompare(String(left.submit_at || left.submit_time || ''));
   });
-  const labels = { RUNNING: 'Running', PENDING: 'Pending', FAILED_DEPENDENCY: 'Failed Dependency', COMPLETED: 'Completed', FAILED_EARLY: 'Failed (Early)', FAILED_TIMEOUT: 'Failed (Timeout)', CANCELLED: 'Cancelled', OTHER: 'Other' };
+  const labels = { RUNNING: 'Running', PENDING: 'Pending', DEPENDING: 'Depending', FAILED_DEPENDENCY: 'Failed Dependency', COMPLETED: 'Completed', FAILED_EARLY: 'Failed (Early)', FAILED_TIMEOUT: 'Failed (Timeout)', CANCELLED: 'Cancelled', OTHER: 'Other' };
   const archived = payload.archived_jobs || [];
   const knownJobs = [...jobs, ...archived];
   const rows = [];
@@ -976,19 +1000,25 @@ function partitionFairShare(entries, error = null) {
   return `<div class="partition-fair-share"><span class="fair-share-title">FairShare:</span><div class="fair-share-bars">${bars || unavailable}</div></div>`;
 }
 
-/** Render the current user's running/pending ratio in a cluster summary. */
+/** Render clickable running, pending, and dependency-held shares for a cluster. */
 function clusterJobRatio(counts = {}) {
   const count = (value) => Number.isFinite(Number(value)) ? Math.max(0, Math.floor(Number(value))) : 0;
   const running = count(counts.running);
   const pending = count(counts.pending);
-  const total = running + pending;
+  const depending = count(counts.depending);
+  const total = running + pending + depending;
   const runningPercent = total ? running / total * 100 : 0;
   const pendingPercent = total ? pending / total * 100 : 0;
-  const label = `${running} running, ${pending} pending`;
-  const segments = total
-    ? `<span class="cluster-job-running" style="width:${runningPercent}%"></span><span class="cluster-job-pending" style="width:${pendingPercent}%"></span>`
-    : '';
-  return `<span class="cluster-job-track" role="img" aria-label="${escapeHtml(label)}" data-fast-tooltip="${escapeHtml(label)}">${segments}</span>`;
+  const dependingPercent = total ? depending / total * 100 : 0;
+  const label = `${running} running, ${pending} pending, ${depending} depending`;
+  const segments = [
+    ['RUNNING', running, runningPercent],
+    ['PENDING', pending, pendingPercent],
+    ['DEPENDING', depending, dependingPercent],
+  ].filter(([, number]) => number > 0).map(([group, number, percent]) => (
+    `<button class="cluster-job-${group.toLowerCase()}" style="width:${percent}%" ${commandButtonAttributes('clusterWatcher.showJobsGroup', [group])} aria-label="Show ${number} ${group.toLowerCase()} job${number === 1 ? '' : 's'} in My Jobs"></button>`
+  )).join('');
+  return `<span class="cluster-job-track" role="group" aria-label="${escapeHtml(label)}" data-fast-tooltip="${escapeHtml(label)}">${segments}</span>`;
 }
 
 /** Return whether an interactive machine currently lacks its reusable SSH session. */

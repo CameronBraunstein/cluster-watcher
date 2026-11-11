@@ -62,6 +62,24 @@ test('jobs retain terminal state grouping and lifecycle visibility', () => {
   assert.match(jobKey(jobs[0]), /cluster_1/);
 });
 
+test('dependency waits appear in Depending between Pending and failed dependencies', () => {
+  const jobs = [
+    { job_id: 'ready', cluster: 'c', state: 'PENDING', reason: 'Priority' },
+    { job_id: 'held', cluster: 'c', state: 'PENDING', dependency: 'afterok:11(unfulfilled)', expected_start_at: '2026-10-01T11:00:00Z' },
+    { job_id: 'failed', cluster: 'c', state: 'PENDING', reason: 'DependencyNeverSatisfied', dependency: 'afterok:12(failed)' },
+  ];
+  const html = renderJobs({ jobs });
+  assert.equal(jobGroup(jobs[0]), 'PENDING');
+  assert.equal(jobGroup(jobs[1]), 'DEPENDING');
+  assert.equal(jobGroup(jobs[2]), 'FAILED_DEPENDENCY');
+  assert.ok(html.indexOf('Pending (1)') < html.indexOf('Depending (1)'));
+  assert.ok(html.indexOf('Depending (1)') < html.indexOf('Failed Dependency (1)'));
+  assert.match(html, /group:active:DEPENDING" open/);
+  const held = html.match(/data-job-ref="c\/held"[^>]*>.*?<\/details>/s)[0];
+  assert.doesNotMatch(held, /<dt>Launched<\/dt>/);
+  assert.doesNotMatch(held, /data-progress=/);
+});
+
 test('finished and failed cards expose one Archive icon before summary progress', () => {
   const cases = [
     ['running', 'RUNNING', {}, false],
@@ -163,12 +181,17 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /querySelectorAll\('\[data-fast-tooltip\]'\)/);
   assert.doesNotMatch(html, /0 mixed/);
   assert.doesNotMatch(html, /<table/);
-  assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary><span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">cluster_0<\/span><span class="cluster-job-track" role="img" aria-label="3 running, 1 pending"/);
+  assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary><span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">cluster_0<\/span><span class="cluster-job-track" role="group" aria-label="3 running, 1 pending, 0 depending"/);
   assert.match(html, /class="cluster-job-running" style="width:75%"/);
   assert.match(html, /class="cluster-job-pending" style="width:25%"/);
+  assert.match(html, /class="cluster-job-running"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;RUNNING&quot;\]"/);
+  assert.match(html, /class="cluster-job-pending"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;PENDING&quot;\]"/);
+  assert.doesNotMatch(html, /data-args="\[&quot;DEPENDING&quot;\]"/);
   assert.doesNotMatch(html, /class="cluster-login-host"|login-02\.example/);
   assert.match(html, /\.cluster-job-running\{background:var\(--vscode-progressBar-background\)\}/);
   assert.match(html, /\.cluster-job-pending\{background:var\(--vscode-editorError-foreground\)\}/);
+  assert.match(html, /\.cluster-job-depending\{display:block;height:100%;background:#6b1026\}/);
+  assert.match(html, /\.cluster-job-running\{background:#2563eb\}\.cluster-job-pending\{background:#dc2626\}/);
   assert.doesNotMatch(html, /\.cluster-group(?:\[open\])?>summary::before/);
   assert.match(html, /\.cluster-summary\{[^}]*display:inline-flex;flex-direction:column/);
   assert.match(html, /<dialog class="sessions-dialog" aria-labelledby="sessions-dialog-title">/);
@@ -197,8 +220,31 @@ test('cluster job ratio remains empty when no jobs are running or pending', () =
     { name: 'idle', reachable: true, user_jobs: { running: 0, pending: 0 }, partitions: [] },
   ] });
   const track = html.match(/<span class="cluster-job-track"[^>]*>.*?<\/span>/s)[0];
-  assert.match(track, /aria-label="0 running, 0 pending"/);
-  assert.doesNotMatch(track, /cluster-job-(?:running|pending)/);
+  assert.match(track, /aria-label="0 running, 0 pending, 0 depending"/);
+  assert.doesNotMatch(track, /cluster-job-(?:running|pending|depending)/);
+});
+
+test('cluster ratio includes three correctly sized status colors', () => {
+  const html = renderStatus({ clusters: [
+    { name: 'busy', reachable: true, user_jobs: { running: 2, pending: 1, depending: 1 }, partitions: [] },
+  ] });
+  assert.match(html, /aria-label="2 running, 1 pending, 1 depending"/);
+  assert.match(html, /class="cluster-job-running" style="width:50%"/);
+  assert.match(html, /class="cluster-job-pending" style="width:25%"/);
+  assert.match(html, /class="cluster-job-depending" style="width:25%"/);
+  assert.match(html, /class="cluster-job-depending"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;DEPENDING&quot;\]"/);
+  assert.match(html, /const target = \[\.\.\.document\.querySelectorAll\('details\.job-group\[data-disclosure-key\]'\)\]/);
+  assert.match(html, /if \(!target\.open\) \{ target\.open = true; remember\(target\); \}/);
+  assert.match(html, /target\.scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
+});
+
+test('active jobs are ordered by newest submission within each state group', () => {
+  const jobs = [
+    { job_id: 'older', name: 'Zebra', cluster: 'c', state: 'RUNNING', submit_at: '2026-10-01T10:00:00Z' },
+    { job_id: 'newer', name: 'Apple', cluster: 'c', state: 'RUNNING', submit_at: '2026-10-01T11:00:00Z' },
+  ];
+  const html = renderJobs({ jobs });
+  assert.ok(html.indexOf('data-job-ref="c/newer"') < html.indexOf('data-job-ref="c/older"'));
 });
 
 test('matched fair-share factors have bars above GPU and node availability', () => {
@@ -331,7 +377,7 @@ test('Cluster Status replaces logged-out session details with scoped login actio
   const open = summaryFor('open');
   const closed = summaryFor('closed');
 
-  assert.match(open, /class="cluster-job-track"[^>]*aria-label="2 running, 1 pending"/);
+  assert.match(open, /class="cluster-job-track"[^>]*aria-label="2 running, 1 pending, 0 depending"/);
   assert.doesNotMatch(open, /cluster-login-host|a\.example|alice/);
   assert.match(html, /open: alice@a\.example\n🕒 07:59 left/);
   assert.doesNotMatch(open, /alice@/);
@@ -724,7 +770,7 @@ test('pending wait counts down and the webview re-runs the shared code', () => {
   assert.match(html, /function progressView\(spec, now\)/);
   assert.match(html, /setInterval\(tick, 5000\)/);
   assert.doesNotMatch(html, /<div class="meta"/);
-  assert.match(html, /event\.data\?\.type !== 'checked'/);
+  assert.match(html, /event\.data\?\.type === 'checked'/);
 });
 
 test('pending jobs without an estimate explain why and omit the empty bar', () => {

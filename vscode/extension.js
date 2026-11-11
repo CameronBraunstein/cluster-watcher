@@ -28,6 +28,7 @@ const WEBVIEW_COMMANDS = new Set([
   'clusterWatcher.startService', 'clusterWatcher.runSetup', 'clusterWatcher.editConfig', 'clusterWatcher.openSettings',
   'clusterWatcher.stopService', 'clusterWatcher.openDashboard', 'clusterWatcher.copyServiceCommand',
   'clusterWatcher.refresh', 'clusterWatcher.login', 'clusterWatcher.manageBackend',
+  'clusterWatcher.showJobsGroup',
 ]);
 
 /** Return the current extension configuration. */
@@ -477,6 +478,13 @@ class SidebarProvider {
       );
     } else if (message?.type === 'missingJob' && typeof message.ref === 'string') {
       vscode.window.showInformationMessage(`Job ${message.ref} could not be found in My Jobs; it may be older than 24 hours or belong to another user.`);
+    } else if (message?.type === 'ready' && this.kind === 'jobs' && this.pendingGroup && this.showingData && this.view) {
+      const group = this.pendingGroup;
+      void this.view.webview.postMessage({ type: 'jumpGroup', group }).then((delivered) => {
+        if (delivered && this.pendingGroup === group) this.pendingGroup = undefined;
+      });
+    } else if (message?.type === 'missingGroup' && this.kind === 'jobs') {
+      vscode.window.showInformationMessage(`No visible ${String(message.group || '').toLowerCase()} jobs are in My Jobs. Check Archive if you moved them there.`);
     }
   }
 
@@ -593,6 +601,18 @@ class JobsSidebarProvider extends SidebarProvider {
     this.payload = { jobs: [] };
     /** ``cluster/job_id`` refs whose End Job request succeeded but that Slurm still lists as active. */
     this.cancelling = new Set();
+    /** Group to scroll to after the newly rendered My Jobs webview is ready. */
+    this.pendingGroup = undefined;
+  }
+
+  /** Focus My Jobs and reveal one active section selected from Cluster Status. */
+  async revealGroup(group) {
+    if (!['RUNNING', 'PENDING', 'DEPENDING'].includes(group)) return;
+    this.pendingGroup = group;
+    this.disclosures[`group:active:${group}`] = true;
+    const previousView = this.view;
+    await vscode.commands.executeCommand('clusterWatcher.jobs.focus');
+    if (this.view && this.view === previousView) this.render();
   }
 
   update(payload, checkedAt = Date.now()) {
@@ -961,6 +981,7 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('clusterWatcher.stopService', () => controller.stop().catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.refresh', () => coordinator.refresh()),
+    vscode.commands.registerCommand('clusterWatcher.showJobsGroup', (group) => jobsProvider.revealGroup(group).catch(reportError)),
     vscode.commands.registerCommand('clusterWatcher.refreshJobs', refreshJobsWithFeedback),
     vscode.commands.registerCommand('clusterWatcher.refreshJobsBusy', refreshJobsWithFeedback),
     vscode.commands.registerCommand('clusterWatcher.refreshStatus', refreshStatusWithFeedback),

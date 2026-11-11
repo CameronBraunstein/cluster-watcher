@@ -54,6 +54,18 @@ test('status bar summarises running and pending jobs', () => {
   assert.match(statusSummary([job('1', 'PENDING')]).tooltip, /0 jobs running and 1 job pending/);
 });
 
+test('status bar adds Depending only when dependency-held jobs exist', () => {
+  const summary = statusSummary([
+    job('1', 'RUNNING'),
+    job('2', 'PENDING', { reason: 'Priority' }),
+    job('3', 'PENDING', { dependency: 'afterok:1(unfulfilled)' }),
+  ]);
+  assert.equal(summary.text, '$(server-process) 1 running · 1 pending · 1 depending');
+  assert.match(summary.tooltip, /1 job running, 1 job pending, and 1 job depending/);
+  assert.equal(statusSummary([job('3', 'PENDING', { dependency: 'afterok:1' })]).text,
+    '$(server-process) 0 running · 0 pending · 1 depending');
+});
+
 test('publishing is blocked while placeholders remain', () => {
   assert.equal(publishProblems({ publisher: 'cluster-watcher-project', repository: { url: 'https://github.com/REPLACE-ME/x' } }).length, 4);
   assert.deepEqual(publishProblems({

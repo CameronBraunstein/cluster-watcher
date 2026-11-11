@@ -1,6 +1,6 @@
 'use strict';
 
-const { isFailureGroup, jobKey, jobRef, localTime, stateGroup } = require('./renderers');
+const { isFailureGroup, jobGroup, jobKey, jobRef, localTime, stateGroup } = require('./renderers');
 
 const ACTIVE_GROUPS = new Set(['RUNNING', 'PENDING']);
 const FINISHED_GROUPS = new Set(['COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED']);
@@ -57,16 +57,20 @@ function jobCount(count) {
 function statusSummary(jobs, refreshedAt) {
   let running = 0;
   let pending = 0;
+  let depending = 0;
   for (const job of jobs || []) {
-    const group = stateGroup(job.state);
+    const group = jobGroup(job);
     if (group === 'RUNNING') running += 1;
     else if (group === 'PENDING') pending += 1;
+    else if (group === 'DEPENDING') depending += 1;
   }
-  const text = running || pending ? `$(server-process) ${running} running · ${pending} pending` : '$(server-process) no active jobs';
+  const text = running || pending || depending
+    ? `$(server-process) ${running} running · ${pending} pending${depending ? ` · ${depending} depending` : ''}`
+    : '$(server-process) no active jobs';
   const refreshed = refreshedAt ? `\nLast refreshed ${localTime(refreshedAt, true)}.` : '';
   return {
     text,
-    tooltip: `Cluster Watcher: ${jobCount(running)} running and ${jobCount(pending)} pending.${refreshed}\nClick to show My Jobs.`,
+    tooltip: `Cluster Watcher: ${jobCount(running)} running${depending ? `, ${jobCount(pending)} pending, and ${jobCount(depending)} depending` : ` and ${jobCount(pending)} pending`}.${refreshed}\nClick to show My Jobs.`,
   };
 }
 
