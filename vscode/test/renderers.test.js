@@ -318,7 +318,7 @@ test('partition navigation briefly highlights only the destination card', () => 
   assert.match(html, /setTimeout\(\(\) => card\.classList\.remove\('jump-highlight'\), 1500\)/);
 });
 
-test('expanded lifecycle rows keep label, clock, and date on one line', () => {
+test('expanded lifecycle rows keep label, date, and clock on one line', () => {
   const html = renderJobs({ jobs: [{
     job_id: '7', cluster: 'c', state: 'COMPLETED',
     submit_at: '2026-09-30T15:00:00Z', start_at: '2026-09-30T15:01:00Z',
@@ -326,7 +326,7 @@ test('expanded lifecycle rows keep label, clock, and date on one line', () => {
   }] });
   const submitted = html.match(/<div class="time-row"><dt>Submitted<\/dt><dd>([^<]+)<\/dd><\/div>/);
   assert.ok(submitted);
-  assert.match(submitted[1], /^\d\d:\d\d \d\d\.\d\d$/);
+  assert.match(submitted[1], /^\d\d\.\d\d \d\d:\d\d$/);
   assert.match(html, /<div class="time-row"><dt>Launched<\/dt><dd>[^<]+<\/dd><\/div>/);
   assert.match(html, /<div class="time-row"><dt>Ended<\/dt><dd>[^<]+<\/dd><\/div>/);
   assert.match(html, /\.time-row\{[^}]*justify-content:space-between;[^}]*white-space:nowrap\}/);
@@ -339,7 +339,7 @@ test('expanded timestamps honor month-first date settings without showing a year
     setDateFormat('MM/DD/YY');
     const html = renderJobs({ jobs: [{ job_id: '7', cluster: 'c', state: 'PENDING',
       submit_at: '2026-09-30T15:00:00Z' }] });
-    assert.match(html, /<div class="time-row"><dt>Submitted<\/dt><dd>\d\d:\d\d 09\/30<\/dd><\/div>/);
+    assert.match(html, /<div class="time-row"><dt>Submitted<\/dt><dd>09\/30 \d\d:\d\d<\/dd><\/div>/);
     assert.doesNotMatch(html.match(/<div class="time-row">.*?<\/div>/s)[0], /2026|<dt>Submitted:/);
   } finally {
     setDateFormat();

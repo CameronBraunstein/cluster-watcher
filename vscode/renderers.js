@@ -34,7 +34,7 @@ function localTime(value, withSeconds = false) {
   return `${dateFormat.replace(/YYYY|YY|MM|DD/g, (token) => parts[token])} ${clock}`;
 }
 
-/** Put the local clock before day and month, respecting the configured order. */
+/** Put day and month before the local clock, respecting the configured order. */
 function cardTime(value) {
   if (!value) return 'Unavailable';
   const parsed = new Date(value);
@@ -45,7 +45,7 @@ function cardTime(value) {
   const month = pad(parsed.getMonth() + 1);
   const separator = dateFormat.match(/[./-]/)?.[0] || ' ';
   const monthFirst = dateFormat.indexOf('MM') < dateFormat.indexOf('DD');
-  return `${clock} ${monthFirst ? `${month}${separator}${day}` : `${day}${separator}${month}`}`;
+  return `${monthFirst ? `${month}${separator}${day}` : `${day}${separator}${month}`} ${clock}`;
 }
 
 /** Build compact freshness text for the last line of a sidebar view. */
@@ -307,7 +307,7 @@ function runningLimitRow(job, asOf) {
   return timeRow('Limit', new Date(startedAt + spec.limit * 1000).toISOString());
 }
 
-/** Render a lifecycle event on one line with its clock before its date. */
+/** Render a lifecycle event on one line with its date before its clock. */
 function timeRow(label, value) {
   return `<div class="time-row"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(cardTime(value))}</dd></div>`;
 }

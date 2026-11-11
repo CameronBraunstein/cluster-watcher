@@ -621,7 +621,7 @@ changing whether that cluster is expanded; click the partition name to jump to t
 partition's card, which briefly gets a blue highlight. The metadata line has
 no general hover tooltip.
 Submitted, Launched, Ended, and Limit each occupy one compact line. The label
-has no colon; the local time and day/month sit against the card's right edge.
+has no colon; day/month followed by local time sits against the card's right edge.
 The year is omitted here even when the configured date format includes one.
 Long dependency details may wrap onto additional lines.
 
