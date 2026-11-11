@@ -1,6 +1,7 @@
 """Local HTTP dashboard and periodic status cache."""
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -103,6 +104,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .legend { display:flex; flex-wrap:wrap; gap:.35rem .75rem; font-size:.85rem; }
 .legend-item { display:inline-flex; gap:.3rem; align-items:center; } .swatch { width:.7rem; height:.7rem; border-radius:50%; }
 .error { color:#c33; white-space:pre-wrap; }
+.cluster-warning { color:#d9a400; margin-left:.35rem; font-weight:700; }
 .job-badges { display:flex; flex-wrap:wrap; gap:.35rem; } .job-badge { border:1px solid #8885; border-radius:.55rem; font-size:.82rem; padding:.2rem .5rem; white-space:nowrap; }
 .job-badge .job-progress { display:inline-grid; grid-template-columns:70px auto; align-items:center; gap:.35rem; margin:0 0 0 .35rem; } .job-badge .job-progress-track { width:70px; height:.4rem; } .job-badge .job-progress-text { margin:0; }
 @media (max-width:600px) { .title-row { flex-wrap:wrap; gap:.25rem .75rem; } .partition-heading { flex-wrap:wrap; } .job-badge .job-progress { display:none; } }
@@ -784,11 +786,14 @@ function partitionFairShareView(share, partition) {
 
 function clusterView(cluster, waitThresholds) {
   let content;
-  if (cluster.error) content = `<p class="error">${escapeHtml(cluster.error)}</p>` + (cluster.login_required ? `<p>The SSH session has closed. Log in again with <code>cluster-watcher login ${escapeHtml(cluster.name)}</code>.</p>` : '');
-  else if (!cluster.nodes || !cluster.nodes.length) content = '<p>No individual node information was returned by scontrol.</p>';
+  if (!cluster.nodes || !cluster.nodes.length) content = cluster.error ? '<p>No previous node information is available.</p>' : cluster.capacity_updated_at ? '<p>No individual node information was returned by scontrol.</p>' : '<p>Collecting cluster data…</p>';
   else { const compute = new Map((cluster.partition_compute || []).map(summary => [summary.name, summary])); content = partitionGroups(cluster.nodes, compute).map(group => partitionView(cluster.name, group, compute, cluster.user_jobs, waitThresholds || [5, 30, 60, 120], cluster.wait_estimates, cluster.wait_estimates_updated_at, cluster.fair_share)).join(''); }
   if (cluster.jobs) content += `<p><b>Jobs:</b> ${Object.entries(cluster.jobs).map(([state, count]) => `${escapeHtml(state)}=${count}`).join(', ') || 'none'}</p>`;
-  return `<section class="cluster"><h2>${escapeHtml(cluster.name)} <small>${escapeHtml(cluster.username)}@${escapeHtml(cluster.host)}</small></h2>${content}</section>`;
+  const error = cluster.error || cluster.resource_error;
+  const timeout = error && /timed?\\s*out|timeout/i.test(error);
+  const warningText = error ? `${timeout ? 'Cluster refresh timed out.' : 'Cluster refresh failed.'} ${cluster.capacity_updated_at ? 'Showing last known data.' : 'No previous data is available.'}${timeout ? '' : `\\n${error}`}` : '';
+  const warning = error ? `<span class="fast-hover cluster-warning" role="img" aria-label="${escapeHtml(warningText)}" data-fast-tooltip="${escapeHtml(warningText)}">⚠</span>` : '';
+  return `<section class="cluster"><h2>${escapeHtml(cluster.name)}${warning} <small>${escapeHtml(cluster.username)}@${escapeHtml(cluster.host)}</small></h2>${content}</section>`;
 }
 
 let refreshTimer, refreshDeadline = 0, refreshPeriodMs = 1;
@@ -839,6 +844,11 @@ async function refresh() {
       rememberPartitionDisclosure(); partitionBodies.clear();
       document.querySelector('#clusters').innerHTML = result.clusters.map(cluster => clusterView(cluster, thresholds)).join('');
       document.querySelectorAll('details[data-partition-key][open]').forEach(materializePartition);
+    }
+    if (result.clusters.some(cluster => !cluster.capacity_updated_at && !cluster.error)) {
+      document.querySelector('#updated').textContent = 'Loading clusters as they respond…';
+      scheduleRefresh(1, result.refresh_seconds);
+      return;
     }
     await refreshJobs(result, !notModified);
     const checked = notModified ? ` · checked ${new Date().toLocaleTimeString()}` : '';
@@ -939,13 +949,16 @@ class StatusStore:
 
         Capacity data refreshes every :data:`CAPACITY_REFRESH_SECONDS`; the
         user's jobs (and, with the jobs API, fingerprint-gated accounting)
-        refresh every time. Clusters are collected in parallel: each still
-        receives exactly one SSH call per refresh against its own Slurm
-        controller, so a refresh takes as long as the slowest cluster instead
-        of the sum of all of them.
+        refresh every time. Clusters are collected in parallel and published
+        as they finish, so one slow controller cannot hold back another
+        cluster's result. A failed refresh retains that cluster's last good
+        inventory, jobs, and accounting while exposing the current error.
         """
         with self._lock:
             previous = {status.name: status for status in self._statuses}
+            if not self.machines:
+                self._updated_at = datetime.now(timezone.utc).isoformat()
+                return
         now = time.monotonic()
         due = {
             machine.name: now - self._capacity_collected.get(machine.name, float("-inf")) >= CAPACITY_REFRESH_SECONDS
@@ -963,24 +976,43 @@ class StatusStore:
                 status.login_required = not session_status(machine, self.timeout)["session_open"]
             return status
 
+        ordered = [previous.get(machine.name) or ClusterStatus(
+            machine.name, machine.host, machine.username, hosts=machine.candidate_hosts,
+        ) for machine in self.machines]
+        positions = {machine.name: index for index, machine in enumerate(self.machines)}
         with ThreadPoolExecutor(max_workers=max(1, len(self.machines)), thread_name_prefix="collect") as pool:
-            statuses = list(pool.map(collect, self.machines))  # Keeps configuration order.
-        for status in statuses:
-            if due[status.name] and status.error is None:
-                self._capacity_collected[status.name] = now
-        with self._lock:
-            for status in statuses:
-                status.wait_estimates = self._wait_estimates.get(status.name)
-                status.wait_estimates_updated_at = self._wait_estimates_updated_at.get(status.name)
-            snapshot_changed = self._snapshot_source_changed(self._statuses, statuses)
-            status_changed = self._status_source_changed(self._statuses, statuses)
-            self._statuses = statuses
-            self._updated_at = datetime.now(timezone.utc).isoformat()
-            if status_changed:
-                self._document_cache.pop("status", None)
-            if snapshot_changed:
-                self._document_cache.pop("snapshot-full", None)
-                self._document_cache.pop("snapshot-summary", None)
+            futures = {pool.submit(collect, machine): machine for machine in self.machines}
+            for future in as_completed(futures):
+                machine = futures[future]
+                status = future.result()
+                old = previous.get(machine.name)
+                if status.error and old is not None:
+                    retained = deepcopy(old)
+                    retained.host = status.host
+                    retained.error = status.error
+                    retained.login_required = status.login_required
+                    status = retained
+                if status.error or status.resource_error:
+                    status.last_success_at = old.last_success_at if old is not None else None
+                else:
+                    status.last_success_at = datetime.now(timezone.utc).isoformat()
+                if due[status.name] and status.error is None:
+                    self._capacity_collected[status.name] = now
+                with self._lock:
+                    status.wait_estimates = self._wait_estimates.get(status.name, status.wait_estimates)
+                    status.wait_estimates_updated_at = self._wait_estimates_updated_at.get(
+                        status.name, status.wait_estimates_updated_at,
+                    )
+                    ordered[positions[status.name]] = status
+                    snapshot_changed = self._snapshot_source_changed(self._statuses, ordered)
+                    status_changed = self._status_source_changed(self._statuses, ordered)
+                    self._statuses = list(ordered)
+                    self._updated_at = datetime.now(timezone.utc).isoformat()
+                    if status_changed:
+                        self._document_cache.pop("status", None)
+                    if snapshot_changed:
+                        self._document_cache.pop("snapshot-full", None)
+                        self._document_cache.pop("snapshot-summary", None)
 
     @staticmethod
     def _snapshot_source_changed(
@@ -996,6 +1028,7 @@ class StatusStore:
         )
         return any(
             any(getattr(before, field) != getattr(after, field) for field in fields)
+            or (before.capacity_updated_at is None) != (after.capacity_updated_at is None)
             or active_job_counts(before) != active_job_counts(after)
             for before, after in zip(previous, current)
         )
@@ -1027,7 +1060,8 @@ class StatusStore:
         ignored = {"accounting", "fair_share_rules", *VOLATILE_FIELDS}
         fields = set(ClusterStatus.__dataclass_fields__) - ignored
         return any(
-            any(
+            (before.capacity_updated_at is None) != (after.capacity_updated_at is None)
+            or any(
                 not cls._stable_public_equal(
                     getattr(before, field), getattr(after, field),
                 )
@@ -1195,7 +1229,7 @@ CAPACITY_REFRESH_SECONDS = 60
 VOLATILE_FIELDS = frozenset({
     # ``since`` is the moving start of the jobs API's default 24-hour window.
     "generated_at", "updated_at", "since", "capacity_updated_at", "elapsed", "elapsed_seconds",
-    "time_left", "time_left_seconds", "estimated_wait_seconds",
+    "time_left", "time_left_seconds", "estimated_wait_seconds", "last_success_at",
 })
 
 

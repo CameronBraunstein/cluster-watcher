@@ -422,7 +422,8 @@ use its always-visible server toggle; **Start Server** beside the off switch
 explains its action. **My Jobs** points to that control instead of duplicating
 it. **Run setup wizard** remains in the Command Palette. Below the cluster
 cards, a thin gray divider precedes the server toggle and URL, followed by
-**configure clusters...**, which opens that file. Configuration and settings
+**view sessions** and **configure clusters** on one line, separated by `|`.
+**configure clusters** opens that file. Configuration and settings
 commands remain
 available from VS Code's Command Palette.
 The placeholders disappear when the service responds, and the live job and
@@ -605,6 +606,19 @@ GPU total is not available from accounting. The segment gains a
 white outline on hover. The bar matches the thin job progress bars
 and stays empty when no active jobs exist.
 
+If one cluster's refresh times out, a yellow warning triangle appears beside
+its summary bar. Hover it for the error and **Latest update: HH:MM:SS date**
+in local time; the timestamp is the last complete update for that cluster.
+The last successfully collected
+partition cards and job counts remain visible while the service retries;
+they are stale until that cluster responds again. **My Jobs** also keeps its
+last known jobs and accounting for that cluster. A cluster with no earlier
+result shows the warning without invented capacity or job counts.
+On startup, clusters appear in configuration order with **Loading…** markers;
+each completed cluster becomes usable immediately while others are still
+being queried. The sidebar checks once per second until all initial cluster
+queries have responded, then returns to its configured refresh interval.
+
 In an expanded **My Jobs** card, the GPU/APU number is the total for the job.
 An APU profile makes the card say **APU** and provides its model name even
 when Slurm exposes only a generic GPU GRES count, as on Viper's MI300A nodes.
@@ -631,11 +645,11 @@ opens automatically. Archived jobs remain in **Archive** and are not shown
 in the active group.
 
 The VS Code status bar retains the active-job counts. Its hover text shows
-only the last refresh time and a link prompt for **My Jobs**. Both sidebar
-views show **Last update** on their final line, below **Archive** or
-**configure clusters...**.
+only the last refresh time and a link prompt for **My Jobs**. **My Jobs** shows
+**Last update** below **Archive**. **Cluster Status** shows **Last update**
+above **view sessions | configure clusters**.
 
-The **configure clusters...** link at the end of Cluster Status opens the selected
+The **configure clusters** link at the end of Cluster Status opens the selected
 `clusters.toml`; if it is missing, the extension offers the setup wizard. Each
 summary shows only the cluster name and job-ratio bar. Thin gray lines
 separate cluster groups. The active login node is available in the session dialog.
@@ -655,7 +669,8 @@ toggle says **Stop service** on hover; the gray/off toggle says **Start service*
 and has **Start Server** beside it.
 
 Cluster Status shows reusable SSH-session state; there is no separate Server
-Status view. **view sessions...** above **configure clusters...** opens the **SSH Sessions** popup, a
+Status view. **view sessions** and **configure clusters** share one line with a
+`|` separator. **view sessions** opens the **SSH Sessions** popup, a
 selectable dialog inside Cluster Status that spans nearly the full view width, with one scrollbar and an **×** close
 button close to the upper-left edge. Each entry shows `name: username@node`
 followed by `🕒 HH:MM left` on the next line (hours and minutes). Popup text uses the gray **My Jobs** update color at a slightly larger size,
@@ -769,8 +784,11 @@ for this project and is dedicated under CC0-1.0; see
   refresh, or `Refreshing…` while one is in flight.
 
 Open/closed sections survive automatic refreshes while the page stays open.
-On startup the page retries every second until the first collection
-finishes.
+On startup the page retries every second and shows each cluster as its result
+arrives. A slow cluster does not hold back the others. If a later refresh
+times out, its last known partition and job information remains visible with
+a yellow warning triangle; hover the triangle for the error. Such data is
+stale until that cluster responds again.
 
 > [!WARNING]
 > The service binds to `127.0.0.1` and has no authentication or TLS. To view
@@ -1172,15 +1190,21 @@ compatibility.
 | `wait_threshold_minutes` | Configured launch-wait boundaries used to color browser and VS Code blocks. |
 | `clusters` | All configured clusters, including unreachable ones. |
 
-Each cluster has its `name` and `host`, `reachable`,
-`resource_data_complete`, collection errors, unique cluster-wide resource
+Each cluster has its `name` and `host`, `reachable`, `collecting`,
+`resource_data_complete`, `last_success_at`, collection errors, unique cluster-wide resource
 totals, `wait_estimates_updated_at`, and every known partition. `user_jobs`
 contains current `running`, independent `pending`, and dependency-held
 `depending` counts for compact status clients.
+`last_success_at` is the ISO timestamp of the last complete status refresh for
+that cluster and remains unchanged after a failed attempt; it is `null` before
+any complete result.
 `scheduling`
 holds `scheduler_type`, `priority_type`, `priority_weight_partition`, and
 `priority_flags` when Slurm exposes them (otherwise it is empty). `error` means
-the cluster could not be queried; `resource_error` means partitions were read
+the cluster could not be queried; previously collected data remains in the
+document on a later failure, so check `reachable` before treating it as
+current. `collecting` is `true` for a cluster awaiting its first result.
+`resource_error` means partitions were read
 but node/GPU detail failed. `login_required` is `true` when an
 `interactive_auth` cluster's shared session has closed (fix it with
 `cluster-watcher login NAME`).

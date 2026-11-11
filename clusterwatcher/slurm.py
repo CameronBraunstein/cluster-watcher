@@ -519,9 +519,9 @@ def accounting_gate_command(machine: Machine, previous_fingerprint: str | None, 
 def _accounting_from_section(
     section: Section, previous: AccountingSnapshot | None,
 ) -> tuple[str | None, AccountingSnapshot | None]:
-    """Return the queue fingerprint and the (possibly reused) accounting records."""
+    """Return accounting data, retaining the last result on a section error."""
     if section.returncode:
-        return None, None
+        return (previous.fingerprint, previous) if previous is not None else (None, None)
     first, _, rest = section.stdout.partition("\n")
     if not first.startswith("fingerprint "):
         return None, None
@@ -699,13 +699,17 @@ def collect_status(
             else:
                 status.user_jobs = []
         except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:
-            # A personal-job failure never invalidates the node inventory.
-            status.user_jobs = []
+            # A personal-job failure never invalidates the last known jobs or
+            # node inventory. The error marks both as potentially stale.
+            status.user_jobs = deepcopy(previous.user_jobs or []) if previous is not None else []
             status.resource_error = str(exc)
         if include_jobs and capacity:
             job_output = sections["queue"].output()
             status.jobs = dict(sorted(Counter(line.strip() for line in job_output.splitlines() if line.strip()).items()))
         if include_accounting:
+            if sections["accounting"].returncode:
+                detail = sections["accounting"].stderr.strip() or "accounting query failed"
+                status.resource_error = "; ".join(filter(None, (status.resource_error, detail)))
             status.user_jobs_fingerprint, status.accounting = _accounting_from_section(
                 sections["accounting"], previous_accounting,
             )

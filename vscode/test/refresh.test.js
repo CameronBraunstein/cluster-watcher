@@ -88,6 +88,31 @@ test('the initial-collection 503 is loading and retries promptly without an offl
   assert.equal(state.statusProvider.updates.length, 1);
 });
 
+test('partial startup status retries until every cluster has responded', async () => {
+  const retryCallbacks = [];
+  let polls = 0;
+  const state = harness(async () => {
+    polls += 1;
+    return { payload: { clusters: [{ name: 'fast', collecting: false },
+      { name: 'slow', collecting: polls === 1 }] }, etag: `status-${polls}` };
+  }, undefined, {
+    setTimeout: (callback, delay) => {
+      assert.equal(delay, 1000);
+      retryCallbacks.push(callback);
+      return retryCallbacks.length;
+    },
+    clearTimeout: () => {},
+  });
+
+  assert.equal((await state.coordinator.refreshStatus()).outcome, 'updated');
+  assert.equal(state.statusProvider.updates.length, 1);
+  assert.equal(retryCallbacks.length, 1);
+  retryCallbacks[0]();
+  await state.coordinator.refreshStatus();
+  assert.equal(state.statusProvider.updates.length, 2);
+  assert.equal(retryCallbacks.length, 1);
+});
+
 test('a pre-start request failure cannot restore offline after the service becomes reachable', async () => {
   let rejectJobs;
   let rejectStatus;

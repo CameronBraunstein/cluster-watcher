@@ -5,13 +5,14 @@ from email.message import Message
 import json
 import shutil
 import subprocess
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
 from clusterwatcher.dashboard import PAGE, StatusStore, make_handler
 from clusterwatcher.commands import SessionUnavailableError
 from clusterwatcher.jobs import JobLogNotFound
-from clusterwatcher.models import ClusterStatus, Machine
+from clusterwatcher.models import AccountingSnapshot, ClusterStatus, Machine
 from clusterwatcher.snapshot import build_snapshot
 from helpers import TimedTestCase
 
@@ -372,6 +373,88 @@ class SnapshotTests(TimedTestCase):
         self.assertIsNone(snapshot["generated_at"])
         self.assertEqual(snapshot["clusters"], [])
         self.assertIn("first cluster status collection", snapshot["error"])
+
+    def test_startup_publishes_each_cluster_before_the_slowest_finishes(self):
+        """The first fast cluster is visible while another SSH call waits."""
+        machines = [Machine("fast", "fast.example", "alice"), Machine("slow", "slow.example", "alice")]
+        store = StatusStore(machines, 5, False, 15)
+        release_slow = threading.Event()
+        first_published = threading.Event()
+        fast = example_status()
+        fast.name = "fast"
+        fast.capacity_updated_at = "2026-11-11T10:00:00+00:00"
+        slow = ClusterStatus("slow", "slow.example", "alice", partitions=[], nodes=[],
+                             capacity_updated_at="2026-11-11T10:00:00+00:00")
+
+        def collect(machine, *_args, **_kwargs):
+            if machine.name == "slow":
+                if not release_slow.wait(3):
+                    raise AssertionError("test did not release the slow cluster")
+                return slow
+            return fast
+
+        def published(_before, _after):
+            first_published.set()
+            return True
+
+        with patch("clusterwatcher.dashboard.collect_status", side_effect=collect), \
+                patch.object(store, "_status_source_changed", side_effect=published):
+            worker = threading.Thread(target=store.refresh, daemon=True)
+            worker.start()
+            try:
+                self.assertTrue(first_published.wait(2))
+                response, document = request_handler(store, "/api/v1/snapshot?detail=summary")
+                self.assertEqual(response["status"], 200)
+                self.assertEqual([cluster["name"] for cluster in document["clusters"]], ["fast", "slow"])
+                self.assertFalse(document["clusters"][0]["collecting"])
+                self.assertTrue(document["clusters"][1]["collecting"])
+                self.assertIsNotNone(document["clusters"][0]["last_success_at"])
+                self.assertIsNone(document["clusters"][1]["last_success_at"])
+                self.assertFalse(document["clusters"][1]["resource_data_complete"])
+                self.assertEqual(document["clusters"][0]["partitions"][0]["name"], "gpu-a100")
+            finally:
+                release_slow.set()
+                worker.join(3)
+        self.assertFalse(worker.is_alive())
+        response, document = request_handler(store, "/api/v1/snapshot?detail=summary")
+        self.assertEqual(response["status"], 200)
+        self.assertFalse(document["clusters"][1]["collecting"])
+        response, dashboard = request_handler(store, "/api/status")
+        self.assertEqual(response["status"], 200)
+        self.assertIsNotNone(dashboard["clusters"][1]["capacity_updated_at"])
+
+    def test_timeout_retains_last_inventory_and_jobs(self):
+        """An SSH timeout marks stale data without deleting jobs or cards."""
+        store = StatusStore([Machine("cluster_0", "slurm.example", "alice")], 5, False, 15,
+                            jobs_api_enabled=True)
+        prior = example_status()
+        prior.capacity_updated_at = "2026-11-11T10:00:00+00:00"
+        prior.last_success_at = "2026-11-11T10:15:00+00:00"
+        prior.user_jobs = [{"id": "42", "state": "RUNNING", "name": "training",
+                            "partition": "gpu-a100", "gpus": 1, "node_count": 1}]
+        prior.accounting = AccountingSnapshot(records=[], fingerprint="42", since="", fetched_at="")
+        store._statuses = [prior]
+        store._updated_at = "2026-11-11T10:00:00+00:00"
+        failure = ClusterStatus("cluster_0", "slurm.example", "alice", error="SSH timed out after 5 seconds")
+
+        with patch("clusterwatcher.dashboard.collect_status", return_value=failure):
+            store.refresh()
+
+        current = store.statuses()[0]
+        self.assertEqual(current.error, failure.error)
+        self.assertEqual(current.nodes, prior.nodes)
+        self.assertEqual(current.user_jobs, prior.user_jobs)
+        self.assertEqual(current.accounting, prior.accounting)
+        self.assertEqual(current.wait_estimates, prior.wait_estimates)
+        self.assertEqual(current.last_success_at, prior.last_success_at)
+        cluster = store.snapshot_payload()["clusters"][0]
+        self.assertFalse(cluster["reachable"])
+        self.assertFalse(cluster["collecting"])
+        self.assertEqual(cluster["last_success_at"], prior.last_success_at)
+        self.assertEqual(cluster["partitions"][0]["name"], "gpu-a100")
+        response, jobs = request_handler(store, "/api/v1/jobs")
+        self.assertEqual(response["status"], 200)
+        self.assertEqual([job["job_id"] for job in jobs["jobs"]], ["42"])
 
     def test_dashboard_endpoint_retries_until_first_collection(self):
         store = StatusStore([Machine("a", "host", "user")], 5, False, 15)

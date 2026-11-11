@@ -34,6 +34,13 @@ function localTime(value, withSeconds = false) {
   return `${dateFormat.replace(/YYYY|YY|MM|DD/g, (token) => parts[token])} ${clock}`;
 }
 
+/** Format a cluster's last successful update as local clock followed by date. */
+function timeThenDate(value) {
+  const formatted = localTime(value, true);
+  const separator = formatted.lastIndexOf(' ');
+  return separator < 0 ? formatted : `${formatted.slice(separator + 1)} ${formatted.slice(0, separator)}`;
+}
+
 /** Put day and month before the local clock, respecting the configured order. */
 function cardTime(value) {
   if (!value) return 'Unavailable';
@@ -208,9 +215,9 @@ function sessionsDialog(inventory) {
   return `<dialog class="sessions-dialog" aria-labelledby="sessions-dialog-title"><div class="sessions-dialog-header"><button class="sessions-dialog-close" type="button" data-close-sessions aria-label="Close SSH Sessions">×</button><h2 id="sessions-dialog-title">SSH Sessions</h2></div>${content}</dialog>`;
 }
 
-/** Render the Cluster Status footer with service controls above configuration. */
-function clusterFooter(service = {}, sessions) {
-  return `<hr class="cluster-config-separator">${serviceSummary(service)}<button class="view-sessions" type="button" data-open-sessions>view sessions...</button><button class="configure-clusters" data-scroll-anchor="configure-clusters" ${commandButtonAttributes('clusterWatcher.editConfig')}>configure clusters...</button>${sessionsDialog(sessions)}`;
+/** Render service controls, then freshness, then the Cluster Status links. */
+function clusterFooter(service = {}, sessions, updatedAt) {
+  return `<hr class="cluster-config-separator">${serviceSummary(service)}${freshnessView(updatedAt)}<div class="cluster-footer-links"><button class="view-sessions" type="button" data-open-sessions>view sessions</button><span class="footer-divider" aria-hidden="true">|</span><button class="configure-clusters" data-scroll-anchor="configure-clusters" ${commandButtonAttributes('clusterWatcher.editConfig')}>configure clusters</button></div>${sessionsDialog(sessions)}`;
 }
 
 /**
@@ -343,6 +350,7 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 .card-summary-title[data-full-name]::after{outline:1px solid #fff}
 .card[open] .name{white-space:normal;overflow-wrap:anywhere}
 .progress-message{display:block;max-width:100%;font-size:.72em;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
+.cluster-warning{flex:0 0 auto;color:var(--vscode-editorWarning-foreground,#d9a400);font-size:13px;line-height:1;cursor:help}.cluster-collecting{margin-left:auto;color:var(--vscode-descriptionForeground);font-size:.78em;font-weight:400;white-space:nowrap}
 .dependency-icon{display:inline-block;margin-left:2px;font-family:system-ui,sans-serif;font-weight:700;cursor:help}.dependency-icon.waiting{font-weight:400}.dependency-icon.satisfied{color:var(--vscode-testing-iconPassed)}.dependency-icon.failed{color:var(--vscode-errorForeground)}
 .priority-context{display:flex;align-items:center;gap:5px;margin-top:6px;min-width:0}.priority-gauge{display:flex;align-items:center;flex:1 1 auto;min-width:54px;max-width:150px;cursor:help}.priority-track{position:relative;display:block;flex:1 1 auto;height:4px;border-radius:3px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed))}.priority-marker{position:absolute;top:-3px;width:2px;height:10px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.priority-prominent{margin-top:5px}.priority-prominent .priority-track{height:6px}.priority-prominent .priority-marker{top:-3px;height:12px}.card[open] .card-summary-progress>.priority-prominent{display:none}.priority-help{color:var(--vscode-descriptionForeground);font-size:.8em;cursor:help}
 .partition-card{padding:5px;container-type:inline-size}.partition-title{align-items:center;flex-wrap:wrap;gap:4px 7px}.partition-title>.name{flex:0 1 auto;margin-right:auto}.partition-title>.launchability{flex:0 0 auto;margin-left:0}.partition-specs{display:block;margin-top:3px;font-size:.72em;white-space:normal;overflow-wrap:anywhere}.gpu-model,.vram-spec,.thread-spec{cursor:help}.partition-availability{display:flex;align-items:center;gap:0;margin-top:4px;font-size:.72em}.partition-availability-label{box-sizing:border-box;flex:0 0 36px;width:36px;padding-right:2px;color:var(--vscode-descriptionForeground);text-align:left;white-space:nowrap}.partition-availability>.availability-cell{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,max-content);column-gap:2px;flex:1 1 auto;min-width:0}.partition-availability .availability-cell>.availability{width:100%;min-width:0}.partition-availability .availability-count{width:max-content;min-width:min(var(--availability-count-width),45cqw);max-width:100%;overflow:hidden;text-overflow:ellipsis}.times dd>.availability-cell{justify-content:flex-end}
@@ -352,7 +360,7 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 button.button{border:0;font:inherit;cursor:pointer}
 .service-summary{display:flex;align-items:center;gap:4px;margin:3px 0 5px;min-width:0;white-space:nowrap;font-size:.78em}.service-summary>strong{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}.service-url{box-sizing:border-box;display:block;flex:0 0 auto;max-width:calc(100% - 26px);min-width:0;margin:0;padding:0;overflow:hidden;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;text-decoration:underline;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.service-toggle{position:relative;box-sizing:border-box;flex:0 0 22px;width:22px;height:12px;margin:0;padding:0;border:0;border-radius:999px;background:var(--vscode-descriptionForeground);cursor:pointer}.service-toggle::after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--vscode-sideBar-background);transition:left .12s ease}.service-toggle.on{background:var(--vscode-testing-iconPassed)}.service-toggle.on::after{left:12px}.service-toggle:disabled{cursor:wait;opacity:.65}.cluster-login-actions{display:flex;flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end;gap:3px;margin-left:auto}.cluster-login-actions>.compact-action{box-sizing:border-box;max-width:100%;padding:2px 4px;font-size:.68em;line-height:1.3;white-space:normal;overflow-wrap:anywhere;text-align:left}
 .service-setup-actions{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 8px}.service-setup-actions>.button{box-sizing:border-box;max-width:100%;padding:3px 5px;font-size:.78em;white-space:normal;text-align:left}
-.cluster-config-separator{height:0;margin:9px 0 5px;border:0;border-top:1px solid color-mix(in srgb,var(--vscode-foreground) 40%,transparent)}.view-sessions,.configure-clusters{display:block;margin:4px 0 0;padding:0;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;font-size:.78em;text-align:left;text-decoration:none;cursor:pointer}.view-sessions:hover,.configure-clusters:hover{text-decoration:underline}
+.cluster-config-separator{height:0;margin:9px 0 5px;border:0;border-top:1px solid color-mix(in srgb,var(--vscode-foreground) 40%,transparent)}.cluster-footer-links{display:flex;align-items:center;gap:3px;margin:4px 0 0;white-space:nowrap;font-size:.7em}.cluster-footer-links button{flex:0 0 auto;margin:0;padding:0;border:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;text-align:left;text-decoration:none;cursor:pointer}.cluster-footer-links button:hover{text-decoration:underline}.footer-divider{color:var(--vscode-descriptionForeground)}
 .partition-fair-share{display:flex;align-items:flex-start;gap:0;margin-top:5px;font-size:.72em}.fair-share-title{box-sizing:border-box;flex:0 0 56px;width:56px;padding-right:2px;color:var(--vscode-descriptionForeground);white-space:nowrap}.fair-share-bars{display:grid;flex:1 1 auto;min-width:0;gap:4px;padding-top:3px}.fair-share-row{min-width:0}.fair-share-track{box-sizing:border-box;position:relative;display:block;width:100%;height:6px;overflow:visible;border-radius:4px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed))}.fair-share-marker{position:absolute;top:-3px;width:2px;height:12px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background);cursor:help}.fair-share-marker::before{content:'';position:absolute;inset:-2px -3px}.fair-share-marker:hover{outline:1px solid var(--vscode-focusBorder)}.fair-share-track.unavailable{background:color-mix(in srgb,var(--vscode-foreground) 10%,transparent)}
 .cluster-group+.cluster-group{border-top:1px solid color-mix(in srgb,var(--vscode-foreground) 35%,transparent);padding-top:4px}
 .sessions-dialog{box-sizing:border-box;width:calc(100vw - 16px);max-width:none;inset:50% auto auto 50%;transform:translate(-50%,-50%);margin:0;height:fit-content;min-height:0;max-height:calc(100vh - 8px);overflow:auto;padding:4px 8px;border:1px solid var(--vscode-panel-border);border-left:6px solid #000;border-right:6px solid #000;border-radius:6px;background:var(--vscode-editorWidget-background,var(--vscode-sideBar-background));color:var(--vscode-descriptionForeground);font-size:.82em;box-shadow:0 8px 28px #0008}html:has(.sessions-dialog[open]){overflow:hidden}.sessions-dialog::backdrop{background:#0009}.sessions-dialog-header{display:flex;align-items:center;gap:8px;margin-bottom:4px}.sessions-dialog h2{margin:0;font-size:1em}.sessions-dialog-close{padding:0 2px;border:0;background:none;color:inherit;font:inherit;font-size:1.6em;cursor:pointer}.sessions-dialog-text{margin:0;padding:6px 0;border-top:1px solid color-mix(in srgb,var(--vscode-foreground) 35%,transparent);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-all;user-select:text;font:inherit;line-height:1.5}.sessions-dialog-text:last-of-type{padding-bottom:0}
@@ -654,8 +662,9 @@ function renderLoading(title, freshness = {}, connecting = false, server = {}) {
     : `Cluster Watcher is running. Loading ${subject}…`;
   const controls = title === 'Cluster Status'
     ? serverNotices(server) : '';
-  const footer = title === 'Cluster Status' ? clusterFooter(server.service, server.sessions) : '';
-  return document(title, `${controls}<p class="muted" role="status">${message}</p>${footer}`, freshness);
+  const isStatus = title === 'Cluster Status';
+  const footer = isStatus ? clusterFooter(server.service, server.sessions, freshness.updatedAt) : '';
+  return document(title, `${controls}<p class="muted" role="status">${message}</p>${footer}`, isStatus ? {} : freshness);
 }
 
 /**
@@ -682,8 +691,8 @@ function renderWelcome(title, detail, freshness = {}, server = {}) {
   const guidance = title === 'Cluster Status' ? 'No service found.' : 'No service found. Use Cluster Status to start it.';
   const body = `${controls}<div class="welcome"><p class="muted" role="status">${guidance}</p>`
     + (detail ? `<details class="welcome-detail"><summary class="muted">Connection details</summary><p class="error">${escapeHtml(detail)}</p></details>` : '')
-    + `</div>${title === 'Cluster Status' ? clusterFooter(server.service, server.sessions) : ''}`;
-  return document(title, body, freshness);
+    + `</div>${title === 'Cluster Status' ? clusterFooter(server.service, server.sessions, freshness.updatedAt) : ''}`;
+  return document(title, body, title === 'Cluster Status' ? {} : freshness);
 }
 
 /**
@@ -1144,8 +1153,21 @@ function clusterLoginActions(cluster, session) {
 function clusterSummary(cluster, session) {
   const clusterName = escapeHtml(cluster.name);
   const loggedOut = clusterLoggedOut(cluster, session);
-  const status = loggedOut ? clusterLoginActions(cluster, session) : clusterJobRatio(cluster.user_jobs, cluster.name, cluster.user_gpu_hours);
-  return `<span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">${clusterName}</span>${status}</span></span>`;
+  const status = loggedOut ? clusterLoginActions(cluster, session)
+    : cluster.collecting ? '<span class="cluster-collecting">Loading…</span>'
+      : cluster.reachable === false && !(cluster.partitions || []).length
+        ? '<span class="cluster-collecting">Unavailable</span>'
+        : clusterJobRatio(cluster.user_jobs, cluster.name, cluster.user_gpu_hours);
+  const error = cluster.error || cluster.resource_error;
+  const warning = error ? (() => {
+    const timeout = /timed?\s*out|timeout/i.test(String(error));
+    const lead = timeout ? 'Cluster refresh timed out.' : 'Cluster refresh failed.';
+    const latest = `Latest update: ${timeThenDate(cluster.last_success_at)}`;
+    const detail = timeout ? `${lead}\n${latest}` : `${lead}\n${latest}\n${withoutSshUsernames(error)}`;
+    const tooltip = escapeHtml(detail);
+    return `<span class="cluster-warning fast-hover" role="img" aria-label="${tooltip}" data-fast-tooltip="${tooltip}">⚠</span>`;
+  })() : '';
+  return `<span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">${clusterName}</span>${status}${warning}</span></span>`;
 }
 
 /**
@@ -1166,19 +1188,19 @@ function renderStatus(payload, disclosures = {}, freshness = {}, server = {}) {
     const rawKey = `cluster:${cluster.name}`;
     const disclosureKey = escapeHtml(rawKey);
     const open = openAttribute(disclosures, rawKey, true);
-    if (!cluster.reachable) {
-      clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${summary}</summary><p class="error">${escapeHtml(withoutSshUsernames(cluster.error || 'Cluster is unreachable'))}</p></details>`);
+    if (cluster.collecting) {
+      clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${summary}</summary><p class="muted">Collecting cluster data…</p></details>`);
       continue;
     }
     // No probe round has finished for this cluster yet (they start with the service).
     const pending = !cluster.wait_estimates_updated_at;
     const partitions = [...(cluster.partitions || [])].sort((left, right) => (Number(left.rank) || 9999) - (Number(right.rank) || 9999) || String(left.name).localeCompare(String(right.name)));
     const cards = partitions.map((partition) => partitionCard(partition, pending, asOf, thresholds, cluster.fair_share?.mapping_error || cluster.fair_share?.error)).join('');
-    clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${summary}</summary>${cluster.resource_error ? `<p class="error">${escapeHtml(withoutSshUsernames(cluster.resource_error))}</p>` : ''}${cards}</details>`);
+    clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${summary}</summary>${cards || '<p class="muted">No cluster status is available yet.</p>'}</details>`);
   }
   const content = clusters.join('') || '<p>No clusters returned.</p>';
-  const body = serverNotices(server) + content + clusterFooter(server.service, server.sessions);
-  return document('Cluster Status', body, freshness);
+  const body = serverNotices(server) + content + clusterFooter(server.service, server.sessions, freshness.updatedAt);
+  return document('Cluster Status', body);
 }
 
 module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, isFailureGroup, jobGroup, jobRef, launchabilityStrip, metadataSameLine, openAttribute, parseDependency, relativeJobPriority, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderLoading, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };

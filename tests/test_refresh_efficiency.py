@@ -115,6 +115,36 @@ class CapacityCadenceTests(TimedTestCase):
         self.assertIsNone(recovered.resource_error)
 
     @patch("clusterwatcher.slurm.run_batch")
+    def test_personal_timeout_keeps_last_known_jobs(self, run_batch):
+        """A timed-out squeue section cannot empty My Jobs on refresh."""
+        run_batch.return_value = {
+            "running": Section("", "squeue timed out", 124),
+            "pending": Section("", "", 0),
+            "priority_counts": Section("", "", 0),
+        }
+        previous = self.previous()
+        previous.user_jobs = [{"id": "42", "state": "RUNNING", "name": "training"}]
+
+        status = collect_status(MACHINE, 5, True, previous=previous, refresh_capacity=False)
+
+        self.assertEqual(status.user_jobs, previous.user_jobs)
+        self.assertIn("timed out", status.resource_error)
+
+    def test_accounting_timeout_keeps_last_known_completed_jobs(self):
+        """A failed accounting section retains its cached completed records."""
+        previous = AccountingSnapshot(
+            records=[{"job_id": "40", "state": "COMPLETED"}],
+            fingerprint="42:RUNNING", since="yesterday", fetched_at="today",
+        )
+
+        fingerprint, retained = _accounting_from_section(
+            Section("", "sacct timed out", 124), previous,
+        )
+
+        self.assertEqual(fingerprint, previous.fingerprint)
+        self.assertIs(retained, previous)
+
+    @patch("clusterwatcher.slurm.run_batch")
     def test_personal_failure_during_capacity_refresh_keeps_valid_node_detail(self, run_batch):
         """A failed queue section cannot discard successfully parsed nodes."""
         run_batch.return_value = {
@@ -390,7 +420,11 @@ class AccountingGateTests(TimedTestCase):
         self.assertEqual([record["job_id"] for record in fresh.records], ["10"])
         self.assertEqual(fresh.fingerprint, "2 2")
 
-        self.assertEqual(_accounting_from_section(Section("", "squeue failed", 1), previous), (None, None))
+        self.assertEqual(
+            _accounting_from_section(Section("", "squeue failed", 1), previous),
+            (previous.fingerprint, previous),
+        )
+        self.assertEqual(_accounting_from_section(Section("", "squeue failed", 1), None), (None, None))
 
     @patch("clusterwatcher.slurm.run_batch")
     def test_stale_accounting_forces_a_query(self, run_batch):
@@ -426,8 +460,8 @@ class ETagTests(TimedTestCase):
     """Unchanged data answers 304 even though timestamps and elapsed times moved."""
 
     def test_etag_ignores_volatile_fields_only(self):
-        base = {"generated_at": "t1", "jobs": [{"job_id": "1", "state": "RUNNING", "elapsed_seconds": 10}]}
-        later = {"generated_at": "t2", "jobs": [{"job_id": "1", "state": "RUNNING", "elapsed_seconds": 25}]}
+        base = {"generated_at": "t1", "last_success_at": "t1", "jobs": [{"job_id": "1", "state": "RUNNING", "elapsed_seconds": 10}]}
+        later = {"generated_at": "t2", "last_success_at": "t2", "jobs": [{"job_id": "1", "state": "RUNNING", "elapsed_seconds": 25}]}
         finished = {"generated_at": "t2", "jobs": [{"job_id": "1", "state": "COMPLETED", "elapsed_seconds": 25}]}
 
         self.assertEqual(stable_etag(base), stable_etag(later))

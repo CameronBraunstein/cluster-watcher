@@ -365,17 +365,23 @@ def build_snapshot(
     """
     clusters: list[dict[str, object]] = []
     for status in statuses:
+        collecting = (
+            status.capacity_updated_at is None and status.error is None
+            and status.partitions is None and status.nodes is None
+        )
         clusters.append(
             {
                 "name": status.name,
                 "host": status.host,
                 "hosts": list(status.hosts or (status.host,)),
                 "reachable": status.error is None,
+                "collecting": collecting,
                 # Additive field: the session needs ``cluster-watcher login NAME``.
                 "login_required": status.login_required,
-                "resource_data_complete": status.error is None and status.resource_error is None,
+                "resource_data_complete": not collecting and status.error is None and status.resource_error is None,
                 "error": status.error,
                 "resource_error": status.resource_error,
+                "last_success_at": status.last_success_at,
                 "wait_estimates_updated_at": status.wait_estimates_updated_at,
                 "scheduling": status.scheduling or {},
                 "user_jobs": active_job_counts(status),

@@ -15,7 +15,7 @@ test('first-collection loading views place service controls in the Cluster Statu
     state: 'attached', url: 'http://127.0.0.1:8080/', pid: 42,
     recentLines: [{ stream: 'stderr', text: 'startup diagnostic' }],
   } });
-  assert.match(status, /role="status">Cluster Watcher is running\. Loading cluster status…<\/p><hr class="cluster-config-separator"><div class="service-summary">.*?http:\/\/127\.0\.0\.1:8080\/.*?<\/div><button class="view-sessions" type="button" data-open-sessions>view sessions\.\.\.<\/button><button class="configure-clusters"/s);
+  assert.match(status, /role="status">Cluster Watcher is running\. Loading cluster status…<\/p><hr class="cluster-config-separator"><div class="service-summary">.*?http:\/\/127\.0\.0\.1:8080\/.*?<\/div><div class="cluster-footer-links"><button class="view-sessions" type="button" data-open-sessions>view sessions<\/button><span class="footer-divider" aria-hidden="true">\|<\/span><button class="configure-clusters"/s);
   assert.match(status, /data-command="clusterWatcher\.stopService"/);
   assert.doesNotMatch(status, /class="error"/);
   assert.doesNotMatch(status, /Recent backend output|startup diagnostic/);
@@ -211,10 +211,11 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /sessionsOpen: open/);
   assert.doesNotMatch(html, /copySessions/);
   assert.ok(html.lastIndexOf('class="configure-clusters"') > html.lastIndexOf('class="cluster-group"'));
-  assert.match(html, /<hr class="cluster-config-separator"><div class="service-summary">.*?<\/div><button class="view-sessions" type="button" data-open-sessions>view sessions\.\.\.<\/button><button class="configure-clusters"/s);
+  assert.match(html, /<hr class="cluster-config-separator"><div class="service-summary">.*?<\/div><div class="cluster-footer-links"><button class="view-sessions" type="button" data-open-sessions>view sessions<\/button><span class="footer-divider" aria-hidden="true">\|<\/span><button class="configure-clusters"/s);
   assert.match(html, /\.cluster-group\+\.cluster-group\{border-top:1px solid color-mix\(in srgb,var\(--vscode-foreground\) 35%,transparent\);padding-top:4px\}/);
   assert.match(html, /\.cluster-config-separator\{[^}]*border-top:1px solid color-mix\(in srgb,var\(--vscode-foreground\) 40%,transparent\)/);
-  assert.match(html, /<button class="configure-clusters" data-scroll-anchor="configure-clusters" type="button" data-command="clusterWatcher\.editConfig" data-args="\[\]">configure clusters\.\.\.<\/button>/);
+  assert.match(html, /<button class="configure-clusters" data-scroll-anchor="configure-clusters" type="button" data-command="clusterWatcher\.editConfig" data-args="\[\]">configure clusters<\/button><\/div>/);
+  assert.match(html, /\.cluster-footer-links\{display:flex;align-items:center;gap:3px;margin:4px 0 0;white-space:nowrap/);
   assert.match(html, /const statusAnchor = document\.querySelector\('\[data-scroll-anchor="configure-clusters"\]'\)/);
   assert.doesNotMatch(html, /## cluster_0 ##/);
   assert.doesNotMatch(html, /<body><h2>Cluster Status<\/h2>/);
@@ -808,7 +809,7 @@ test('offline Cluster Status owns the service control while My Jobs points to it
   assert.ok(status.indexOf('class="welcome"') < status.indexOf('class="cluster-config-separator"'));
   assert.ok(status.indexOf('class="cluster-config-separator"') < status.indexOf('class="service-summary"'));
   assert.equal((status.match(/data-command="clusterWatcher\.startService"/g) || []).length, 1);
-  assert.match(status, /<hr class="cluster-config-separator"><div class="service-summary">.*?<\/div><button class="view-sessions" type="button" data-open-sessions>view sessions\.\.\.<\/button><button class="configure-clusters"/s);
+  assert.match(status, /<hr class="cluster-config-separator"><div class="service-summary">.*?<\/div><div class="cluster-footer-links"><button class="view-sessions" type="button" data-open-sessions>view sessions<\/button><span class="footer-divider" aria-hidden="true">\|<\/span><button class="configure-clusters"/s);
   assert.match(status, /class="configure-clusters"[^>]*data-command="clusterWatcher\.editConfig"/);
   assert.doesNotMatch(status, /Recent backend output|offline diagnostic/);
 });
@@ -1061,7 +1062,7 @@ test('dates use DD.MM.YYYY by default and follow the configured pattern', () => 
   }
 });
 
-test('view freshness is the final line after Archive and Configure Clusters', () => {
+test('Cluster Status freshness precedes its links while My Jobs freshness stays last', () => {
   const updated = new Date(2026, 9, 8, 14, 5, 23).toISOString();
   assert.equal(viewFreshness(updated), 'Last update: 08.10.2026 14:05:23');
   assert.equal(viewFreshness(undefined), '');
@@ -1070,7 +1071,15 @@ test('view freshness is the final line after Archive and Configure Clusters', ()
     { clusters: [] }, {}, { updatedAt: updated },
   );
   assert.match(html, /<p class="view-freshness">Last update: 08\.10\.2026 14:05:23<\/p>/);
-  assert.ok(html.indexOf('configure clusters...') < html.indexOf('<p class="view-freshness">'));
+  assert.ok(html.indexOf('<p class="view-freshness">') < html.indexOf('view sessions</button>'));
+  assert.ok(html.indexOf('view sessions</button>') < html.indexOf('configure clusters</button>'));
+  assert.equal((html.match(/Last update:/g) || []).length, 1);
+  const loading = renderLoading('Cluster Status', { updatedAt: updated });
+  const offline = renderWelcome('Cluster Status', '', { updatedAt: updated });
+  for (const view of [loading, offline]) {
+    assert.ok(view.indexOf('<p class="view-freshness">') < view.indexOf('view sessions</button>'));
+    assert.equal((view.match(/Last update:/g) || []).length, 1);
+  }
   const jobsHtml = renderJobs({ jobs: [] }, {}, new Set(), { updatedAt: updated });
   assert.ok(jobsHtml.indexOf('Archive (0)') < jobsHtml.indexOf('<p class="view-freshness">'));
   assert.match(jobsHtml, /<\/details><p class="view-freshness">Last update: 08\.10\.2026 14:05:23<\/p><script/);
@@ -1086,6 +1095,43 @@ test('a closed SSH session offers its login button in the cluster summary', () =
   assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;cluster_0&quot;,false\]">Log in<\/button>/);
   assert.equal((html.match(/>Log in<\/button>/g) || []).length, 1);
   assert.doesNotMatch(html, /Log in again|The SSH session has closed/);
+});
+
+test('a timed-out cluster keeps its job bar and partition cards with a warning hover', () => {
+  const updated = new Date(2026, 9, 8, 14, 5, 23).toISOString();
+  const html = renderStatus({ clusters: [{
+    name: 'inf', reachable: false, error: 'alice@login.example: SSH timed out after 35 seconds',
+    last_success_at: updated,
+    user_jobs: { running: 2, pending: 1 },
+    partitions: [{ name: 'gpu-h100', gpus: { total: 4 } }],
+  }] });
+  assert.match(html, /class="cluster-job-running"/);
+  assert.match(html, /class="cluster-job-pending"/);
+  assert.match(html, /class="cluster-warning fast-hover"[^>]*data-fast-tooltip="Cluster refresh timed out\.\nLatest update: 14:05:23 08\.10\.2026"/);
+  assert.doesNotMatch(html, /35 seconds/);
+  assert.match(html, /class="card partition-card/);
+  assert.doesNotMatch(html, /<p class="error">/);
+  assert.doesNotMatch(html, /alice@login\.example/);
+});
+
+test('an unfinished cluster shows a loading placeholder beside completed clusters', () => {
+  const html = renderStatus({ clusters: [
+    { name: 'fast', reachable: true, partitions: [{ name: 'gpu', gpus: { total: 1 } }] },
+    { name: 'slow', reachable: true, collecting: true, partitions: [] },
+  ] });
+  assert.match(html, /gpu/);
+  assert.match(html, /cluster-collecting">Loading…<\/span>/);
+  assert.match(html, /Collecting cluster data…/);
+});
+
+test('a first-refresh failure does not present invented zero job counts', () => {
+  const html = renderStatus({ clusters: [{
+    name: 'slow', reachable: false, error: 'SSH timed out', partitions: [],
+    user_jobs: { running: 0, pending: 0 },
+  }] });
+  assert.match(html, /cluster-collecting">Unavailable<\/span>/);
+  assert.match(html, /Latest update: Unavailable/);
+  assert.doesNotMatch(html, /<span class="cluster-job-track"/);
 });
 
 test('wait cells label policy refusals separately from real errors', () => {

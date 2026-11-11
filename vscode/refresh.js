@@ -44,6 +44,7 @@ class RefreshCoordinator {
     this.serverInFlight = undefined;
     this.jobsRetry = undefined;
     this.statusRetry = undefined;
+    this.statusCollecting = false;
     this.timer = undefined;
     this.disposed = false;
     this.serviceGeneration = 0;
@@ -163,13 +164,17 @@ class RefreshCoordinator {
       this.onServiceAvailable();
       if (result.notModified) {
         this.statusProvider.checked(checkedAt);
+        if (this.statusCollecting) this.retryFirstCollection('status');
         return { outcome: 'unchanged', checkedAt };
       }
       this.etags.status = result.etag;
+      this.statusCollecting = (result.payload.clusters || []).some((cluster) => cluster.collecting);
       this.statusProvider.update(result.payload, checkedAt);
+      if (this.statusCollecting) this.retryFirstCollection('status');
       return { outcome: 'updated', checkedAt };
     } catch (error) {
       this.etags.status = undefined;
+      this.statusCollecting = false;
       const collecting = initialCollectionPending(error);
       if (collecting || generation !== this.serviceGeneration) {
         if (collecting) this.onServiceAvailable();
