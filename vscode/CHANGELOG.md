@@ -4,6 +4,18 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
+- Separate dependency-held jobs into **Depending** across the terminal, web,
+  and VS Code boards. Show running, pending, and depending activity in cluster
+  summaries, with segment-specific counts and GPU-hour estimates.
+- Make Cluster Status activity segments open the matching jobs for that
+  cluster. Order active VS Code jobs by cluster and submission time, and keep
+  the sidebar's refresh time and status tooltip concise.
+- Resolve per-job GPU or APU models from Slurm allocations and configured
+  profiles, show whole-job accelerator counts, and link expanded job cards to
+  their cluster and partition with a brief partition highlight.
+- Tighten expanded job card resource and lifecycle layouts, including
+  date-before-time labels and consistent wrapping in narrow sidebars.
+
 ## 0.2.1 - 2026-11-09
 
 - Show account-specific FairShare markers with compact `account: rank/total`
