@@ -48,10 +48,10 @@ test('status bar summarises running and pending jobs', () => {
   assert.equal(summary.text, '$(server-process) 1 running · 2 pending');
   assert.equal(
     summary.tooltip,
-    'Cluster Watcher: 1 job running and 2 jobs pending.\nLast refreshed 08.10.2026 14:05:23.\nClick to show My Jobs.',
+    'Cluster Watcher: Last refreshed: 08.10.2026 14:05:23\nClick to show my jobs.',
   );
   assert.equal(statusSummary([]).text, '$(server-process) no active jobs');
-  assert.match(statusSummary([job('1', 'PENDING')]).tooltip, /0 jobs running and 1 job pending/);
+  assert.equal(statusSummary([]).tooltip, 'Cluster Watcher: Last refreshed: Unavailable\nClick to show my jobs.');
 });
 
 test('status bar adds Depending only when dependency-held jobs exist', () => {
@@ -61,7 +61,7 @@ test('status bar adds Depending only when dependency-held jobs exist', () => {
     job('3', 'PENDING', { dependency: 'afterok:1(unfulfilled)' }),
   ]);
   assert.equal(summary.text, '$(server-process) 1 running · 1 pending · 1 depending');
-  assert.match(summary.tooltip, /1 job running, 1 job pending, and 1 job depending/);
+  assert.equal(summary.tooltip, 'Cluster Watcher: Last refreshed: Unavailable\nClick to show my jobs.');
   assert.equal(statusSummary([job('3', 'PENDING', { dependency: 'afterok:1' })]).text,
     '$(server-process) 0 running · 0 pending · 1 depending');
 });

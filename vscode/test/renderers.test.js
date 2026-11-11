@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, renderLoading, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
 
@@ -45,7 +47,7 @@ test('jobs retain terminal state grouping and lifecycle visibility', () => {
   assert.match(html, /<details class="job-group" data-disclosure-key="group:active:RUNNING" open><summary>Running \(1\)<\/summary>/);
   assert.match(html, /<details class="card" data-disclosure-key=/);
   assert.match(html, /class="card-summary-progress"/);
-  assert.match(html, /<dt>Limit<\/dt><dd>/);
+  assert.match(html, /<div class="time-row"><dt>Limit<\/dt><dd>/);
   assert.doesNotMatch(html, /<body><h2>My Jobs<\/h2>/);
   assert.match(html, /api\.postMessage\(\{ type: 'disclosure'/);
   assert.match(html, /title="Archive job" aria-label="Archive job"><svg class="action-icon"/);
@@ -147,7 +149,7 @@ test('status shows every partition detail compactly without a card disclosure', 
     clusters: [{ name: 'cluster_0', host: 'login-02.example', reachable: true, user_jobs: { running: 3, pending: 1 }, partitions: [partition] }],
   });
 
-  const card = html.match(/<article class="card partition-card" style="--availability-count-width:8ch">.*?<\/article>/s)[0];
+  const card = html.match(/<article class="card partition-card" data-partition="gpu-h100" style="--availability-count-width:8ch">.*?<\/article>/s)[0];
   assert.match(card, /<div class="card-summary-title partition-title"><span class="name">gpu-h100<\/span><span class="launchability"/);
   assert.match(card, /class="launch-block launch-wait-1"/);
   assert.match(card, /class="launch-block launch-blocked"[^>]*>×<\/span>/);
@@ -184,14 +186,20 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary><span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">cluster_0<\/span><span class="cluster-job-track" role="group" aria-label="3 running, 1 pending, 0 depending"/);
   assert.match(html, /class="cluster-job-running" style="width:75%"/);
   assert.match(html, /class="cluster-job-pending" style="width:25%"/);
-  assert.match(html, /class="cluster-job-running"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;RUNNING&quot;\]"/);
-  assert.match(html, /class="cluster-job-pending"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;PENDING&quot;\]"/);
-  assert.doesNotMatch(html, /data-args="\[&quot;DEPENDING&quot;\]"/);
+  assert.match(html, /class="cluster-job-running"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;RUNNING&quot;,&quot;cluster_0&quot;\]"/);
+  assert.match(html, /class="cluster-job-pending"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;PENDING&quot;,&quot;cluster_0&quot;\]"/);
+  assert.doesNotMatch(html, /data-args="\[&quot;DEPENDING&quot;,&quot;cluster_0&quot;\]"/);
+  assert.match(html, /data-fast-tooltip="3 running jobs\nGPU-hours unavailable"/);
+  assert.match(html, /data-fast-tooltip="1 pending job\nGPU-hours unavailable"/);
+  assert.doesNotMatch(html, /data-fast-tooltip="[^"]*(?:cluster_0|Click to view)/);
+  assert.doesNotMatch(html, /class="cluster-job-track"[^>]*data-fast-tooltip=/);
   assert.doesNotMatch(html, /class="cluster-login-host"|login-02\.example/);
   assert.match(html, /\.cluster-job-running\{background:var\(--vscode-progressBar-background\)\}/);
   assert.match(html, /\.cluster-job-pending\{background:var\(--vscode-editorError-foreground\)\}/);
   assert.match(html, /\.cluster-job-depending\{display:block;height:100%;background:#6b1026\}/);
   assert.match(html, /\.cluster-job-running\{background:#2563eb\}\.cluster-job-pending\{background:#dc2626\}/);
+  assert.match(html, /\.cluster-job-track\{[^}]*height:6px/);
+  assert.match(html, /\.cluster-job-track>button:hover,\.cluster-job-track>button:focus-visible\{box-shadow:inset 0 0 0 1px #fff\}/);
   assert.doesNotMatch(html, /\.cluster-group(?:\[open\])?>summary::before/);
   assert.match(html, /\.cluster-summary\{[^}]*display:inline-flex;flex-direction:column/);
   assert.match(html, /<dialog class="sessions-dialog" aria-labelledby="sessions-dialog-title">/);
@@ -232,19 +240,116 @@ test('cluster ratio includes three correctly sized status colors', () => {
   assert.match(html, /class="cluster-job-running" style="width:50%"/);
   assert.match(html, /class="cluster-job-pending" style="width:25%"/);
   assert.match(html, /class="cluster-job-depending" style="width:25%"/);
-  assert.match(html, /class="cluster-job-depending"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;DEPENDING&quot;\]"/);
+  assert.match(html, /class="cluster-job-depending"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;DEPENDING&quot;,&quot;busy&quot;\]"/);
+  assert.match(html, /data-fast-tooltip="1 depending job\nGPU-hours unavailable"/);
   assert.match(html, /const target = \[\.\.\.document\.querySelectorAll\('details\.job-group\[data-disclosure-key\]'\)\]/);
   assert.match(html, /if \(!target\.open\) \{ target\.open = true; remember\(target\); \}/);
-  assert.match(html, /target\.scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
+  assert.match(html, /clusterCard\.scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
 });
 
-test('active jobs are ordered by newest submission within each state group', () => {
+test('cluster ratio hover estimates remaining and requested GPU hours', () => {
+  const html = renderStatus({ clusters: [{
+    name: 'c', reachable: true, partitions: [],
+    user_jobs: { running: 2, pending: 1, depending: 1 },
+    user_gpu_hours: { running: 7.5, pending: 8, depending: 2 },
+  }] });
+  assert.match(html, /data-fast-tooltip="2 running jobs\n7\.5 GPU-hours remaining"/);
+  assert.match(html, /data-fast-tooltip="1 pending job\n8 GPU-hours requested"/);
+  assert.match(html, /data-fast-tooltip="1 depending job\n2 GPU-hours requested"/);
+});
+
+test('expanded job shows total GPUs, model breakdown, and partition navigation', () => {
+  const html = renderJobs({ jobs: [{
+    job_id: '42', name: 'train', cluster: 'inf', partition: 'gpu-all', state: 'RUNNING',
+    node_count: 2, gpus: 2, gpu_total: 4, cpus: 24,
+    gpu_models: [{ name: 'A100', count: 2 }, { name: 'H100', count: 2 }],
+  }] });
+  const meta = html.match(/<div class="muted card-meta">.*?<\/div>/s)[0];
+  assert.match(meta, /data-command="clusterWatcher\.showCluster" data-args="\[&quot;inf&quot;\]"/);
+  assert.match(meta, /data-command="clusterWatcher\.showPartition" data-args="\[&quot;inf&quot;,&quot;gpu-all&quot;\]"/);
+  assert.match(meta, /data-fast-tooltip="A100: 2\nH100: 2"[^>]*>4 GPU<\/span>/);
+  assert.doesNotMatch(meta, /title=/);
+  const one = renderJobs({ jobs: [{ job_id: '43', cluster: 'inf', partition: 'gpu-h100',
+    state: 'RUNNING', node_count: 2, gpus: 1, gpu_total: 2,
+    gpu_models: [{ name: 'H100', count: 2 }] }] });
+  assert.match(one, /data-fast-tooltip="H100"[^>]*>2 GPU<\/span>/);
+  assert.match(html, /event\.data\?\.type === 'jumpPartition'/);
+  assert.match(html, /if \(!partition\) \{ group\.scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\); return; \}/);
+  const status = renderStatus({ clusters: [{ name: 'inf', reachable: true,
+    partitions: [{ name: 'gpu-all', gpus: { total: 4 } }] }] });
+  assert.match(status, /data-partition="gpu-all"/);
+});
+
+test('APU jobs show APU counts and the configured model', () => {
+  const html = renderJobs({ jobs: [{
+    job_id: '42', cluster: 'viper', partition: 'apu', state: 'RUNNING',
+    node_count: 2, gpus: 2, gpu_total: 4, accelerator_type: 'apu',
+    gpu_models: [{ name: 'AMD Instinct MI300A', count: 4 }],
+  }] });
+  assert.match(html, /data-fast-tooltip="AMD Instinct MI300A"[^>]*>4 APU<\/span>/);
+  const unknown = renderJobs({ jobs: [{ job_id: '43', cluster: 'viper', state: 'RUNNING',
+    gpus: 1, accelerator_type: 'apu', gpu_models: [] }] });
+  assert.match(unknown, /data-fast-tooltip="APU model unavailable"[^>]*>1 APU<\/span>/);
+});
+
+test('cluster-name navigation preserves the cluster disclosure state', () => {
+  const html = renderJobs({ jobs: [{ job_id: '42', cluster: 'viper', state: 'RUNNING' }] });
+  const clusterJump = html.indexOf("if (!partition) { group.scrollIntoView");
+  const partitionOpens = html.indexOf('if (!group.open) { group.open = true; remember(group); }', clusterJump);
+  assert.ok(clusterJump > -1 && partitionOpens > clusterJump);
+  const source = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  assert.match(source, /if \(partition\) this\.disclosures\[`cluster:\$\{cluster\}`\] = true;/);
+  assert.match(source, /if \(!partition && this\.showingData\) \{[\s\S]*?this\.view\.webview\.postMessage\(\{ type: 'jumpPartition', \.\.\.target \}\)/);
+  assert.match(html, /data-command="clusterWatcher\.showCluster" data-args="\[&quot;viper&quot;\]"/);
+  assert.match(renderStatus({ clusters: [{ name: 'viper', reachable: true, partitions: [] }] },
+    { 'cluster:viper': false }), /data-disclosure-key="cluster:viper"><summary>/);
+});
+
+test('expanded lifecycle rows keep label, clock, and date on one line', () => {
+  const html = renderJobs({ jobs: [{
+    job_id: '7', cluster: 'c', state: 'COMPLETED',
+    submit_at: '2026-09-30T15:00:00Z', start_at: '2026-09-30T15:01:00Z',
+    end_at: '2026-09-30T15:02:00Z',
+  }] });
+  const submitted = html.match(/<div class="time-row"><dt>Submitted<\/dt><dd>([^<]+)<\/dd><\/div>/);
+  assert.ok(submitted);
+  assert.match(submitted[1], /^\d\d:\d\d \d\d\.\d\d$/);
+  assert.match(html, /<div class="time-row"><dt>Launched<\/dt><dd>[^<]+<\/dd><\/div>/);
+  assert.match(html, /<div class="time-row"><dt>Ended<\/dt><dd>[^<]+<\/dd><\/div>/);
+  assert.match(html, /\.time-row\{[^}]*justify-content:space-between;[^}]*white-space:nowrap\}/);
+  assert.match(html, /\.time-row dd\{[^}]*text-align:right\}/);
+  assert.match(html, /\.times dd\.dependency-value\{overflow-wrap:anywhere\}/);
+});
+
+test('expanded timestamps honor month-first date settings without showing a year', () => {
+  try {
+    setDateFormat('MM/DD/YY');
+    const html = renderJobs({ jobs: [{ job_id: '7', cluster: 'c', state: 'PENDING',
+      submit_at: '2026-09-30T15:00:00Z' }] });
+    assert.match(html, /<div class="time-row"><dt>Submitted<\/dt><dd>\d\d:\d\d 09\/30<\/dd><\/div>/);
+    assert.doesNotMatch(html.match(/<div class="time-row">.*?<\/div>/s)[0], /2026|<dt>Submitted:/);
+  } finally {
+    setDateFormat();
+  }
+});
+
+test('running, pending, and depending jobs group by cluster then newest submission', () => {
   const jobs = [
-    { job_id: 'older', name: 'Zebra', cluster: 'c', state: 'RUNNING', submit_at: '2026-10-01T10:00:00Z' },
-    { job_id: 'newer', name: 'Apple', cluster: 'c', state: 'RUNNING', submit_at: '2026-10-01T11:00:00Z' },
+    { job_id: 'b-new', cluster: 'beta', state: 'RUNNING', submit_at: '2026-10-01T12:00:00Z' },
+    { job_id: 'a-old', cluster: 'alpha', state: 'RUNNING', submit_at: '2026-10-01T10:00:00Z' },
+    { job_id: 'a-new', cluster: 'alpha', state: 'RUNNING', submit_at: '2026-10-01T11:00:00Z' },
+    { job_id: 'p-beta', cluster: 'beta', state: 'PENDING', submit_at: '2026-10-01T12:00:00Z' },
+    { job_id: 'p-alpha', cluster: 'alpha', state: 'PENDING', submit_at: '2026-10-01T10:00:00Z' },
+    { job_id: 'd-beta', cluster: 'beta', state: 'PENDING', dependency: 'afterok:1', submit_at: '2026-10-01T12:00:00Z' },
+    { job_id: 'd-alpha', cluster: 'alpha', state: 'PENDING', dependency: 'afterok:1', submit_at: '2026-10-01T10:00:00Z' },
   ];
   const html = renderJobs({ jobs });
-  assert.ok(html.indexOf('data-job-ref="c/newer"') < html.indexOf('data-job-ref="c/older"'));
+  assert.ok(html.indexOf('data-job-ref="alpha/a-new"') < html.indexOf('data-job-ref="alpha/a-old"'));
+  assert.ok(html.indexOf('data-job-ref="alpha/a-old"') < html.indexOf('data-job-ref="beta/b-new"'));
+  assert.ok(html.indexOf('data-job-ref="alpha/p-alpha"') < html.indexOf('data-job-ref="beta/p-beta"'));
+  assert.ok(html.indexOf('data-job-ref="alpha/d-alpha"') < html.indexOf('data-job-ref="beta/d-beta"'));
+  assert.doesNotMatch(html, /job-cluster-heading|data-job-cluster/);
+  assert.match(html, /card\.dataset\.jobRef\.startsWith\(cluster \+ '\/'\)/);
 });
 
 test('matched fair-share factors have bars above GPU and node availability', () => {
@@ -326,7 +431,7 @@ test('long availability fractions keep their complete value available on hover',
   };
   const html = renderStatus({ clusters: [{ name: 'large-cluster', reachable: true, partitions: [partition] }] });
 
-  assert.match(html, /<article class="card partition-card" style="--availability-count-width:15ch">/);
+  assert.match(html, /<article class="card partition-card" data-partition="large" style="--availability-count-width:15ch">/);
   assert.match(html, /aria-label="1234 of 12345 free" title="1234\/12345 Free">1234\/12345 Free<\/span>/);
   assert.match(html, /aria-label="2 of 7 free" title="2\/7 Free">2\/7 Free<\/span>/);
 });
@@ -498,7 +603,7 @@ test('collapsed title hover shows the full name and the job ID sits beside the p
   assert.match(html, /\.card-summary-title\[data-full-name\]::after\{outline:1px solid #fff\}/);
   assert.match(html, /\.card:not\(\[open\]\) \.card-summary-progress>\.job-id\{display:none\}/);
   assert.doesNotMatch(cardSummary, /<summary[^>]* title=/);
-  assert.match(html, /<div class="muted card-meta" title="cluster_0 \/ no partition · 0 node · 0 GPU · 0 CPU">cluster_0 \/ no partition · 0 node · 0 GPU · 0 CPU<\/div>/);
+  assert.match(html, /<div class="muted card-meta"><button class="job-cluster-link"[^>]*>cluster_0<\/button> \/ no partition · 0 node · <span class="job-gpu-count"[^>]*>0 GPU<\/span> · 0 CPU<\/div>/);
   assert.equal((html.match(/data-copy=/g) || []).length, 1);
   assert.match(html, /\.job-id\{[^}]*border-radius:0\}/);
   assert.match(html, /\.job-id:hover,\.job-id:focus-visible\{outline:none;box-shadow:inset 0 0 0 1px var\(--vscode-focusBorder\)\}/);
@@ -843,7 +948,7 @@ test('narrow cards contain long metadata and dependency text', () => {
 
   assert.match(html, /\.card-meta\{min-width:0;white-space:normal;overflow-wrap:anywhere\}/);
   assert.match(html, /\.times dd\.dependency-value\{overflow-wrap:anywhere\}/);
-  assert.match(html, /<div class="muted card-meta" title="cluster-with-a-very-long-name \/ partition-with-a-very-long-name/);
+  assert.match(html, /<div class="muted card-meta"><button class="job-cluster-link"[^>]*>cluster-with-a-very-long-name<\/button> \/ <button class="job-partition-link"[^>]*>partition-with-a-very-long-name<\/button>/);
   assert.match(html, /<dd class="dependency-value">/);
 });
 
@@ -855,7 +960,7 @@ test('expanded card moves the running deadline down and keeps details and action
       submit_at: '2026-09-30T15:00:00Z', start_at: '2026-09-30T15:01:00Z',
     }],
   });
-  assert.ok(html.includes(`<dt>Limit</dt><dd>${localTime('2026-09-30T16:01:00Z')}</dd>`));
+  assert.match(html, /<div class="time-row"><dt>Limit<\/dt><dd>[^<]+<\/dd><\/div>/);
   assert.doesNotMatch(html, /<dt>Elapsed<\/dt>/);
   assert.doesNotMatch(html, /<dt>Ended<\/dt>/);
   assert.match(html, /<span class="muted progress-label" title="[^"]+ \/ 1h">[^<]+ \/ 1h<\/span>/);
@@ -881,7 +986,7 @@ test('terminal cards keep elapsed time in the compact fraction and end time in d
   assert.match(cardSummary, /<span class="muted progress-label" title="10m \/ 1h">10m \/ 1h<\/span>/);
   assert.doesNotMatch(cardSummary, />[^<]*(?:elapsed|ended)[^<]*</i);
   assert.doesNotMatch(html, /<dt>Elapsed<\/dt>/);
-  assert.match(html, /<dt>Ended<\/dt><dd>[^<]+<\/dd>/);
+  assert.match(html, /<div class="time-row"><dt>Ended<\/dt><dd>[^<]+<\/dd><\/div>/);
   assert.match(html, /\.progress-label:empty\{display:none\}/);
 });
 
@@ -897,7 +1002,7 @@ test('expanded lifecycle rows are state-specific and failure groups distinguish 
   const card = name => html.match(new RegExp(`<summary><span class="card-summary-title" data-full-name="c ${identifiers[name]} ${name}">.*?</details>`, 's'))[0];
 
   assert.doesNotMatch(card('running-job'), /<dt>Ended<\/dt>/);
-  assert.doesNotMatch(card('pending-job'), /<dt>(?:Launched|Ended)<\/dt>/);
+  assert.doesNotMatch(card('pending-job'), /<dt>(?:Launched|Ended):<\/dt>/);
   assert.doesNotMatch(html, /<dt>Elapsed<\/dt>/);
   assert.ok(html.indexOf('Failed (Early) (1)') < html.indexOf('Failed (Timeout) (1)'));
   assert.match(html, /data-disclosure-key="group:active:FAILED_EARLY" open><summary>Failed \(Early\) \(1\)<\/summary>/);
@@ -924,7 +1029,7 @@ test('dates use DD.MM.YYYY by default and follow the configured pattern', () => 
   }
 });
 
-test('view freshness shows only the last update with second precision', () => {
+test('view freshness is the final line after Archive and Configure Clusters', () => {
   const updated = new Date(2026, 9, 8, 14, 5, 23).toISOString();
   assert.equal(viewFreshness(updated), 'Last update: 08.10.2026 14:05:23');
   assert.equal(viewFreshness(undefined), '');
@@ -933,8 +1038,12 @@ test('view freshness shows only the last update with second precision', () => {
     { clusters: [] }, {}, { updatedAt: updated },
   );
   assert.match(html, /<p class="view-freshness">Last update: 08\.10\.2026 14:05:23<\/p>/);
+  assert.ok(html.indexOf('configure clusters...') < html.indexOf('<p class="view-freshness">'));
+  const jobsHtml = renderJobs({ jobs: [] }, {}, new Set(), { updatedAt: updated });
+  assert.ok(jobsHtml.indexOf('Archive (0)') < jobsHtml.indexOf('<p class="view-freshness">'));
+  assert.match(jobsHtml, /<\/details><p class="view-freshness">Last update: 08\.10\.2026 14:05:23<\/p><script/);
   assert.doesNotMatch(html, /Last checked|data-last-checked/);
-  assert.match(html, /\.view-freshness\{margin:0 0 7px;/);
+  assert.match(html, /\.view-freshness\{margin:8px 0 0\}/);
 });
 
 test('a closed SSH session offers its login button in the cluster summary', () => {

@@ -8,7 +8,7 @@ import sys
 import time
 from typing import Callable, TextIO
 
-from .jobs import ACTIVE_JOB_STATES, JobService
+from .jobs import ACTIVE_JOB_STATES, JobService, has_failed_dependency, waits_for_dependency
 from .models import Machine
 from .slurm import collect_user_job_status, normalize_job_state
 from .terminal_ui import (
@@ -34,26 +34,28 @@ def collect_personal_jobs(machines: list[Machine], timeout: int) -> dict[str, ob
     return service.query()
 
 
-def _state_rank(state: object) -> int:
+def _state_rank(state: object, job: dict[str, object] | None = None) -> int:
     """Map detailed Slurm states onto the board's requested state ordering."""
     normalized = normalize_job_state(str(state))
     if normalized == "RUNNING":
         return 0
     if normalized == "PENDING" or normalized in ACTIVE_JOB_STATES:
-        return 1
+        if job and has_failed_dependency(job):
+            return 3
+        return 2 if job and waits_for_dependency(job) else 1
     if normalized == "COMPLETED":
-        return 2
-    if normalized in _FAILURE_STATES:
-        return 3
-    if normalized == "CANCELLED":
         return 4
-    return 5
+    if normalized in _FAILURE_STATES:
+        return 5
+    if normalized == "CANCELLED":
+        return 6
+    return 7
 
 
-def _state_group(state: object) -> str:
+def _state_group(state: object, job: dict[str, object] | None = None) -> str:
     """Return the visible separator group for a detailed Slurm state."""
-    rank = _state_rank(state)
-    return ("RUNNING", "PENDING", "COMPLETED", "FAILED", "CANCELLED", "OTHER")[rank]
+    rank = _state_rank(state, job)
+    return ("RUNNING", "PENDING", "DEPENDING", "FAILED_DEPENDENCY", "COMPLETED", "FAILED", "CANCELLED", "OTHER")[rank]
 
 
 def _parse_time(value: object) -> datetime | None:
@@ -83,7 +85,7 @@ def _sort_key(job: dict[str, object]) -> tuple[object, ...]:
     job_id = str(job.get("job_id") or job.get("id") or "")
     numeric_id = tuple(int(value) for value in job_id.replace("_", ".").split(".") if value.isdigit())
     return (
-        _state_rank(job.get("state")), -submitted_value,
+        _state_rank(job.get("state"), job), -submitted_value,
         str(job.get("cluster", "")).casefold(), numeric_id, job_id,
     )
 
@@ -140,7 +142,13 @@ def _progress(job: dict[str, object], now: datetime, use_color: bool, width: int
         expected = _parse_time(job.get("expected_start_at") or job.get("start_at") or job.get("start_time"))
         current = _local_now_for(submitted or expected, now) if submitted or expected else now
         waited = max(0, round((current - submitted).total_seconds())) if submitted else 0
-        if submitted and expected and expected > submitted:
+        if has_failed_dependency(job):
+            fraction = 0.0
+            label = "dependency cannot be satisfied"
+        elif waits_for_dependency(job):
+            fraction = 0.0
+            label = "waiting for dependency"
+        elif submitted and expected and expected > submitted:
             total_wait = max(1, round((expected - submitted).total_seconds()))
             remaining = max(0, round((expected - current).total_seconds()))
             fraction = waited / total_wait
@@ -150,8 +158,7 @@ def _progress(job: dict[str, object], now: datetime, use_color: bool, width: int
             )
         else:
             fraction = 0.0
-            reason = str(job.get("reason") or "")
-            label = "waiting for dependency" if reason.startswith("Dependency:") else f"{_format_duration(waited)} waiting"
+            label = f"{_format_duration(waited)} waiting"
         styled_bar, plain_bar = _colored_bar(fraction, width, ANSI_RED, use_color)
     else:
         return f"{_format_duration(elapsed)} elapsed", f"{_format_duration(elapsed)} elapsed"
@@ -268,7 +275,7 @@ def render_job_board(
     if terminal_width < 136:
         previous_group: str | None = None
         for job in jobs:
-            group = _state_group(job.get("state"))
+            group = _state_group(job.get("state"), job)
             if group != previous_group:
                 lines.append(f"### {group} ###")
                 previous_group = group
@@ -287,7 +294,7 @@ def render_job_board(
     for job in jobs:
         styled_progress, plain_progress = _progress(job, observed_at, use_color)
         prepared_rows.append({
-            "group": _state_group(job.get("state")),
+            "group": _state_group(job.get("state"), job),
             "job_id": str(job.get("job_id") or job.get("id") or "-"),
             "name": str(job.get("name") or job.get("job_id") or job.get("id") or "-"),
             "cluster": str(job.get("cluster") or "-"),

@@ -39,6 +39,66 @@ def accounting_line(
 class JobServiceTests(TimedTestCase):
     """Exercise parsing, degradation, caching, and safe bounded log access."""
 
+    def test_viper_apu_profile_fills_generic_slurm_job_model(self):
+        """A generic Slurm GPU GRES still identifies Viper's MI300A APUs."""
+        from clusterwatcher import compute
+
+        previous_path = compute._config_path
+        try:
+            compute.configure_gpu_profiles(Path(__file__).parents[1] / "clusters.example.toml")
+            status = ClusterStatus(
+                "cluster-b", "login.example", "alice",
+                user_jobs=[{
+                    "id": "42", "name": "train", "state": "RUNNING", "partition": "apu",
+                    "nodes": ["n1", "n2"], "node_count": 2, "cpus": 96, "gpus": 2,
+                    "gpu_gres_per_node": "gpu:2", "time_limit_seconds": 3600,
+                }],
+                nodes=[{"name": "n1", "gpu": {"types": {"generic": 2}}},
+                       {"name": "n2", "gpu": {"types": {"generic": 2}}}],
+                accounting=AccountingSnapshot(records=[], fingerprint="", since="", fetched_at=""),
+            )
+            service = JobService([Machine("cluster-b", "login.example", "alice")], 5, 15, lambda: [status])
+            job = service.query()["jobs"][0]
+            self.assertEqual(job["gpu_total"], 4)
+            self.assertEqual(job["accelerator_type"], "apu")
+            self.assertEqual(job["gpu_models"], [{"name": "AMD Instinct MI300A", "count": 4}])
+        finally:
+            compute.configure_gpu_profiles(previous_path)
+
+    def test_live_gpu_total_and_model_breakdown(self):
+        """The job API totals per-node GRES and resolves homogeneous nodes."""
+        from clusterwatcher.jobs import _active_record, _gpu_models_for_job
+
+        job = {"id": "42", "state": "RUNNING", "gpus": 2, "node_count": 2,
+               "nodes": ["n1", "n2"], "gpu_gres_per_node": "gpu:2"}
+        nodes = [
+            {"name": "n1", "gpu": {"types": {"a100": 4}}},
+            {"name": "n2", "gpu": {"types": {"h100": 4}}},
+        ]
+        self.assertEqual(_active_record("test", job)["gpu_total"], 4)
+        self.assertEqual(_gpu_models_for_job("test", job, nodes),
+                         [{"name": "a100", "count": 2}, {"name": "h100", "count": 2}])
+        job["gpu_gres_per_node"] = "gpu:h100:2"
+        self.assertEqual(_gpu_models_for_job("test", job, nodes), [{"name": "h100", "count": 4}])
+        job["gpu_gres_per_node"] = "gpu:2"
+        nodes[0]["gpu"]["types"] = {"a100": 2, "h100": 2}
+        self.assertEqual(_gpu_models_for_job("test", job, nodes), [])
+
+    def test_accounting_gpu_models_use_typed_tres_or_single_model_nodes(self):
+        """Completed jobs retain model detail without claiming mixed-node types."""
+        from clusterwatcher.jobs import _accounting_gpu_models
+
+        nodes = [{"name": "n1", "gpu": {"types": {"a100": 4}}},
+                 {"name": "n2", "gpu": {"types": {"h100": 4}}}]
+        record = {"gpus": 2, "nodes": ["n1", "n2"], "gpu_models": {"generic": 2}}
+        self.assertEqual(_accounting_gpu_models("test", record, nodes), [])
+        nodes[1]["gpu"]["types"] = {"a100": 4}
+        self.assertEqual(_accounting_gpu_models("test", record, nodes),
+                         [{"name": "a100", "count": 2}])
+        record["gpu_models"] = {"h100": 2}
+        self.assertEqual(_accounting_gpu_models("test", record, nodes),
+                         [{"name": "h100", "count": 2}])
+
     def test_finished_array_tasks_and_cancelled_state_are_parsed(self):
         jobs = parse_accounting_jobs(
             accounting_line("12345_0")

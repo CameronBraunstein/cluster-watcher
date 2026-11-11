@@ -13,13 +13,14 @@ from typing import Any
 
 @dataclass(frozen=True)
 class GPUProfile:
-    """Hardware characteristics used to rank one cluster's GPU partitions."""
+    """Hardware characteristics and device type for one cluster's accelerators."""
 
     cluster: str
     name: str
     aliases: tuple[str, ...]
     vram_gb: int
     fp16_bf16_tensor_tflops: float
+    device_type: str = "gpu"
 
 
 def _normalized(value: str) -> str:
@@ -77,6 +78,15 @@ def parse_gpu_profiles(
         aliases = item.get("aliases")
         vram = item.get("vram_gb")
         throughput = item.get("fp16_bf16_tensor_tflops")
+        # Older catalogs described MI300A/APU hardware without a type field.
+        # Preserve their meaning when users upgrade an existing installation.
+        legacy_apu = (
+            isinstance(name, str) and "mi300a" in _normalized(name)
+        ) or (
+            isinstance(aliases, list)
+            and any(isinstance(alias, str) and _normalized(alias) == "apu" for alias in aliases)
+        )
+        device_type = item.get("device_type", "apu" if legacy_apu else "gpu")
         try:
             throughput_value = float(throughput) if isinstance(throughput, (int, float)) else 0.0
         except OverflowError:
@@ -89,11 +99,12 @@ def parse_gpu_profiles(
             or not isinstance(vram, int) or isinstance(vram, bool) or vram < 1
             or isinstance(throughput, bool) or not math.isfinite(throughput_value)
             or throughput_value <= 0
+            or not isinstance(device_type, str) or device_type not in {"gpu", "apu"}
         ):
             raise ValueError(f"GPU profile #{index} in {path} is incomplete or invalid")
         if known_clusters is not None and cluster not in known_clusters:
             raise ValueError(f"GPU profile #{index} in {path} refers to unknown cluster {cluster!r}")
-        profiles.append(GPUProfile(cluster, name, tuple(aliases), vram, throughput_value))
+        profiles.append(GPUProfile(cluster, name, tuple(aliases), vram, throughput_value, device_type))
     return tuple(profiles)
 
 

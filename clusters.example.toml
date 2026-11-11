@@ -51,6 +51,7 @@ fp16_bf16_tensor_tflops = 989.0
 [[profile]]
 cluster = "cluster-b"
 name = "AMD Instinct MI300A"
+device_type = "apu"
 aliases = ["mi300a", "apu"]
 vram_gb = 128
 fp16_bf16_tensor_tflops = 980.6

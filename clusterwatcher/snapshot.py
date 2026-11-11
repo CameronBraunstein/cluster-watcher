@@ -9,6 +9,7 @@ from typing import Any
 from .compute import GPUProfile, profile_for
 from .config import DEFAULT_WAIT_THRESHOLD_MINUTES
 from .fair_share import partition_associations
+from .jobs import has_failed_dependency, waits_for_dependency
 from .models import ClusterStatus
 from .wait_probes import WAIT_PROBE_REFRESH_SECONDS, classify_wait_error
 
@@ -23,12 +24,53 @@ _PENDING_JOB_STATES = {
 
 
 def active_job_counts(status: ClusterStatus) -> dict[str, int]:
-    """Return the current user's running and not-yet-running job counts."""
-    states = [str(job.get("state", "")).upper() for job in status.user_jobs or []]
+    """Count running, independently pending, and dependency-held jobs."""
+    jobs = status.user_jobs or []
+    states = [str(job.get("state", "")).upper() for job in jobs]
     return {
         "running": sum(state == "RUNNING" for state in states),
-        "pending": sum(state in _PENDING_JOB_STATES for state in states),
+        "pending": sum(state in _PENDING_JOB_STATES and not has_failed_dependency(job)
+                       and not waits_for_dependency(job)
+                       for state, job in zip(states, jobs)),
+        "depending": sum(state in _PENDING_JOB_STATES and not has_failed_dependency(job)
+                         and waits_for_dependency(job)
+                         for state, job in zip(states, jobs)),
     }
+
+
+def active_gpu_hours(status: ClusterStatus) -> dict[str, float | None]:
+    """Estimate remaining running and requested queued GPU hours by state.
+
+    Unknown GPU counts or time limits make that group's estimate unavailable;
+    reporting a partial sum would understate the requested resources.
+    """
+    groups: dict[str, list[dict[str, object]]] = {"running": [], "pending": [], "depending": []}
+    for job in status.user_jobs or []:
+        state = str(job.get("state", "")).upper()
+        if state == "RUNNING":
+            groups["running"].append(job)
+        elif state in _PENDING_JOB_STATES and not has_failed_dependency(job):
+            groups["depending" if waits_for_dependency(job) else "pending"].append(job)
+    accounting_totals = {
+        str(record.get("job_id")): int(record["gpus"])
+        for record in (status.accounting.records if status.accounting else [])
+        if int(record.get("gpus") or 0) > 0 and str(record.get("state", "")).upper() == "RUNNING"
+    }
+    result: dict[str, float | None] = {}
+    for group, jobs in groups.items():
+        hours = 0.0
+        for job in jobs:
+            gpu_per_node = job.get("gpus")
+            nodes = job.get("node_count")
+            seconds = job.get("time_left_seconds" if group == "running" else "time_limit_seconds")
+            allocated_total = accounting_totals.get(str(job.get("id"))) if group == "running" else None
+            if ((gpu_per_node is None or nodes is None) and allocated_total is None) or seconds is None:
+                hours = None
+                break
+            gpu_total = allocated_total if allocated_total is not None else max(0, int(gpu_per_node)) * max(1, int(nodes))
+            hours += gpu_total * max(0, int(seconds)) / 3600
+        result[group] = None if hours is None else round(hours, 2)
+    return result
 
 
 def _partitions(node: dict[str, object]) -> list[str]:
@@ -337,6 +379,7 @@ def build_snapshot(
                 "wait_estimates_updated_at": status.wait_estimates_updated_at,
                 "scheduling": status.scheduling or {},
                 "user_jobs": active_job_counts(status),
+                "user_gpu_hours": active_gpu_hours(status),
                 "fair_share": status.fair_share,
                 "fair_share_updated_at": status.fair_share_updated_at,
                 "resources": _cluster_resources(status),

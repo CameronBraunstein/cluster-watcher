@@ -34,12 +34,26 @@ function localTime(value, withSeconds = false) {
   return `${dateFormat.replace(/YYYY|YY|MM|DD/g, (token) => parts[token])} ${clock}`;
 }
 
-/** Build compact freshness text displayed directly below a sidebar view title. */
+/** Put the local clock before day and month, respecting the configured order. */
+function cardTime(value) {
+  if (!value) return 'Unavailable';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'Unavailable';
+  const pad = (number) => String(number).padStart(2, '0');
+  const clock = `${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+  const day = pad(parsed.getDate());
+  const month = pad(parsed.getMonth() + 1);
+  const separator = dateFormat.match(/[./-]/)?.[0] || ' ';
+  const monthFirst = dateFormat.indexOf('MM') < dateFormat.indexOf('DD');
+  return `${clock} ${monthFirst ? `${month}${separator}${day}` : `${day}${separator}${month}`}`;
+}
+
+/** Build compact freshness text for the last line of a sidebar view. */
 function viewFreshness(updatedAt) {
   return updatedAt ? `Last update: ${localTime(updatedAt, true)}` : '';
 }
 
-/** Render the latest data-update time beneath a view's native heading. */
+/** Render the latest data-update time after the view content. */
 function freshnessView(updatedAt) {
   const text = viewFreshness(updatedAt);
   return text ? `<p class="view-freshness">${escapeHtml(text)}</p>` : '';
@@ -285,15 +299,20 @@ function runningLimitRow(job, asOf) {
   const spec = progressSpec(job, asOf);
   if (spec.group !== 'RUNNING' || !spec.limit) return '';
   const startedAt = spec.start ?? spec.asOf - spec.elapsed * 1000;
-  return `<dt>Limit</dt><dd>${escapeHtml(localTime(new Date(startedAt + spec.limit * 1000).toISOString()))}</dd>`;
+  return timeRow('Limit', new Date(startedAt + spec.limit * 1000).toISOString());
+}
+
+/** Render a lifecycle event on one line with its clock before its date. */
+function timeRow(label, value) {
+  return `<div class="time-row"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(cardTime(value))}</dd></div>`;
 }
 
 /** Render only lifecycle rows that are meaningful for the job's current state. */
 function lifecycleRows(job, asOf) {
   const group = jobGroup(job);
-  const rows = [`<dt>Submitted</dt><dd>${escapeHtml(localTime(job.submit_at || job.submit_time))}</dd>`];
-  if (!isQueuedGroup(group)) rows.push(`<dt>Launched</dt><dd>${escapeHtml(lifecycle(job, 'launched'))}</dd>`);
-  if (group !== 'RUNNING' && !isQueuedGroup(group)) rows.push(`<dt>Ended</dt><dd>${escapeHtml(lifecycle(job, 'ended'))}</dd>`);
+  const rows = [timeRow('Submitted', job.submit_at || job.submit_time)];
+  if (!isQueuedGroup(group)) rows.push(timeRow('Launched', job.start_at || job.start_time));
+  if (group !== 'RUNNING' && !isQueuedGroup(group)) rows.push(timeRow('Ended', job.end_at));
   const limit = runningLimitRow(job, asOf);
   if (limit) rows.push(limit);
   return rows.join('');
@@ -311,7 +330,10 @@ function document(title, body, freshness = {}) {
 body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}.view-freshness{margin:0 0 7px;color:var(--vscode-descriptionForeground);font-size:.72em;white-space:nowrap}.meta,.muted{color:var(--vscode-descriptionForeground);font-size:.82em}.meta{margin:5px 0 9px}.job-group{margin:9px 0}.cluster-group{margin:4px 0}.job-group>summary,.cluster-group>summary{cursor:pointer;font-weight:600;font-size:11px;text-transform:none}.cluster-group>summary{margin-bottom:3px;min-width:0}.cluster-summary{box-sizing:border-box;display:inline-flex;flex-direction:column;gap:2px;width:calc(100% - 16px);min-width:0;vertical-align:top}.cluster-summary-main{display:flex;align-items:center;gap:7px;min-width:0}.cluster-summary-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cluster-job-track{display:flex;flex:1 1 70px;max-width:140px;min-width:40px;height:6px;margin-left:auto;overflow:hidden;border-radius:4px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent);cursor:help}.cluster-job-running,.cluster-job-pending{display:block;height:100%}.cluster-job-running{background:var(--vscode-progressBar-background)}.cluster-job-pending{background:var(--vscode-editorError-foreground)}.card{border:1px solid var(--vscode-panel-border);border-radius:0;margin:3px 0;background:var(--vscode-sideBar-background);min-width:0}.card>summary{position:relative;padding:4px 5px;cursor:pointer;list-style:none;min-width:0}.card>summary::-webkit-details-marker{display:none}.card[open]>summary{border-bottom:1px solid var(--vscode-panel-border)}.card-summary-title[data-full-name]::after{content:attr(data-full-name);position:absolute;z-index:10;left:0;top:calc(100% + 2px);max-width:calc(100% - 14px);padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:normal;overflow-wrap:anywhere;visibility:hidden;opacity:0;pointer-events:none}.card:not([open]) .card-summary-title[data-full-name]:hover::after{visibility:visible;opacity:1}.card-summary-title{position:relative;display:flex;min-width:0}.card-summary-progress{display:flex;align-items:center;gap:5px;min-width:0}.card-summary-progress>:not(.job-id){flex:1 1 auto;min-width:0}.card-summary-progress>.job-id{flex:0 0 auto;font-size:.72em}.card:not([open]) .card-summary-progress>.job-id{display:none}.job-progress{display:flex;flex-wrap:nowrap;align-items:center;column-gap:4px;min-width:0;max-width:100%}.job-progress>.progress{flex:1 1 auto;min-width:20px}.progress-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72em}.progress-label:empty{display:none}.card-body{padding:0 8px 8px;min-width:0}.card[open]>.card-body{padding-top:7px}@keyframes card-layout-flash{0%{border-color:var(--vscode-focusBorder);box-shadow:0 0 0 1px var(--vscode-focusBorder)}100%{border-color:var(--vscode-panel-border);box-shadow:none}}.card.layout-flash{animation:card-layout-flash .9s ease-out both}.row{display:flex;justify-content:space-between;gap:8px}.name{font-weight:600;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}.badge{font-size:.72em;padding:1px 5px;border-radius:8px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground)}.job-id{font-family:var(--vscode-editor-font-family);white-space:nowrap;cursor:copy;border-radius:0}.card-meta{min-width:0;white-space:normal;overflow-wrap:anywhere}.job-id:hover{outline:1px solid var(--vscode-focusBorder)}.job-id.copied{background:var(--vscode-testing-iconPassed)}.job-id.ending{background:var(--vscode-editorError-foreground)}.dep-link{color:var(--vscode-textLink-foreground);text-decoration:none;font-family:var(--vscode-editor-font-family)}.dep-link:hover{text-decoration:underline}.card.flash{outline:2px solid var(--vscode-focusBorder)}.button.danger{background:var(--vscode-inputValidation-errorBackground,var(--vscode-editorError-foreground));color:var(--vscode-button-foreground)}.progress,.availability{height:6px;border-radius:4px;overflow:hidden}.progress{display:block;margin:6px 0 3px;background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.progress-fill,.available,.unavailable{display:block;height:100%}.running{background:var(--vscode-progressBar-background)}.pending,.failed,.unavailable{background:var(--vscode-editorError-foreground)}.completed{background:var(--vscode-testing-iconPassed)}.cancelled,.other{background:var(--vscode-descriptionForeground)}.availability-cell{display:flex;align-items:center;gap:2px;white-space:nowrap}.availability-cell>.availability{display:flex;flex:0 0 34px;margin:0;cursor:help}.availability-count{font-variant-numeric:tabular-nums;white-space:nowrap}.available{background:var(--vscode-testing-iconPassed)}.fast-tooltip{position:fixed;z-index:100;display:none;box-sizing:border-box;width:max-content;max-width:min(220px,calc(100vw - 8px));overflow-wrap:anywhere;padding:3px 5px;border:1px solid var(--vscode-widget-border,var(--vscode-panel-border));outline:1px solid #fff;border-radius:2px;background:var(--vscode-editorHoverWidget-background,var(--vscode-sideBar-background));color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground));font-size:11px;font-weight:400;line-height:1.25;white-space:pre-line;pointer-events:none}.times{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 4px;margin-top:6px;font-size:.72em;min-width:0}.times dt{color:var(--vscode-descriptionForeground);white-space:nowrap}.times dd{margin:0;min-width:0;white-space:normal;text-align:right}.times dd.dependency-value{overflow-wrap:anywhere}.actions{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-top:8px;min-width:0}.actions>.end-job{margin-left:auto}.actions>.compact-action{box-sizing:border-box;flex:0 0 auto;padding:2px 3px;font-size:.72em;line-height:1.4;white-space:nowrap}.action-icon{display:block;width:11px;height:11px}.button{display:inline-block;padding:4px 7px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);text-decoration:none;border-radius:2px}.button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}.error{color:var(--vscode-errorForeground);white-space:pre-wrap}.aggregate{opacity:.78}.welcome p{margin:8px 0}.command-line{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px;background:var(--vscode-textCodeBlock-background);font-family:var(--vscode-editor-font-family);font-size:.85em}.welcome-detail{margin-top:12px}.welcome-detail>summary{cursor:pointer}
 .card-summary-progress>.summary-archive-action{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;padding:2px 3px;line-height:1.4}
 .cluster-job-running{background:#2563eb}.cluster-job-pending{background:#dc2626}.cluster-job-depending{display:block;height:100%;background:#6b1026}
-.cluster-job-track{height:10px}.cluster-job-track>button{display:block;height:100%;min-width:0;margin:0;padding:0;border:0;cursor:pointer}.cluster-job-track>button:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:-2px}
+.cluster-job-track>button{display:block;height:100%;min-width:0;margin:0;padding:0;border:0;cursor:pointer}.cluster-job-track>button:hover,.cluster-job-track>button:focus-visible{box-shadow:inset 0 0 0 1px #fff}
+.job-partition-link,.job-cluster-link{border:0;padding:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;cursor:pointer}.job-partition-link:hover,.job-cluster-link:hover{text-decoration:underline}.job-gpu-count{cursor:help}
+.time-row{grid-column:1/-1;display:flex;justify-content:space-between;gap:4px;min-width:0;white-space:nowrap}.time-row dt{flex:0 0 auto}.time-row dd{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.view-freshness{margin:8px 0 0}
 .card-summary-title[data-full-name]::after{outline:1px solid #fff}
 .card[open] .name{white-space:normal;overflow-wrap:anywhere}
 .progress-message{display:block;max-width:100%;font-size:.72em;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
@@ -327,7 +349,7 @@ button.button{border:0;font:inherit;cursor:pointer}
 .partition-fair-share{display:flex;align-items:flex-start;gap:0;margin-top:5px;font-size:.72em}.fair-share-title{box-sizing:border-box;flex:0 0 56px;width:56px;padding-right:2px;color:var(--vscode-descriptionForeground);white-space:nowrap}.fair-share-bars{display:grid;flex:1 1 auto;min-width:0;gap:4px;padding-top:3px}.fair-share-row{min-width:0}.fair-share-track{box-sizing:border-box;position:relative;display:block;width:100%;height:6px;overflow:visible;border-radius:4px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed))}.fair-share-marker{position:absolute;top:-3px;width:2px;height:12px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background);cursor:help}.fair-share-marker::before{content:'';position:absolute;inset:-2px -3px}.fair-share-marker:hover{outline:1px solid var(--vscode-focusBorder)}.fair-share-track.unavailable{background:color-mix(in srgb,var(--vscode-foreground) 10%,transparent)}
 .cluster-group+.cluster-group{border-top:1px solid color-mix(in srgb,var(--vscode-foreground) 35%,transparent);padding-top:4px}
 .sessions-dialog{box-sizing:border-box;width:calc(100vw - 16px);max-width:none;inset:50% auto auto 50%;transform:translate(-50%,-50%);margin:0;height:fit-content;min-height:0;max-height:calc(100vh - 8px);overflow:auto;padding:4px 8px;border:1px solid var(--vscode-panel-border);border-left:6px solid #000;border-right:6px solid #000;border-radius:6px;background:var(--vscode-editorWidget-background,var(--vscode-sideBar-background));color:var(--vscode-descriptionForeground);font-size:.82em;box-shadow:0 8px 28px #0008}html:has(.sessions-dialog[open]){overflow:hidden}.sessions-dialog::backdrop{background:#0009}.sessions-dialog-header{display:flex;align-items:center;gap:8px;margin-bottom:4px}.sessions-dialog h2{margin:0;font-size:1em}.sessions-dialog-close{padding:0 2px;border:0;background:none;color:inherit;font:inherit;font-size:1.6em;cursor:pointer}.sessions-dialog-text{margin:0;padding:6px 0;border-top:1px solid color-mix(in srgb,var(--vscode-foreground) 35%,transparent);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-all;user-select:text;font:inherit;line-height:1.5}.sessions-dialog-text:last-of-type{padding-bottom:0}
-</style></head><body>${freshnessView(freshness.updatedAt)}${body}<script nonce="${nonce}">
+</style></head><body>${body}${freshnessView(freshness.updatedAt)}<script nonce="${nonce}">
 (() => {
   const api = acquireVsCodeApi();
   const savedViewport = api.getState() || {};
@@ -460,13 +482,29 @@ button.button{border:0;font:inherit;cursor:pointer}
   // A not-modified check still prompts an immediate local progress update.
   window.addEventListener('message', (event) => {
     if (event.data?.type === 'checked') tick();
+    if (event.data?.type === 'jumpPartition') {
+      const { cluster, partition } = event.data;
+      const group = [...document.querySelectorAll('details.cluster-group[data-disclosure-key]')]
+        .find((details) => details.dataset.disclosureKey === 'cluster:' + cluster);
+      if (!group) { api.postMessage({ type: 'missingPartition', cluster, partition }); return; }
+      if (!partition) { group.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      if (!group.open) { group.open = true; remember(group); }
+      const card = group && [...group.querySelectorAll('.partition-card[data-partition]')]
+        .find((item) => item.dataset.partition === partition);
+      if (!card) { api.postMessage({ type: 'missingPartition', cluster, partition }); return; }
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     if (event.data?.type !== 'jumpGroup') return;
-    const group = event.data.group;
+    const { group, cluster } = event.data;
     const target = [...document.querySelectorAll('details.job-group[data-disclosure-key]')]
       .find((details) => details.dataset.disclosureKey === 'group:active:' + group);
-    if (!target) { api.postMessage({ type: 'missingGroup', group }); return; }
+    if (!target) { api.postMessage({ type: 'missingGroup', group, cluster }); return; }
+    const clusterCard = [...target.querySelectorAll('details.card[data-job-ref]')]
+      .find((card) => card.dataset.jobRef.startsWith(cluster + '/'));
+    if (!clusterCard) { api.postMessage({ type: 'missingGroup', group, cluster }); return; }
     if (!target.open) { target.open = true; remember(target); }
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    clusterCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   document.addEventListener('click', (event) => {
     const button = event.target.closest('[data-command]');
@@ -724,7 +762,16 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
   const name = String(job.name || identifier);
   const hoverText = [job.cluster, identifier, name].filter(Boolean).join(' ');
   const nodes = Number(job.node_count) || (job.nodes || []).length;
-  const resources = `${nodes} node · ${Number(job.gpus) || 0} GPU · ${Number(job.cpus) || 0} CPU`;
+  const totalGpus = Number(job.gpu_total ?? (stateGroup(job.state) === 'RUNNING' || stateGroup(job.state) === 'PENDING'
+    ? (Number(job.gpus) || 0) * Math.max(1, nodes) : job.gpus)) || 0;
+  const modelEntries = Array.isArray(job.gpu_models) ? job.gpu_models : [];
+  const device = job.accelerator_type === 'apu' ? 'APU' : job.accelerator_type === 'mixed' ? 'GPU/APU' : 'GPU';
+  const modelsKnown = totalGpus > 0 && modelEntries.length && modelEntries.every((entry) => Number(entry.count) > 0)
+    && modelEntries.reduce((sum, entry) => sum + Number(entry.count), 0) === totalGpus;
+  const models = modelsKnown ? modelEntries.map((entry) => `${entry.name}${modelEntries.length > 1 ? `: ${entry.count}` : ''}`).join('\n')
+    : totalGpus ? `${device} model unavailable` : `No ${device}s requested`;
+  const gpuLabel = `<span class="job-gpu-count" data-fast-tooltip="${escapeHtml(models)}" aria-label="${escapeHtml(`${totalGpus} ${device}; ${models}`)}">${totalGpus} ${device}</span>`;
+  const resources = `${nodes} node · ${gpuLabel} · ${Number(job.cpus) || 0} CPU`;
   const archiveCommand = archived ? 'clusterWatcher.restoreJob' : 'clusterWatcher.archiveJob';
   const key = jobKey(job);
   const quickArchive = !archived && !['RUNNING', 'PENDING', 'DEPENDING'].includes(jobGroup(job));
@@ -744,14 +791,19 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
     actions.push(`<a class="button danger compact-action end-job" role="button" ${commandAttributes('clusterWatcher.cancelJob', [job.cluster, identifier, job.name || identifier])} title="End job" aria-label="End job">End</a>`);
   }
   const disclosureKey = `card:${archived ? 'archive' : 'active'}:${key}`;
-  const metadata = `${job.cluster} / ${job.partition || 'no partition'} · ${resources}`;
+  const partition = String(job.partition || '');
+  const partitionLabel = partition
+    ? `<button class="job-partition-link" ${commandButtonAttributes('clusterWatcher.showPartition', [job.cluster, partition])} aria-label="Show ${escapeHtml(partition)} in Cluster Status">${escapeHtml(partition)}</button>`
+    : 'no partition';
+  const clusterLabel = `<button class="job-cluster-link" ${commandButtonAttributes('clusterWatcher.showCluster', [job.cluster])} aria-label="Show ${escapeHtml(job.cluster)} in Cluster Status">${escapeHtml(job.cluster)}</button>`;
+  const metadata = `${clusterLabel} / ${partitionLabel} · ${resources}`;
   const priority = !archived && jobGroup(job) === 'PENDING' ? jobPriorityGauge(job, priorityJobs) : '';
   const noEstimatePriority = priority && progressSpec(job, asOf).expected == null
     && pendingExplanation(job) === 'no estimate available'
     ? jobPriorityGauge(job, priorityJobs, true) : '';
   const expandedPriority = priority;
   const idBadge = `<span class="badge job-id${ending ? ' ending' : ''}" role="button" tabindex="0" data-copy="${escapeHtml(identifier)}" title="${escapeHtml(identifier)}${ending ? ' · ending' : ''} — click to copy">${escapeHtml(identifier)}</span>`;
-  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary><span class="card-summary-title" data-full-name="${escapeHtml(hoverText)}"><span class="name">${escapeHtml(name)}</span></span><span class="card-summary-progress">${quickArchive ? archiveAction : ''}${jobProgress(job, asOf, Date.now(), noEstimatePriority)}${idBadge}</span></summary><div class="card-body"><div class="muted card-meta" title="${escapeHtml(metadata)}">${escapeHtml(metadata)}</div>${expandedPriority}<dl class="times">${lifecycleRows(job, asOf)}${dependencyLinks(job, jobs)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
+  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary><span class="card-summary-title" data-full-name="${escapeHtml(hoverText)}"><span class="name">${escapeHtml(name)}</span></span><span class="card-summary-progress">${quickArchive ? archiveAction : ''}${jobProgress(job, asOf, Date.now(), noEstimatePriority)}${idBadge}</span></summary><div class="card-body"><div class="muted card-meta">${metadata}</div>${expandedPriority}<dl class="times">${lifecycleRows(job, asOf)}${dependencyLinks(job, jobs)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
 }
 
 /**
@@ -761,11 +813,18 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
  */
 function renderJobs(payload, disclosures = {}, cancelling = new Set(), freshness = {}) {
   const asOf = Date.parse(payload.generated_at || '') || Date.now();
+  const byCluster = new Set(['RUNNING', 'PENDING', 'DEPENDING']);
   const ranks = new Map(['RUNNING', 'PENDING', 'DEPENDING', 'FAILED_DEPENDENCY', 'COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED', 'OTHER'].map((name, index) => [name, index]));
   const jobs = [...(payload.jobs || [])].sort((left, right) => {
-    const groupDifference = ranks.get(jobGroup(left)) - ranks.get(jobGroup(right));
+    const leftGroup = jobGroup(left);
+    const groupDifference = ranks.get(leftGroup) - ranks.get(jobGroup(right));
     if (groupDifference) return groupDifference;
-    return String(right.submit_at || right.submit_time || '').localeCompare(String(left.submit_at || left.submit_time || ''));
+    if (byCluster.has(leftGroup)) {
+      const clusterDifference = String(left.cluster || '').localeCompare(String(right.cluster || ''), undefined, { sensitivity: 'base', numeric: true });
+      if (clusterDifference) return clusterDifference;
+    }
+    return String(right.submit_at || right.submit_time || '').localeCompare(String(left.submit_at || left.submit_time || ''))
+      || jobKey(left).localeCompare(jobKey(right));
   });
   const labels = { RUNNING: 'Running', PENDING: 'Pending', DEPENDING: 'Depending', FAILED_DEPENDENCY: 'Failed Dependency', COMPLETED: 'Completed', FAILED_EARLY: 'Failed (Early)', FAILED_TIMEOUT: 'Failed (Timeout)', CANCELLED: 'Cancelled', OTHER: 'Other' };
   const archived = payload.archived_jobs || [];
@@ -773,7 +832,10 @@ function renderJobs(payload, disclosures = {}, cancelling = new Set(), freshness
   const rows = [];
   for (const group of ranks.keys()) {
     const grouped = jobs.filter((job) => jobGroup(job) === group);
-    if (grouped.length) rows.push(`<details class="job-group" data-disclosure-key="group:active:${group}"${openAttribute(disclosures, `group:active:${group}`, true)}><summary>${labels[group]} (${grouped.length})</summary>${grouped.map((job) => jobCard(job, false, disclosures, cancelling, asOf, knownJobs, jobs)).join('')}</details>`);
+    if (grouped.length) {
+      const cards = grouped.map((job) => jobCard(job, false, disclosures, cancelling, asOf, knownJobs, jobs)).join('');
+      rows.push(`<details class="job-group" data-disclosure-key="group:active:${group}"${openAttribute(disclosures, `group:active:${group}`, true)}><summary>${labels[group]} (${grouped.length})</summary>${cards}</details>`);
+    }
   }
   rows.push(`<details class="job-group archive" data-disclosure-key="group:archive"${openAttribute(disclosures, 'group:archive', false)}><summary>Archive (${archived.length})</summary>${archived.length ? archived.map((job) => jobCard(job, true, disclosures, cancelling, asOf, knownJobs)).join('') : '<p class="muted">No archived jobs.</p>'}</details>`);
   if (!jobs.length && !archived.length) rows.unshift('<p>No jobs found in the last 24 hours.</p>');
@@ -963,7 +1025,7 @@ function partitionCard(partition, pending, asOf, thresholds, shareError = null) 
   const idleGpus = Math.min(gpuTotal, Math.max(0, Number(partition.gpus?.schedulable_idle) || 0));
   const nodeCounts = nodeAvailabilityCounts(partition);
   const countWidth = Math.max(`${idleGpus}/${gpuTotal} Free`.length, `${nodeCounts.idle}/${nodeCounts.total} Free`.length);
-  return `<article class="card partition-card${partition.aggregate ? ' aggregate' : ''}" style="--availability-count-width:${countWidth}ch"><div class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${launchability}</div><div class="muted partition-specs">${partitionSpecs(partition, profile)}</div>${partitionFairShare(partition.fair_share, shareError)}<div class="partition-availability"><span class="partition-availability-label">GPUs:</span>${availabilityBar(idleGpus, gpuTotal, gpuAvailabilityTitle(partition))}</div><div class="partition-availability"><span class="partition-availability-label">Nodes:</span>${availabilityBar(nodeCounts.idle, nodeCounts.total, availabilityTitle(partition))}</div></article>`;
+  return `<article class="card partition-card${partition.aggregate ? ' aggregate' : ''}" data-partition="${escapeHtml(partition.name)}" style="--availability-count-width:${countWidth}ch"><div class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${launchability}</div><div class="muted partition-specs">${partitionSpecs(partition, profile)}</div>${partitionFairShare(partition.fair_share, shareError)}<div class="partition-availability"><span class="partition-availability-label">GPUs:</span>${availabilityBar(idleGpus, gpuTotal, gpuAvailabilityTitle(partition))}</div><div class="partition-availability"><span class="partition-availability-label">Nodes:</span>${availabilityBar(nodeCounts.idle, nodeCounts.total, availabilityTitle(partition))}</div></article>`;
 }
 
 /** Return whether a Slurm association has a displayable fair-share factor. */
@@ -1001,7 +1063,7 @@ function partitionFairShare(entries, error = null) {
 }
 
 /** Render clickable running, pending, and dependency-held shares for a cluster. */
-function clusterJobRatio(counts = {}) {
+function clusterJobRatio(counts = {}, cluster = '', gpuHours = {}) {
   const count = (value) => Number.isFinite(Number(value)) ? Math.max(0, Math.floor(Number(value))) : 0;
   const running = count(counts.running);
   const pending = count(counts.pending);
@@ -1015,10 +1077,14 @@ function clusterJobRatio(counts = {}) {
     ['RUNNING', running, runningPercent],
     ['PENDING', pending, pendingPercent],
     ['DEPENDING', depending, dependingPercent],
-  ].filter(([, number]) => number > 0).map(([group, number, percent]) => (
-    `<button class="cluster-job-${group.toLowerCase()}" style="width:${percent}%" ${commandButtonAttributes('clusterWatcher.showJobsGroup', [group])} aria-label="Show ${number} ${group.toLowerCase()} job${number === 1 ? '' : 's'} in My Jobs"></button>`
-  )).join('');
-  return `<span class="cluster-job-track" role="group" aria-label="${escapeHtml(label)}" data-fast-tooltip="${escapeHtml(label)}">${segments}</span>`;
+  ].filter(([, number]) => number > 0).map(([group, number, percent]) => {
+    const hours = gpuHours[group.toLowerCase()];
+    const estimate = hours == null || !Number.isFinite(Number(hours)) ? 'GPU-hours unavailable'
+      : `${Number(hours).toLocaleString(undefined, { maximumFractionDigits: 1 })} GPU-hours ${group === 'RUNNING' ? 'remaining' : 'requested'}`;
+    const tooltip = `${number} ${group.toLowerCase()} job${number === 1 ? '' : 's'}\n${estimate}`;
+    return `<button class="cluster-job-${group.toLowerCase()}" style="width:${percent}%" ${commandButtonAttributes('clusterWatcher.showJobsGroup', [group, cluster])} aria-label="Show ${number} ${group.toLowerCase()} job${number === 1 ? '' : 's'} on ${escapeHtml(cluster)} in My Jobs" data-fast-tooltip="${escapeHtml(tooltip)}"></button>`;
+  }).join('');
+  return `<span class="cluster-job-track" role="group" aria-label="${escapeHtml(label)}">${segments}</span>`;
 }
 
 /** Return whether an interactive machine currently lacks its reusable SSH session. */
@@ -1044,7 +1110,7 @@ function clusterLoginActions(cluster, session) {
 function clusterSummary(cluster, session) {
   const clusterName = escapeHtml(cluster.name);
   const loggedOut = clusterLoggedOut(cluster, session);
-  const status = loggedOut ? clusterLoginActions(cluster, session) : clusterJobRatio(cluster.user_jobs);
+  const status = loggedOut ? clusterLoginActions(cluster, session) : clusterJobRatio(cluster.user_jobs, cluster.name, cluster.user_gpu_hours);
   return `<span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">${clusterName}</span>${status}</span></span>`;
 }
 

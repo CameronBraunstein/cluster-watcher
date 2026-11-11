@@ -471,14 +471,25 @@ detach with **Ctrl+B**, then **D**. VS Code will attach to it when opened.
 
 #### My Jobs
 
-Jobs are grouped into **Running**, **Pending**, **Failed Dependency**,
-**Completed**, **Failed (Early)**, **Failed (Timeout)**, **Cancelled**, and a
-collapsed **Archive**. Each job is a card:
+Jobs are grouped into **Running**, **Pending**, **Depending**,
+**Failed Dependency**, **Completed**, **Failed (Early)**, **Failed (Timeout)**,
+**Cancelled**, and a
+collapsed **Archive**. **Pending** contains jobs without a dependency;
+**Depending** contains queued jobs waiting for another job. An impossible
+dependency remains in **Failed Dependency**. The **Running**, **Pending**, and
+**Depending** sections order jobs by cluster name, then show the newest
+submission first within each cluster. Job names do not determine this order.
+The lists omit separate cluster labels; expand a card to see its cluster and
+Slurm partition. If that is an aggregate partition, it remains the job's
+partition after launch; its allocated nodes may also belong to narrower
+partitions, so there is no unique narrower partition to report.
+Each job is a card:
 
 - **Collapsed:** the job name and a progress bar with run/allotted time or
   `<duration> estimated wait`. Long names end in an ellipsis; hover the
   **title** for `<cluster> <job ID> <full name>`. In every group except
-  **Running**, **Pending**, and **Archive**, an archive-box icon appears
+  **Running**, **Pending**, **Depending**, and **Archive**, an archive-box icon
+  appears
   immediately left of the progress bar, so you can archive a job without
   expanding its card.
 
@@ -488,8 +499,8 @@ collapsed **Archive**. Each job is a card:
   (click it to copy), followed by cluster, partition, and resources;
   submit/launch/limit/end times; any dependencies; and actions: **.err**,
   **.out**, **script**, plus **End** (with confirmation) for running and
-  pending jobs. **Running** and **Pending** retain Archive among expanded
-  actions; archived jobs have **Restore** there.
+  pending or depending jobs. **Running**, **Pending**, and **Depending** retain
+  Archive among expanded actions; archived jobs have **Restore** there.
 
 Click a dependency's job ID to jump to that card. Logs open as read-only
 documents holding the newest 2,000 lines; **Load 2,000 Older Lines** in the
@@ -581,9 +592,46 @@ all closed group members. Password/OTP requests appear as masked VS Code input
 boxes.
 
 Each cluster's always-visible summary line includes an active-job ratio bar:
-running jobs fill it in blue and pending jobs in red. Hover shows the exact
-counts, and the track stays empty when neither kind exists. The **configure
-clusters...** link at the end of Cluster Status opens the selected
+running jobs fill it in blue, independent pending jobs in red, and
+dependency-held jobs in dark maroon. Each segment's hover text shows its job
+count on the first line and estimated GPU-hours on the second, with no
+separator or approximation symbol. Running uses each job's GPU allocation times its
+remaining Slurm time limit; Pending and Depending use requested GPUs times the
+requested time limit. The estimate is unavailable when a job in that group
+lacks a GPU count or time limit. These are upper-limit resource estimates,
+not predictions of actual runtime or queue wait. GPU counts from live Slurm
+GRES requests are multiplied by the requested node count when an allocated
+GPU total is not available from accounting. The segment gains a
+white outline on hover. The bar matches the thin job progress bars
+and stays empty when no active jobs exist.
+
+In an expanded **My Jobs** card, the GPU/APU number is the total for the job.
+An APU profile makes the card say **APU** and provides its model name even
+when Slurm exposes only a generic GPU GRES count, as on Viper's MI300A nodes.
+Hover the count for the model, or a count for each model on a mixed-model job.
+Models come from typed Slurm GRES/TRES or the allocated nodes' inventory.
+An untyped request on a node with multiple GPU types, or a completed job whose
+untyped allocation spans different node models, cannot be resolved reliably
+and shows **GPU model unavailable** (or **APU model unavailable** for an APU).
+Click the cluster name to jump to its heading in **Cluster Status** without
+changing whether that cluster is expanded; click the partition name to jump to that
+partition's card. The metadata line has no general hover tooltip.
+Submitted, Launched, Ended, and Limit each occupy one compact line. The label
+has no colon; the local time and day/month sit against the card's right edge.
+The year is omitted here even when the configured date format includes one.
+Long dependency details may wrap onto additional lines.
+
+Click a colored segment to open **My Jobs** at that cluster's jobs in the
+matching **Running**, **Pending**, or **Depending** group. A collapsed group
+opens automatically. Archived jobs remain in **Archive** and are not shown
+in the active group.
+
+The VS Code status bar retains the active-job counts. Its hover text shows
+only the last refresh time and a link prompt for **My Jobs**. Both sidebar
+views show **Last update** on their final line, below **Archive** or
+**configure clusters...**.
+
+The **configure clusters...** link at the end of Cluster Status opens the selected
 `clusters.toml`; if it is missing, the extension offers the setup wizard. Each
 summary shows only the cluster name and job-ratio bar. Thin gray lines
 separate cluster groups. The active login node is available in the session dialog.
@@ -645,7 +693,7 @@ per-node arrays used by routing clients.
 | `clusterWatcher.autoStart` | `false` | Start the managed background service when VS Code opens (off so masked MFA prompts never appear unexpectedly). |
 | `clusterWatcher.configPath` | — | Use a configuration file other than the default. |
 | `clusterWatcher.notifications` | `all` | Notify when a job completes, fails, or is cancelled (`all`, `failures`, `off`). |
-| `clusterWatcher.statusBar` | `true` | Show `N running · M pending` (or **offline**) in the status bar. |
+| `clusterWatcher.statusBar` | `true` | Show `N running · M pending`, plus `· D depending` when needed (or **offline**), in the status bar. |
 | `clusterWatcher.dateFormat` | `DD.MM.YYYY` | Date tokens `YYYY`, `YY`, `MM`, `DD`; times are 24-hour local `HH:mm`. |
 | `clusterWatcher.executable` | — | Legacy fallback; choose executables with **Manage Backend Installation**. |
 
@@ -698,13 +746,16 @@ for this project and is dedicated under CC0-1.0; see
 `cluster-watcher serve` opens `http://127.0.0.1:8080/`. It shows:
 
 - **My jobs** (with `--jobs-api`): collapsible **Running**, **Pending**,
-  **Completed**, **Failed (Early)**, **Failed (Timeout)**, and **Cancelled**
-  groups covering the last 24 hours. Each card shows name, ID, progress, and a
+  **Depending**, **Failed Dependency**, **Completed**, **Failed (Early)**,
+  **Failed (Timeout)**, and **Cancelled** groups covering the last 24 hours.
+  Each card shows name, ID, progress, and a
   completion/start estimate; hover the title for the full name. Expand a card
   for location, state, resources, lifecycle times, and **Archive**, **Open
   .err**, **Open .out** (a bounded 100-line tail). Sort controls order cards by
   name, location, state, progress, resources, or time. Archives live in the
-  browser's local storage for this origin.
+  browser's local storage for this origin. The default web order uses state
+  and then cluster/job ID within each group. Use the **Sort** controls to
+  order by name, submission time, or another column.
 - **Cluster capacity:** nodes grouped under their partitions. Each node card
   shows GPUs as large cells above CPUs as small cells: green idle, red
   allocated, yellow unavailable. Nodes used by your running jobs are
@@ -750,11 +801,15 @@ WAIT N/A gpu-large [64 GPU]: Requested node configuration is not available
 WAIT N/A gpu-small [32 GPU]: Requested node configuration is not available
 ```
 
-`jobs` lists running, pending, completed, failed, and cancelled jobs from the
-last 24 hours, grouped under `### RUNNING ###`-style headings, with ID, name,
+`jobs` lists running, pending, depending, completed, failed, and cancelled
+jobs from the last 24 hours, grouped under `### RUNNING ###`-style headings,
+with ID, name,
 cluster, partition, resources, progress, and submit/launch/end times (local
-timezone). Running bars are blue (elapsed vs. limit); pending bars are red and
-advance toward Slurm's estimated start, or say why there is no estimate.
+timezone). **Pending** means no dependency is holding the job; **Depending**
+means the job is held by one; impossible dependencies use
+`### FAILED_DEPENDENCY ###`. Running bars are blue (elapsed vs. limit);
+pending bars are red and advance toward Slurm's estimated start, or say why
+there is no estimate.
 
 With an interval, both boards run full-screen like `top`: arrow keys, Page
 Up/Down, Home, and End scroll; `q` or `Ctrl-C` exits and restores your
@@ -1032,7 +1087,10 @@ partition and GRES labels are local to a cluster (an `a100` label never
 borrows another cluster's profile). Profiles store per-GPU VRAM and dense
 FP16/BF16 Tensor/Matrix throughput without sparsity. Aliases match GRES types,
 partition names, and node names, so generic partitions can be identified from
-node-name prefixes.
+node-name prefixes. Set `device_type = "apu"` for an APU profile; the default
+is `"gpu"`. Existing MI300A profiles and profiles with an exact `apu` alias
+are recognized as APUs even without this new field. The setup wizard asks for
+GPU or APU when creating a profile.
 
 Partitions are ranked by their best single GPU: VRAM, then throughput, then
 CPU threads. `*-all` partitions fully covered by specific partitions are
@@ -1113,7 +1171,8 @@ compatibility.
 Each cluster has its `name` and `host`, `reachable`,
 `resource_data_complete`, collection errors, unique cluster-wide resource
 totals, `wait_estimates_updated_at`, and every known partition. `user_jobs`
-contains current `running` and `pending` counts for compact status clients.
+contains current `running`, independent `pending`, and dependency-held
+`depending` counts for compact status clients.
 `scheduling`
 holds `scheduler_type`, `priority_type`, `priority_weight_partition`, and
 `priority_flags` when Slurm exposes them (otherwise it is empty). `error` means
@@ -1153,7 +1212,7 @@ are `null` and `error` explains why.
       "host": "slurm-submit.example",
       "reachable": true,
       "resource_data_complete": true,
-      "user_jobs": {"running": 2, "pending": 1},
+      "user_jobs": {"running": 2, "pending": 1, "depending": 0},
       "error": null,
       "resource_error": null,
       "wait_estimates_updated_at": "2026-09-22T09:59:00+00:00",
@@ -1214,6 +1273,10 @@ The response has `schema_version`, `generated_at`, the applied `since` and
 `jobs` array. Each job has `cluster`, `job_id`, `array_task_id`, `name`,
 normalized `state`, `exit_code`, `submit_at`, `start_at`, `end_at`,
 `elapsed_seconds`, `partition`, `nodes`, `expected_start_at`, and `reason`.
+`accelerator_type` is `gpu`, `apu`, or `mixed`; `gpu_models` lists resolved
+model names and counts. `gpu_total` gives the whole-job count for live jobs,
+while accounting's `gpus` count is already a whole-job allocation. A configured
+APU profile can supply a model when Slurm reports only generic GPU GRES.
 Active jobs also have Slurm's numeric `priority` (when available) and
 `dependency` (for example `afterok:1000100(unfulfilled)`, or `null`). Pending
 jobs additionally expose `global_priority_rank` and `global_priority_total`

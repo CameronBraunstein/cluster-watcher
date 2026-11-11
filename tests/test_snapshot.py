@@ -104,6 +104,58 @@ def request_handler(
 class SnapshotTests(TimedTestCase):
     """Verify stable API semantics separately from the dashboard payload."""
 
+    def test_snapshot_counts_dependency_waits_separately(self):
+        """A queued dependency does not inflate the ready pending count."""
+        status = example_status()
+        status.user_jobs = [
+            {"state": "RUNNING"},
+            {"state": "PENDING", "reason": "Priority"},
+            {"state": "PENDING", "dependency": "afterok:123(unfulfilled)"},
+            {"state": "CONFIGURING", "reason": "Dependency: afterok:124"},
+            {"state": "PENDING", "dependency": "(null)"},
+            {"state": "PENDING", "reason": "DependencyNeverSatisfied", "dependency": "afterok:125(failed)"},
+        ]
+        snapshot = build_snapshot([status], "2026-09-22T10:00:00+00:00", 15)
+        self.assertEqual(snapshot["clusters"][0]["user_jobs"],
+                         {"running": 1, "pending": 2, "depending": 2})
+
+    def test_snapshot_estimates_gpu_hours_by_queue_group(self):
+        """Running uses remaining walltime; queued jobs use requested walltime."""
+        status = example_status()
+        status.user_jobs = [
+            {"state": "RUNNING", "gpus": 2, "node_count": 2, "time_left_seconds": 5400},
+            {"state": "RUNNING", "gpus": 1, "node_count": 1, "time_left_seconds": 3600},
+            {"state": "PENDING", "gpus": 4, "node_count": 1, "time_limit_seconds": 7200},
+            {"state": "PENDING", "dependency": "afterok:1", "gpus": 2,
+             "node_count": 2, "time_limit_seconds": 1800},
+        ]
+        cluster = build_snapshot([status], "2026-09-22T10:00:00+00:00", 15)["clusters"][0]
+        self.assertEqual(cluster["user_gpu_hours"], {"running": 7.0, "pending": 8.0, "depending": 2.0})
+        status.user_jobs[1].pop("time_left_seconds")
+        cluster = build_snapshot([status], "2026-09-22T10:00:00+00:00", 15)["clusters"][0]
+        self.assertIsNone(cluster["user_gpu_hours"]["running"])
+
+    def test_running_gpu_hours_use_accounting_allocation_when_available(self):
+        """Allocated TRES wins over a live GRES request that may be per node."""
+        from clusterwatcher.models import AccountingSnapshot
+
+        status = example_status()
+        status.user_jobs = [{"id": "42", "state": "RUNNING", "gpus": 1,
+                             "node_count": 2, "time_left_seconds": 3600}]
+        status.accounting = AccountingSnapshot(
+            records=[{"job_id": "42", "state": "RUNNING", "gpus": 3}],
+            fingerprint="", since="", fetched_at="",
+        )
+        cluster = build_snapshot([status], "2026-09-22T10:00:00+00:00", 15)["clusters"][0]
+        self.assertEqual(cluster["user_gpu_hours"]["running"], 3.0)
+
+    def test_browser_groups_dependency_waits_after_pending(self):
+        """The browser shares the three-way queue grouping with the API."""
+        self.assertIn("'RUNNING', 'PENDING', 'DEPENDING', 'FAILED_DEPENDENCY'", PAGE)
+        self.assertIn("DEPENDING:'Depending'", PAGE)
+        self.assertIn("if (ACTIVE_JOB_STATES.has(state) && waitsForDependency(job))", PAGE)
+        self.assertIn(".job-progress.pending .job-progress-fill { background:#dc2626; }", PAGE)
+
     def test_disconnected_http_clients_do_not_emit_request_tracebacks(self):
         store = StatusStore([Machine("cluster_0", "slurm.example", "alice")], 5, False, 15)
 
@@ -139,7 +191,7 @@ class SnapshotTests(TimedTestCase):
         self.assertTrue(cluster["reachable"])
         self.assertTrue(cluster["resource_data_complete"])
         self.assertEqual(cluster["scheduling"]["scheduler_type"], "sched/backfill")
-        self.assertEqual(cluster["user_jobs"], {"running": 2, "pending": 2})
+        self.assertEqual(cluster["user_jobs"], {"running": 2, "pending": 2, "depending": 0})
         self.assertNotIn("username", cluster)
         self.assertEqual(cluster["resources"]["gpus"]["total"], 8)
         self.assertEqual(cluster["resources"]["gpus"]["schedulable_idle"], 3)

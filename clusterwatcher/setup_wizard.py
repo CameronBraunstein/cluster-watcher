@@ -28,6 +28,7 @@ HEADER = """\
 # by your normal OpenSSH configuration.
 # Add `hidden = true` to any machine entry to skip its login, polling, and display.
 # Optional `[[profile]]` entries below describe one GPU/APU model per cluster.
+# Set `device_type = "apu"` for an APU profile; GPU is the default.
 # VRAM and dense FP16/BF16 Tensor throughput are per device, not partition totals.
 """
 
@@ -63,6 +64,8 @@ def render_config(
         lines = ["[[profile]]"]
         for key in ("cluster", "name"):
             lines.append(f"{key} = {_toml_string(str(profile[key]))}")
+        if profile.get("device_type", "gpu") != "gpu":
+            lines.append(f"device_type = {_toml_string(str(profile['device_type']))}")
         aliases = profile["aliases"]
         lines.append(f"aliases = [{', '.join(_toml_string(alias) for alias in aliases)}]")
         lines.append(f"vram_gb = {profile['vram_gb']}")
@@ -131,6 +134,11 @@ def _ask_profile(prompt: Prompt, output: Output, cluster: str) -> dict[str, obje
     """Collect validated per-device GPU/APU specifications for one cluster."""
     name = _ask(prompt, "GPU/APU model name")
     while True:
+        device_type = _ask(prompt, "Device type (GPU/APU)", "GPU").lower()
+        if device_type in {"gpu", "apu"}:
+            break
+        output("Device type must be GPU or APU.")
+    while True:
         aliases = [alias.strip() for alias in _ask(prompt, "Slurm GRES, partition, or node-name aliases (comma-separated)").split(",")]
         if all(aliases):
             break
@@ -150,7 +158,7 @@ def _ask_profile(prompt: Prompt, output: Output, cluster: str) -> dict[str, obje
             break
         output("Throughput must be a positive finite number.")
     return {
-        "cluster": cluster, "name": name, "aliases": aliases,
+        "cluster": cluster, "name": name, "device_type": device_type, "aliases": aliases,
         "vram_gb": int(vram), "fp16_bf16_tensor_tflops": value,
     }
 

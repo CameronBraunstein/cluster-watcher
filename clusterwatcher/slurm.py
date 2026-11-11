@@ -227,6 +227,8 @@ def parse_jobs(output: str) -> list[dict[str, object]]:
             "node_count": int(node_count) if node_count.isdigit() else 0,
             "cpus": int(cpus) if cpus.isdigit() else 0,
             "gpus": gpu_count(gres),
+            # squeue %b describes GRES requested on each node.
+            "gpu_gres_per_node": gres,
             "start_time": utc_slurm_timestamp(start_time),
             "submit_time": utc_slurm_timestamp(submit_time),
             "dependency": dependency,
@@ -364,6 +366,7 @@ def parse_accounting_jobs(output: str) -> list[dict[str, object]]:
             "node_count": int(node_count) if node_count.isdigit() else 0,
             "cpus": int(cpus) if cpus.isdigit() else 0,
             "gpus": gpu_count(allocated_tres),
+            "gpu_models": gpu_types(allocated_tres),
             "expected_start_at": None,
             "reason": _optional_slurm_value(reason),
             "_stdout": _optional_slurm_value(stdout),

@@ -11,6 +11,7 @@ import threading
 import time
 from typing import Callable
 
+from .compute import profile_for
 from .job_scripts import fetch_batch_script
 from .models import ClusterStatus, Machine
 from .slurm import (
@@ -19,6 +20,7 @@ from .slurm import (
     collect_live_job_log_paths,
     job_array_task_id,
     normalize_job_state,
+    gpu_types,
 )
 from .ssh import run_remote
 
@@ -31,6 +33,33 @@ ACTIVE_JOB_STATES = {
 }
 _JOB_ID_PATTERN = re.compile(r"\d+(?:_\d+)?")
 _MISSING_VALUES = {"", "Unknown", "N/A", "None", "(null)", "NULL"}
+
+
+def waits_for_dependency(job: dict[str, object]) -> bool:
+    """Identify queued jobs held by a meaningful Slurm dependency expression.
+
+    Slurm can report the dependency in either its dedicated field or the
+    pending reason. A failed dependency is handled as a separate display group.
+    """
+    if has_failed_dependency(job):
+        return False
+    dependency = _present(job.get("dependency"))
+    reason = str(job.get("reason") or "").strip()
+    return bool(dependency or re.match(r"^Dependency(?:\s*:|$)", reason, re.IGNORECASE))
+
+
+def has_failed_dependency(job: dict[str, object]) -> bool:
+    """Return whether Slurm reports an unsatisfiable dependency constraint."""
+    reason = str(job.get("reason") or "").strip()
+    if re.search(r"dependency\s*never\s*satisfied", reason, re.IGNORECASE):
+        return True
+    expression = _present(job.get("dependency")) or ""
+    clauses = [part.strip() for part in re.split(r"[?,]", expression) if part.strip()]
+    if not clauses:
+        return False
+    failures = [bool(re.search(r"\((?:failed|invalid|never satisfied)\)$", clause, re.IGNORECASE))
+                for clause in clauses]
+    return all(failures) if "?" in expression else any(failures)
 
 
 class JobLogNotFound(RuntimeError):
@@ -118,6 +147,7 @@ def _active_record(cluster: str, job: dict[str, object]) -> dict[str, object]:
         "node_count": int(job.get("node_count") or 0),
         "cpus": int(job.get("cpus") or 0),
         "gpus": int(job.get("gpus") or 0),
+        "gpu_total": int(job.get("gpus") or 0) * max(1, int(job.get("node_count") or 0)),
         "time_limit": job.get("time_limit"),
         "time_limit_seconds": job.get("time_limit_seconds"),
         "time_left_seconds": job.get("time_left_seconds"),
@@ -128,6 +158,105 @@ def _active_record(cluster: str, job: dict[str, object]) -> dict[str, object]:
         "reason": reason,
         "dependency": dependency,
     }
+
+
+def _gpu_models_for_job(cluster: str, job: dict[str, object], nodes: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Resolve allocated GPU models only when the GRES or node type is unambiguous.
+
+    Slurm's live ``%b`` is per node. A multi-type node with an untyped
+    request cannot reveal which devices the scheduler assigned.
+    """
+    per_node = int(job.get("gpus") or 0)
+    if per_node <= 0:
+        return []
+    names = list(job.get("nodes") or [])
+    node_count = max(1, int(job.get("node_count") or len(names)))
+    typed = gpu_types(str(job.get("gpu_gres_per_node") or ""))
+    if typed and "generic" not in typed and sum(typed.values()) == per_node:
+        counts = {kind: count * node_count for kind, count in typed.items()}
+    elif names:
+        by_name = {str(node.get("name")): node for node in nodes}
+        counts: dict[str, int] = {}
+        for name in names:
+            node = by_name.get(str(name))
+            gpu = (node or {}).get("gpu") or {}
+            raw_types = gpu.get("types", {}) if isinstance(gpu, dict) else {}
+            if not isinstance(raw_types, dict) or len(raw_types) != 1:
+                return []
+            kind, capacity = next(iter(raw_types.items()))
+            if str(kind).casefold() == "generic":
+                return []
+            if int(capacity) < per_node:
+                return []
+            counts[str(kind)] = counts.get(str(kind), 0) + per_node
+    else:
+        return []
+    resolved: dict[str, int] = {}
+    for kind, count in counts.items():
+        profile = profile_for(cluster, [kind])
+        label = profile.name if profile else kind
+        resolved[label] = resolved.get(label, 0) + count
+    return [{"name": name, "count": count} for name, count in sorted(resolved.items())]
+
+
+def _accounting_gpu_models(cluster: str, record: dict[str, object], nodes: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Prefer typed allocated TRES; infer untyped totals only for one model."""
+    typed = {kind: count for kind, count in (record.get("gpu_models") or {}).items() if kind != "generic"}
+    total = int(record.get("gpus") or 0)
+    if typed and sum(typed.values()) == total:
+        resolved: dict[str, int] = {}
+        for kind, count in typed.items():
+            profile = profile_for(cluster, [kind])
+            label = profile.name if profile else kind
+            resolved[label] = resolved.get(label, 0) + count
+        return [{"name": name, "count": count} for name, count in sorted(resolved.items())]
+    allocated_nodes = list(record.get("nodes") or [])
+    if not allocated_nodes or total <= 0:
+        return []
+    by_name = {str(node.get("name")): node for node in nodes}
+    kinds: set[str] = set()
+    for name in allocated_nodes:
+        node = by_name.get(str(name))
+        gpu = (node or {}).get("gpu") or {}
+        raw_types = gpu.get("types", {}) if isinstance(gpu, dict) else {}
+        if not isinstance(raw_types, dict) or len(raw_types) != 1:
+            return []
+        if any(str(kind).casefold() == "generic" for kind in raw_types):
+            return []
+        kinds.update(str(kind) for kind in raw_types)
+    if len(kinds) != 1:
+        return []
+    kind = next(iter(kinds))
+    profile = profile_for(cluster, [kind])
+    return [{"name": profile.name if profile else kind, "count": total}]
+
+
+def _annotate_accelerator(cluster: str, record: dict[str, object]) -> None:
+    """Add a GPU/APU label and fill an APU model from its cluster profile.
+
+    Sites may account an APU as generic ``gres/gpu`` while omitting a device
+    type from node inventory. A matching, cluster-scoped APU profile is then
+    the only model evidence available. Other ambiguous allocations stay
+    unknown instead of inheriting a possibly wrong partition GPU profile.
+    """
+    total = int(record.get("gpu_total", record.get("gpus")) or 0)
+    models = list(record.get("gpu_models") or [])
+    partition = str(record.get("partition") or "")
+    partition_profile = profile_for(cluster, [partition]) if partition else None
+    if total > 0 and not models and partition_profile and partition_profile.device_type == "apu":
+        models = [{"name": partition_profile.name, "count": total}]
+        record["gpu_models"] = models
+    kinds = {
+        profile.device_type
+        for model in models
+        if (profile := profile_for(cluster, [str(model.get("name") or "")])) is not None
+    }
+    if len(kinds) == 1:
+        record["accelerator_type"] = next(iter(kinds))
+    elif len(kinds) > 1:
+        record["accelerator_type"] = "mixed"
+    else:
+        record["accelerator_type"] = partition_profile.device_type if partition_profile else "gpu"
 
 
 def _unknown_record(cluster: str, job_id: str, reason: str) -> dict[str, object]:
@@ -274,6 +403,8 @@ class JobService:
                 _active_record(name, job)
                 for job in (status.user_jobs if status and status.user_jobs else [])
             ]
+            for source, record in zip((status.user_jobs if status and status.user_jobs else []), active_records):
+                record["gpu_models"] = _gpu_models_for_job(name, source, status.nodes or [])
             active = {
                 str(record["job_id"]): record
                 for record in active_records
@@ -282,13 +413,19 @@ class JobService:
             merged: dict[str, dict[str, object]] = {}
             for record in accounting:
                 record["cluster"] = name
+                record["gpu_models"] = _accounting_gpu_models(name, record, (status.nodes or []) if status else [])
                 job_id = str(record["job_id"])
                 if _matches_requested(job_id, requested_ids):
                     merged[job_id] = record
                     if record.get("_stdout") or record.get("_stderr"):
                         log_records[(name, job_id)] = record.copy()
             for job_id, record in active.items():
-                private = {key: value for key, value in merged.get(job_id, {}).items() if key.startswith("_")}
+                accounting_record = merged.get(job_id, {})
+                private = {key: value for key, value in accounting_record.items() if key.startswith("_")}
+                if str(record["state"]) == "RUNNING" and int(accounting_record.get("gpus") or 0) > 0:
+                    record["gpu_total"] = int(accounting_record["gpus"])
+                    if accounting_record.get("gpu_models"):
+                        record["gpu_models"] = accounting_record["gpu_models"]
                 merged[job_id] = {**record, **private}
 
             if accounting_error and requested_ids:
@@ -297,6 +434,7 @@ class JobService:
                         merged[job_id] = _unknown_record(name, job_id, f"Accounting unavailable: {accounting_error}")
 
             for record in merged.values():
+                _annotate_accelerator(name, record)
                 is_active = str(record["state"]) in ACTIVE_JOB_STATES
                 if state_filter == "active" and not is_active:
                     continue

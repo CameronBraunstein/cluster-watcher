@@ -50,8 +50,8 @@ class SetupWizardTests(TimedTestCase):
         """The wizard should collect several profiles without a second file."""
         prompt = scripted(
             "gpu-site", "login.example", "alice", "", "", "n", "", "n",
-            "y", "NVIDIA H100", "h100, node-h", "bad", "80", "nan", "989.0",
-            "y", "NVIDIA A100", "a100", "40", "312", "n",
+            "y", "NVIDIA H100", "", "h100, node-h", "bad", "80", "nan", "989.0",
+            "y", "NVIDIA A100", "gpu", "a100", "40", "312", "n",
         )
         output: list[str] = []
 
@@ -63,6 +63,36 @@ class SetupWizardTests(TimedTestCase):
         configure_gpu_profiles(self.path)
         self.assertEqual(len(gpu_profiles()), 2)
         self.assertEqual(profile_for("gpu-site", ["node-h01"]).vram_gb, 80)
+
+    def test_setup_writes_an_explicit_apu_profile(self):
+        """The wizard preserves APU type in the single configuration file."""
+        prompt = scripted(
+            "viper", "login.example", "alice", "", "", "n", "", "n",
+            "y", "AMD Instinct MI300A", "other", "APU", "mi300a, apu", "128", "980.6", "n",
+        )
+        output: list[str] = []
+        self.assertEqual(run_setup(self.path, prompt, output.append, {}), 0)
+        profile = tomllib.loads(self.path.read_text())["profile"][0]
+        self.assertEqual(profile["device_type"], "apu")
+        self.assertTrue(any("GPU or APU" in line for line in output))
+        configure_gpu_profiles(self.path)
+        self.assertEqual(profile_for("viper", ["apu1"]).device_type, "apu")
+
+    def test_existing_mi300a_profile_is_recognized_without_new_field(self):
+        """Upgrades must not require users to recreate an installed catalog."""
+        from clusterwatcher import compute
+
+        previous_path = compute._config_path
+        try:
+            self.path.write_text(
+                '[[profile]]\ncluster="viper"\nname="AMD Instinct MI300A"\n'
+                'aliases=["mi300a","apu"]\nvram_gb=128\n'
+                'fp16_bf16_tensor_tflops=980.6\n'
+            )
+            configure_gpu_profiles(self.path)
+            self.assertEqual(profile_for("viper", ["apu1"]).device_type, "apu")
+        finally:
+            configure_gpu_profiles(previous_path)
 
     def test_setup_rejects_duplicate_names_and_keeps_existing_file_unless_confirmed(self):
         self.path.write_text("existing")

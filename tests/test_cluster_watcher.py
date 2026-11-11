@@ -1112,6 +1112,7 @@ class ClusterWatcherTests(TimedTestCase):
 
         configure_gpu_profiles(root / "clusters.example.toml")
         self.assertEqual(profile_for("cluster-b", ["apu"]).vram_gb, 128)
+        self.assertEqual(profile_for("cluster-b", ["apu"]).device_type, "apu")
         self.assertEqual(profile_for("cluster-a", ["gpu-h100"]).vram_gb, 80)
 
     def test_config_rejects_gpu_profile_with_unknown_machine(self):
@@ -1258,7 +1259,7 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertIn("/api/v1/jobs/", PAGE)
         self.assertIn("data-log-stream=\"err\"", PAGE)
         self.assertIn("data-log-stream=\"out\"", PAGE)
-        self.assertIn("jobsApiEnabled && !['PENDING', 'FAILED_DEPENDENCY'].includes(group)", PAGE)
+        self.assertIn("jobsApiEnabled && !['PENDING', 'DEPENDING', 'FAILED_DEPENDENCY'].includes(group)", PAGE)
         self.assertIn("Loading .${stream} tail", PAGE)
         self.assertIn("data-running-progress", PAGE)
         self.assertIn("data-pending-progress", PAGE)
@@ -1361,9 +1362,9 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertIn("ended:'Ended'", PAGE)
         self.assertIn("jobLifecycleCell(job, 'launched')", PAGE)
         self.assertIn("jobLifecycleCell(job, 'ended')", PAGE)
-        self.assertIn("if (!['PENDING', 'FAILED_DEPENDENCY'].includes(group)) rows.push", PAGE)
+        self.assertIn("if (!['PENDING', 'DEPENDING', 'FAILED_DEPENDENCY'].includes(group)) rows.push", PAGE)
         self.assertIn(
-            "if (group !== 'RUNNING' && !['PENDING', 'FAILED_DEPENDENCY'].includes(group)) rows.push",
+            "if (group !== 'RUNNING' && !['PENDING', 'DEPENDING', 'FAILED_DEPENDENCY'].includes(group)) rows.push",
             PAGE,
         )
         self.assertIn("${jobLifecycleRows(job, submittedAt, submittedText)}", PAGE)

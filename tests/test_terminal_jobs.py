@@ -75,6 +75,7 @@ class TerminalJobsTests(TimedTestCase):
         self.assertIn("CLUSTER_0", output)
         self.assertIn("gpu-h100", output)
         self.assertIn("1 node · 2 GPU · 16 CPU", output)
+
         local_submission = datetime(2026, 9, 25, 10, tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
         local_launch = datetime(2026, 9, 25, 10, 5, tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
         local_end = datetime(2026, 9, 25, 10, 20, tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
@@ -85,6 +86,24 @@ class TerminalJobsTests(TimedTestCase):
         self.assertIn("ENDED", output.splitlines()[1])
         self.assertIn("10m / 1h0m", output)
         self.assertIn("30m waited · 30m left", output)
+
+    def test_dependency_waits_have_a_section_after_pending(self):
+        """Both terminal layouts place dependency-held jobs after ready jobs."""
+        pending = job("PENDING", "1")
+        depending = job("PENDING", "2")
+        depending["dependency"] = "afterok:99(unfulfilled)"
+        depending["reason"] = "Dependency: afterok:99(unfulfilled)"
+        # A stale Slurm estimate must not turn a dependency wait into a timer.
+        failed_dependency = job("PENDING", "3")
+        failed_dependency["reason"] = "DependencyNeverSatisfied"
+        failed_dependency["dependency"] = "afterok:98(failed)"
+        for width in (100, 180):
+            with self.subTest(width=width):
+                board = render_job_board({"jobs": [failed_dependency, depending, pending]}, now=NOW, width=width)
+                self.assertLess(board.index("### PENDING ###"), board.index("### DEPENDING ###"))
+                self.assertLess(board.index("### DEPENDING ###"), board.index("### FAILED_DEPENDENCY ###"))
+                self.assertIn("waiting for dependency", board)
+                self.assertIn("dependency cannot be satisfied", board)
 
     def test_utc_accounting_submission_is_rendered_in_local_timezone(self):
         """Convert explicit accounting UTC rather than printing it as local."""

@@ -48,11 +48,6 @@ function notificationMessage({ job, group }) {
   return `Job ${label} on ${job.cluster} ${outcome}.`;
 }
 
-/** Return a count followed by a correctly pluralized job noun. */
-function jobCount(count) {
-  return `${count} ${count === 1 ? 'job' : 'jobs'}`;
-}
-
 /** Build the status-bar text and tooltip for the current jobs payload and check time. */
 function statusSummary(jobs, refreshedAt) {
   let running = 0;
@@ -67,10 +62,9 @@ function statusSummary(jobs, refreshedAt) {
   const text = running || pending || depending
     ? `$(server-process) ${running} running · ${pending} pending${depending ? ` · ${depending} depending` : ''}`
     : '$(server-process) no active jobs';
-  const refreshed = refreshedAt ? `\nLast refreshed ${localTime(refreshedAt, true)}.` : '';
   return {
     text,
-    tooltip: `Cluster Watcher: ${jobCount(running)} running${depending ? `, ${jobCount(pending)} pending, and ${jobCount(depending)} depending` : ` and ${jobCount(pending)} pending`}.${refreshed}\nClick to show My Jobs.`,
+    tooltip: `Cluster Watcher: Last refreshed: ${localTime(refreshedAt, true)}\nClick to show my jobs.`,
   };
 }
 
