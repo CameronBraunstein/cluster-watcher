@@ -1,5 +1,31 @@
 'use strict';
 
+const { jobGroup } = require('./renderers');
+
+/** Build collapsible cluster summaries from jobs already fetched at startup. */
+function clusterOverviewFromJobs(payload) {
+  const clusters = new Map((payload.clusters || []).map((cluster) => [String(cluster.name), {
+    name: String(cluster.name), reachable: cluster.reachable !== false,
+    error: cluster.reachable === false ? cluster.error : undefined,
+    user_jobs: { running: 0, pending: 0, depending: 0 },
+    user_gpu_hours: {}, partitions: [],
+  }]));
+  for (const job of payload.jobs || []) {
+    const name = String(job.cluster || '');
+    if (!name) continue;
+    if (!clusters.has(name)) clusters.set(name, {
+      name, reachable: true,
+      user_jobs: { running: 0, pending: 0, depending: 0 },
+      user_gpu_hours: {}, partitions: [],
+    });
+    const group = jobGroup(job);
+    if (group === 'RUNNING' || group === 'PENDING' || group === 'DEPENDING') {
+      clusters.get(name).user_jobs[group.toLowerCase()] += 1;
+    }
+  }
+  return { overview_only: true, clusters: [...clusters.values()] };
+}
+
 /** Recognize the backend's temporary response before its first Slurm collection. */
 function initialCollectionPending(error) {
   return error?.status === 503 && /first cluster status collection has not completed/i.test(error.message || '');
@@ -130,6 +156,9 @@ class RefreshCoordinator {
         return { outcome: 'unchanged', checkedAt };
       }
       this.etags.jobs = result.etag;
+      if (!this.statusProvider.hasSuccessfulData || this.statusProvider.payload?.overview_only) {
+        this.statusProvider.updateOverview(clusterOverviewFromJobs(result.payload), checkedAt);
+      }
       // The monitor reads the cancelling set before the provider prunes it.
       this.monitor.update(result.payload, this.jobsProvider.cancelling, checkedAt);
       this.jobsProvider.update(result.payload, checkedAt);
@@ -248,4 +277,4 @@ function refreshResultMessage(result, formattedAt) {
   return undefined;
 }
 
-module.exports = { RefreshCoordinator, RefreshFeedback, initialCollectionPending, refreshResultMessage };
+module.exports = { RefreshCoordinator, RefreshFeedback, clusterOverviewFromJobs, initialCollectionPending, refreshResultMessage };

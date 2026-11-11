@@ -538,6 +538,23 @@ class SidebarProvider {
   }
 
   update(payload, checkedAt = Date.now()) {
+    if (this.kind === 'status') this.collapseNewClusters(payload.clusters);
+    this.recordRefresh(payload, checkedAt);
+    this.render();
+  }
+
+  /** Keep newly seen clusters compact until the user opens one explicitly. */
+  collapseNewClusters(clusters = []) {
+    for (const cluster of clusters || []) {
+      const key = `cluster:${cluster.name}`;
+      if (!(key in this.disclosures)) this.disclosures[key] = false;
+    }
+  }
+
+  /** Show job counts before the slower partition snapshot becomes available. */
+  updateOverview(payload, checkedAt = Date.now()) {
+    if (this.kind !== 'status' || (this.hasSuccessfulData && !this.payload?.overview_only)) return;
+    this.collapseNewClusters(payload.clusters);
     this.recordRefresh(payload, checkedAt);
     this.render();
   }
@@ -562,7 +579,7 @@ class SidebarProvider {
 
   /** Show first-load progress while the service is reachable but has no data. */
   loading() {
-    if (this.loadingState || (this.showingData && this.hasSuccessfulData)) return;
+    if (this.loadingState || (this.hasSuccessfulData && !this.errorState)) return;
     this.loadingState = true;
     this.errorState = undefined;
     this.showingData = false;
@@ -663,7 +680,8 @@ class JobsSidebarProvider extends SidebarProvider {
 
   render() {
     if (!this.view) return;
-    if (this.loadingState) {
+    if (this.loadingState || !this.hasSuccessfulData) {
+      this.showingData = false;
       this.view.webview.html = renderLoading(this.title(), this.freshness());
       return;
     }
@@ -1093,4 +1111,4 @@ function activate(context) {
 /** VS Code disposes all registered resources through the extension context. */
 function deactivate() {}
 
-module.exports = { activate, deactivate };
+module.exports = { activate, deactivate, SidebarProvider };

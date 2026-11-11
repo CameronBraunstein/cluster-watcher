@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { RefreshCoordinator, RefreshFeedback, initialCollectionPending, refreshResultMessage } = require('../refresh');
+const { RefreshCoordinator, RefreshFeedback, clusterOverviewFromJobs, initialCollectionPending, refreshResultMessage } = require('../refresh');
 
 /** Build a coordinator whose collaborators record every observable update. */
 function harness(poll, refreshServer, options = {}) {
@@ -19,12 +19,16 @@ function harness(poll, refreshServer, options = {}) {
     jobsApiDisabled() {},
   };
   const statusProvider = {
+    hasSuccessfulData: false,
+    payload: undefined,
+    overviewUpdates: [],
     updates: [],
     checks: [],
     errors: [],
     loadings: 0,
     loading() { this.loadings += 1; },
-    update(payload, checkedAt) { this.updates.push({ payload, checkedAt }); },
+    update(payload, checkedAt) { this.payload = payload; this.hasSuccessfulData = true; this.updates.push({ payload, checkedAt }); },
+    updateOverview(payload, checkedAt) { this.payload = payload; this.hasSuccessfulData = true; this.overviewUpdates.push({ payload, checkedAt }); },
     checked(checkedAt) { this.checks.push(checkedAt); },
     error(error) { this.errors.push(error); },
   };
@@ -44,6 +48,50 @@ function harness(poll, refreshServer, options = {}) {
   );
   return { coordinator, jobsProvider, statusProvider, monitor };
 }
+
+test('early cluster overview counts active job groups in configuration order', () => {
+  const overview = clusterOverviewFromJobs({
+    clusters: [{ name: 'alpha', reachable: true }, { name: 'beta', reachable: false, error: 'Timed out' }, { name: 'empty', reachable: true }],
+    jobs: [
+      { cluster: 'alpha', state: 'RUNNING' },
+      { cluster: 'alpha', state: 'PENDING', reason: 'Priority' },
+      { cluster: 'alpha', state: 'PENDING', dependency: 'afterok:42(unfulfilled)' },
+      { cluster: 'alpha', state: 'COMPLETED' },
+      { cluster: 'beta', state: 'RUNNING' },
+    ],
+  });
+
+  assert.equal(overview.overview_only, true);
+  assert.deepEqual(overview.clusters.map((cluster) => cluster.name), ['alpha', 'beta', 'empty']);
+  assert.deepEqual(overview.clusters[0].user_jobs, { running: 1, pending: 1, depending: 1 });
+  assert.deepEqual(overview.clusters[1].user_jobs, { running: 1, pending: 0, depending: 0 });
+  assert.equal(overview.clusters[1].error, 'Timed out');
+  assert.deepEqual(overview.clusters[2].user_jobs, { running: 0, pending: 0, depending: 0 });
+});
+
+test('jobs show collapsed cluster summaries before status arrives, then status replaces them', async () => {
+  let finishStatus;
+  const state = harness((path) => path === '/api/v1/jobs'
+    ? Promise.resolve({ payload: { clusters: [{ name: 'alpha' }], jobs: [{ cluster: 'alpha', state: 'RUNNING' }] }, etag: 'jobs-1' })
+    : new Promise((resolve) => { finishStatus = resolve; }));
+
+  const refresh = state.coordinator.refresh();
+  await state.coordinator.refreshJobs();
+  assert.equal(state.statusProvider.overviewUpdates.length, 1);
+  assert.equal(state.statusProvider.payload.overview_only, true);
+  assert.equal(state.statusProvider.payload.clusters[0].user_jobs.running, 1);
+  assert.equal(state.statusProvider.updates.length, 0);
+
+  const full = { clusters: [{ name: 'alpha', partitions: [{ name: 'gpu' }] }] };
+  finishStatus({ payload: full, etag: 'status-1' });
+  await refresh;
+  assert.equal(state.statusProvider.payload, full);
+  assert.equal(state.statusProvider.updates.length, 1);
+
+  await state.coordinator.refreshJobs();
+  assert.equal(state.statusProvider.overviewUpdates.length, 1);
+  assert.equal(state.statusProvider.payload, full);
+});
 
 test('a reachable service immediately replaces stale offline indicators with loading', () => {
   const state = harness(async () => ({ payload: {}, etag: 'ready' }));

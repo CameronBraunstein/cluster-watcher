@@ -87,6 +87,20 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 @keyframes availability-hover-in { from { opacity:0; } to { opacity:1; } }
 .partition-status[data-availability]:hover::after, .fast-hover[data-fast-tooltip]:hover::after { visibility:visible; animation:availability-hover-in .05s linear .1s both; }
 .partition-compute { color:#666; font-size:.8rem; margin:-.2rem 0 .55rem; }
+.partition-specs { color:#666; font-size:.8rem; margin:.3rem 0; }
+.partition-availability { display:flex; align-items:center; gap:.35rem; margin:.22rem 0; font-size:.78rem; }
+.partition-availability-label { flex:0 0 3.2rem; color:#666; }
+.partition-availability-track { display:flex; flex:1 1 auto; max-width:18rem; min-width:2rem; height:.42rem; overflow:hidden; border-radius:999px; background:#8883; }
+.partition-availability-track .free { background:#16a34a; } .partition-availability-track .busy { background:#dc2626; }
+.partition-availability-count { white-space:nowrap; font-variant-numeric:tabular-nums; }
+.cluster > summary { cursor:pointer; list-style:none; } .cluster > summary::-webkit-details-marker { display:none; }
+.cluster-summary { display:flex; align-items:center; gap:.75rem; min-width:0; }
+.cluster-summary h2 { margin:0; flex:0 0 auto; } .cluster-summary small { color:#666; font-size:.7rem; }
+.cluster-job-track { display:flex; flex:1 1 auto; max-width:16rem; height:.5rem; overflow:hidden; border-radius:999px; background:#8883; margin-left:auto; }
+.cluster-job-track button { display:block; height:100%; border:0; padding:0; cursor:pointer; }
+.cluster-job-track button:hover, .cluster-job-track button:focus-visible { outline:1px solid #fff; outline-offset:-1px; }
+.cluster-job-running { background:#2563eb; } .cluster-job-pending { background:#dc2626; } .cluster-job-depending { background:#6b1026; }
+.cluster-detail { margin-top:.75rem; }
 .launchability { display:flex; align-items:end; gap:3px; min-width:0; }
 .launch-shape { display:grid; grid-template-rows:.65rem .85rem; justify-items:center; gap:2px; }
 .launch-count { color:#666; font-size:.62rem; line-height:.65rem; }
@@ -109,7 +123,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .job-badge .job-progress { display:inline-grid; grid-template-columns:70px auto; align-items:center; gap:.35rem; margin:0 0 0 .35rem; } .job-badge .job-progress-track { width:70px; height:.4rem; } .job-badge .job-progress-text { margin:0; }
 @media (max-width:600px) { .title-row { flex-wrap:wrap; gap:.25rem .75rem; } .partition-heading { flex-wrap:wrap; } .job-badge .job-progress { display:none; } }
 </style></head><body><header><div class="title-row"><h1>Cluster Watcher</h1><span id="updated">Loading…</span><div class="refresh-countdown"><svg class="refresh-clock" viewBox="0 0 24 24" role="img" aria-labelledby="refresh-label"><circle class="refresh-clock-face" cx="12" cy="12" r="9.5"></circle><path class="refresh-clock-tick" d="M12 3.8v1.4M20.2 12h-1.4M12 20.2v-1.4M3.8 12h1.4"></path><line id="refresh-clock-hand" class="refresh-clock-hand" x1="12" y1="12" x2="12" y2="5"></line><circle class="refresh-clock-center" cx="12" cy="12" r="1.25"></circle></svg><span id="refresh-label">Waiting for first refresh…</span></div></div></header>
-<section class="my-jobs"><h2>My jobs</h2><div id="my-jobs-content">Waiting for job data…</div></section>
+<section class="my-jobs" id="my-jobs"><h2>My jobs</h2><div id="my-jobs-content">Waiting for job data…</div></section>
 <section class="key"><h2>How to read this dashboard</h2><div class="key-grid"><div><p><i class="swatch powered-off"></i> <b>Drained (powered off)</b> — unavailable and powered off.</p><p><i class="swatch drained"></i> <b>Drained</b> — removed from scheduling by an administrator.</p><p><i class="swatch allocated"></i> <b>Allocated</b> — fully assigned to jobs, including GPU-saturated nodes.</p></div><div><p><i class="swatch mixed-powered-off"></i> <b>Mixed~</b> — partly allocated and powered off/transitioning.</p><p><i class="swatch mixed"></i> <b>Mixed</b> — some resources are assigned to jobs and some remain free.</p><p><i class="swatch idle"></i> <b>Idle</b> — available for eligible new jobs.</p><p><b>Blue outlines</b> mark nodes and resource cells allocated to your running jobs. Pending-job times are Slurm scheduler estimates; node release times are only the earliest visible running-job end, not a promise.</p></div></div></section>
 <main id="clusters"></main><script>
 const escapeHtml = value => String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -1155,6 +1169,10 @@ class StatusStore:
             if kind == "status":
                 payload: dict[str, object] = {
                     "clusters": [asdict(status) for status in self._statuses],
+                    "summary": build_snapshot(
+                        self._statuses, self._updated_at, self.refresh_seconds,
+                        self.wait_threshold_minutes, include_nodes=False,
+                    ),
                     "updated_at": self._updated_at,
                     "refresh_seconds": self.refresh_seconds,
                     "wait_threshold_minutes": self.wait_threshold_minutes,

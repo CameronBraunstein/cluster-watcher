@@ -233,6 +233,21 @@ test('cluster job ratio remains empty when no jobs are running or pending', () =
   assert.doesNotMatch(track, /cluster-job-(?:running|pending|depending)/);
 });
 
+test('early cluster overview keeps clickable job segments while details load', () => {
+  const html = renderStatus({ overview_only: true, clusters: [{
+    name: 'alpha', reachable: true, user_jobs: { running: 2, pending: 1, depending: 1 }, partitions: [],
+  }] }, { 'cluster:alpha': false });
+
+  assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:alpha"><summary>/);
+  assert.match(html, /aria-label="2 running, 1 pending, 1 depending"/);
+  for (const group of ['RUNNING', 'PENDING', 'DEPENDING']) {
+    assert.match(html, new RegExp(`data-args="\\[&quot;${group}&quot;,&quot;alpha&quot;\\]"`));
+  }
+  assert.match(html, /Loading cluster details…/);
+  assert.match(html, /\.cluster-group:not\(\[open\]\)\+\.cluster-config-separator\{margin-top:5px\}/);
+  assert.doesNotMatch(html, /<article class="card partition-card"/);
+});
+
 test('cluster ratio includes three correctly sized status colors', () => {
   const html = renderStatus({ clusters: [
     { name: 'busy', reachable: true, user_jobs: { running: 2, pending: 1, depending: 1 }, partitions: [] },

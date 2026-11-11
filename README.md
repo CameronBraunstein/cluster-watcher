@@ -448,6 +448,18 @@ While the backend performs its first cluster collection, the sidebar retries
 its temporary HTTP 503 responses every second instead of waiting for the
 normal refresh interval. The job and cluster views show data independently as
 soon as each endpoint is ready.
+When the jobs endpoint responds first, **Cluster Status** immediately shows
+collapsed cluster names and their Running/Pending/Depending bars while partition
+details are still loading. The bars remain clickable; selecting a segment opens
+**My Jobs** at that cluster's group, with a loading message until job cards
+arrive. The later cluster snapshot fills in the details without changing which
+clusters you opened. GPU-hour hover estimates appear when the detailed snapshot
+is available.
+If the jobs response arrives before Cluster Status opens, its per-cluster
+overview stays visible when the service connection is subsequently confirmed;
+the later connection event does not put an already populated view back into
+**Loading**. The bottom status-bar totals come from the same jobs response,
+not a separate saved total.
 
 The tmux session is named `cluster-watcher-<12-character hash>` for the local
 service URL. To inspect it, run `tmux list-sessions` and then
@@ -514,8 +526,9 @@ unchanged job card rather than jumping to the top of **My Jobs**.
 
 #### Cluster Status
 
-Each cluster is a collapsible group of permanently expanded, compact partition
-cards ordered by compute rank. Each partition card shows the fair-share factor
+Each cluster starts collapsed and can be opened to show permanently expanded,
+compact partition cards ordered by compute rank. The divider below the last
+cluster sits closer when that cluster is collapsed. Each partition card shows the fair-share factor
 of every user/account association that Slurm explicitly ties to the partition
 *or* whose account and QOS pass that partition's access rules. **FairShare:**
 appears beside a compact bar above the **GPUs:** and **Nodes:** availability bars.
