@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, renderLoading, jobGroup, jobKey, jobRef, renderWelcome, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
+const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, renderLoading, jobGroup, jobKey, jobRef, renderWelcome, metadataSameLine, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
 
 test('first-collection loading views place service controls in the Cluster Status footer', () => {
   const jobs = renderLoading('My Jobs');
@@ -305,6 +305,19 @@ test('cluster-name navigation preserves the cluster disclosure state', () => {
     { 'cluster:viper': false }), /data-disclosure-key="cluster:viper"><summary>/);
 });
 
+test('partition navigation briefly highlights only the destination card', () => {
+  const html = renderStatus({ clusters: [{ name: 'inf', reachable: true,
+    partitions: [{ name: 'gpu-h100', gpus: { total: 1 } }] }] });
+  assert.match(html, /@keyframes partition-jump-highlight\{0%,55%\{box-shadow:0 0 0 2px #2563eb\}100%\{box-shadow:none\}\}/);
+  assert.match(html, /\.partition-card\.jump-highlight\{animation:partition-jump-highlight 1\.5s ease-out both\}/);
+  const clusterJump = html.indexOf("if (!partition) { group.scrollIntoView");
+  const cardJump = html.indexOf("card.scrollIntoView({ behavior: 'smooth', block: 'start' });", clusterJump);
+  const highlight = html.indexOf("card.classList.add('jump-highlight');", cardJump);
+  assert.ok(clusterJump > -1 && cardJump > clusterJump && highlight > cardJump);
+  assert.match(html, /clearTimeout\(partitionHighlightTimers\.get\(card\)\)/);
+  assert.match(html, /setTimeout\(\(\) => card\.classList\.remove\('jump-highlight'\), 1500\)/);
+});
+
 test('expanded lifecycle rows keep label, clock, and date on one line', () => {
   const html = renderJobs({ jobs: [{
     job_id: '7', cluster: 'c', state: 'COMPLETED',
@@ -603,7 +616,7 @@ test('collapsed title hover shows the full name and the job ID sits beside the p
   assert.match(html, /\.card-summary-title\[data-full-name\]::after\{outline:1px solid #fff\}/);
   assert.match(html, /\.card:not\(\[open\]\) \.card-summary-progress>\.job-id\{display:none\}/);
   assert.doesNotMatch(cardSummary, /<summary[^>]* title=/);
-  assert.match(html, /<div class="muted card-meta"><button class="job-cluster-link"[^>]*>cluster_0<\/button> \/ no partition · 0 node · <span class="job-gpu-count"[^>]*>0 GPU<\/span> · 0 CPU<\/div>/);
+  assert.match(html, /<div class="muted card-meta"><span class="meta-field meta-cluster"><button class="job-cluster-link"[^>]*>cluster_0<\/button><\/span><span class="meta-field meta-partition" data-separator="\/">no partition<\/span><span class="meta-field meta-nodes" data-separator="·">0 node<\/span><span class="meta-field meta-accelerators" data-separator="·"><span class="job-gpu-count"[^>]*>0 GPU<\/span><\/span><span class="meta-field meta-cpus" data-separator="·">0 CPU<\/span><\/div>/);
   assert.equal((html.match(/data-copy=/g) || []).length, 1);
   assert.match(html, /\.job-id\{[^}]*border-radius:0\}/);
   assert.match(html, /\.job-id:hover,\.job-id:focus-visible\{outline:none;box-shadow:inset 0 0 0 1px var\(--vscode-focusBorder\)\}/);
@@ -948,8 +961,27 @@ test('narrow cards contain long metadata and dependency text', () => {
 
   assert.match(html, /\.card-meta\{min-width:0;white-space:normal;overflow-wrap:anywhere\}/);
   assert.match(html, /\.times dd\.dependency-value\{overflow-wrap:anywhere\}/);
-  assert.match(html, /<div class="muted card-meta"><button class="job-cluster-link"[^>]*>cluster-with-a-very-long-name<\/button> \/ <button class="job-partition-link"[^>]*>partition-with-a-very-long-name<\/button>/);
+  assert.match(html, /<div class="muted card-meta"><span class="meta-field meta-cluster"><button class="job-cluster-link"[^>]*>cluster-with-a-very-long-name<\/button><\/span><span class="meta-field meta-partition" data-separator="\/">(?:<button class="job-partition-link"[^>]*>partition-with-a-very-long-name<\/button>)/);
   assert.match(html, /<dd class="dependency-value">/);
+});
+
+test('resource labels stay intact and separators follow visual line breaks', () => {
+  const sameRow = { top: 10, bottom: 22, left: 40 };
+  assert.equal(metadataSameLine(sameRow, { top: 10, left: 95 }), true);
+  assert.equal(metadataSameLine(sameRow, { top: 24, left: 10 }), false);
+  assert.equal(metadataSameLine(sameRow, { top: 10, left: 40 }), false);
+
+  const html = renderJobs({ jobs: [{
+    job_id: '9', cluster: 'viper', partition: 'apu', state: 'RUNNING',
+    gpus: 4, accelerator_type: 'apu', cpus: 48,
+  }] });
+  const meta = html.match(/<div class="muted card-meta">.*?<\/div>/s)[0];
+  assert.match(meta, /class="meta-field meta-accelerators" data-separator="·"><span class="job-gpu-count"[^>]*>4 APU<\/span><\/span>/);
+  assert.match(meta, /class="meta-field meta-cpus" data-separator="·">48 CPU<\/span>/);
+  assert.match(html, /\.meta-nodes,\.meta-accelerators,\.meta-cpus,\.job-gpu-count\{white-space:nowrap\}/);
+  assert.match(html, /\.meta-field\.same-line::before\{content:attr\(data-separator\);position:absolute;left:-8px\}/);
+  assert.match(html, /new ResizeObserver\(\(entries\) => entries\.forEach\(\(entry\) => updateMetadataSeparators\(entry\.target\)\)\)/);
+  assert.match(html, /if \(meta && details\.open\) requestAnimationFrame\(\(\) => updateMetadataSeparators\(meta\)\)/);
 });
 
 test('expanded card moves the running deadline down and keeps details and actions compact', () => {

@@ -609,13 +609,17 @@ In an expanded **My Jobs** card, the GPU/APU number is the total for the job.
 An APU profile makes the card say **APU** and provides its model name even
 when Slurm exposes only a generic GPU GRES count, as on Viper's MI300A nodes.
 Hover the count for the model, or a count for each model on a mixed-model job.
+The count and **GPU**/**APU** label stay on one line. Cluster, partition,
+nodes, accelerators, and CPUs may wrap as separate fields in a narrow sidebar;
+their slash or dot separator appears only when adjacent fields share a line.
 Models come from typed Slurm GRES/TRES or the allocated nodes' inventory.
 An untyped request on a node with multiple GPU types, or a completed job whose
 untyped allocation spans different node models, cannot be resolved reliably
 and shows **GPU model unavailable** (or **APU model unavailable** for an APU).
 Click the cluster name to jump to its heading in **Cluster Status** without
 changing whether that cluster is expanded; click the partition name to jump to that
-partition's card. The metadata line has no general hover tooltip.
+partition's card, which briefly gets a blue highlight. The metadata line has
+no general hover tooltip.
 Submitted, Launched, Ended, and Limit each occupy one compact line. The label
 has no colon; the local time and day/month sit against the card's right edge.
 The year is omitted here even when the configured date format includes one.

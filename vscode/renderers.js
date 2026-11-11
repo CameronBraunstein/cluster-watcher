@@ -195,6 +195,11 @@ function commandButtonAttributes(command, args = []) {
   return `type="button" data-command="${escapeHtml(command)}" data-args="${escapeHtml(JSON.stringify(args))}"`;
 }
 
+/** A separator belongs only between fields occupying the same visual row. */
+function metadataSameLine(previous, current) {
+  return current.top < previous.bottom - 1 && current.left > previous.left;
+}
+
 /** Render session details with one scroll container and a top-left close control. */
 function sessionsDialog(inventory) {
   const entries = sessionDialogEntries(inventory);
@@ -332,6 +337,7 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 .cluster-job-running{background:#2563eb}.cluster-job-pending{background:#dc2626}.cluster-job-depending{display:block;height:100%;background:#6b1026}
 .cluster-job-track>button{display:block;height:100%;min-width:0;margin:0;padding:0;border:0;cursor:pointer}.cluster-job-track>button:hover,.cluster-job-track>button:focus-visible{box-shadow:inset 0 0 0 1px #fff}
 .job-partition-link,.job-cluster-link{border:0;padding:0;background:none;color:var(--vscode-textLink-foreground);font:inherit;cursor:pointer}.job-partition-link:hover,.job-cluster-link:hover{text-decoration:underline}.job-gpu-count{cursor:help}
+.card-meta{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:10px;row-gap:1px}.meta-field{position:relative;flex:0 0 auto;max-width:100%}.meta-field.same-line::before{content:attr(data-separator);position:absolute;left:-8px}.meta-cluster,.meta-partition{overflow-wrap:anywhere}.meta-cluster button,.meta-partition button{max-width:100%;overflow-wrap:anywhere;text-align:left}.meta-nodes,.meta-accelerators,.meta-cpus,.job-gpu-count{white-space:nowrap}
 .time-row{grid-column:1/-1;display:flex;justify-content:space-between;gap:4px;min-width:0;white-space:nowrap}.time-row dt{flex:0 0 auto}.time-row dd{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
 .view-freshness{margin:8px 0 0}
 .card-summary-title[data-full-name]::after{outline:1px solid #fff}
@@ -340,6 +346,7 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 .dependency-icon{display:inline-block;margin-left:2px;font-family:system-ui,sans-serif;font-weight:700;cursor:help}.dependency-icon.waiting{font-weight:400}.dependency-icon.satisfied{color:var(--vscode-testing-iconPassed)}.dependency-icon.failed{color:var(--vscode-errorForeground)}
 .priority-context{display:flex;align-items:center;gap:5px;margin-top:6px;min-width:0}.priority-gauge{display:flex;align-items:center;flex:1 1 auto;min-width:54px;max-width:150px;cursor:help}.priority-track{position:relative;display:block;flex:1 1 auto;height:4px;border-radius:3px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--vscode-testing-iconPassed))}.priority-marker{position:absolute;top:-3px;width:2px;height:10px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.priority-prominent{margin-top:5px}.priority-prominent .priority-track{height:6px}.priority-prominent .priority-marker{top:-3px;height:12px}.card[open] .card-summary-progress>.priority-prominent{display:none}.priority-help{color:var(--vscode-descriptionForeground);font-size:.8em;cursor:help}
 .partition-card{padding:5px;container-type:inline-size}.partition-title{align-items:center;flex-wrap:wrap;gap:4px 7px}.partition-title>.name{flex:0 1 auto;margin-right:auto}.partition-title>.launchability{flex:0 0 auto;margin-left:0}.partition-specs{display:block;margin-top:3px;font-size:.72em;white-space:normal;overflow-wrap:anywhere}.gpu-model,.vram-spec,.thread-spec{cursor:help}.partition-availability{display:flex;align-items:center;gap:0;margin-top:4px;font-size:.72em}.partition-availability-label{box-sizing:border-box;flex:0 0 36px;width:36px;padding-right:2px;color:var(--vscode-descriptionForeground);text-align:left;white-space:nowrap}.partition-availability>.availability-cell{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,max-content);column-gap:2px;flex:1 1 auto;min-width:0}.partition-availability .availability-cell>.availability{width:100%;min-width:0}.partition-availability .availability-count{width:max-content;min-width:min(var(--availability-count-width),45cqw);max-width:100%;overflow:hidden;text-overflow:ellipsis}.times dd>.availability-cell{justify-content:flex-end}
+@keyframes partition-jump-highlight{0%,55%{box-shadow:0 0 0 2px #2563eb}100%{box-shadow:none}}.partition-card.jump-highlight{animation:partition-jump-highlight 1.5s ease-out both}
 .launchability{display:flex;align-items:end;gap:2px;margin-left:auto;min-width:0}.launch-shape{display:grid;grid-template-rows:7px 9px;justify-items:center;gap:1px}.launch-count{color:var(--vscode-descriptionForeground);font-size:7px;line-height:7px}.launch-block{box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:9px;height:9px;border:1px solid color-mix(in srgb,var(--vscode-foreground) 24%,transparent);border-radius:2px;color:#fff;font-size:7px;font-weight:700;line-height:1;cursor:help}.launch-wait-0{background:#15803d}.launch-wait-1{background:#22c55e}.launch-wait-2{background:#eab308;color:#111}.launch-wait-3{background:#f97316}.launch-wait-4{background:#dc2626}.launch-blocked{background:#111}.launch-missing,.launch-pending{background:#777}.launch-unsupported{color:var(--vscode-descriptionForeground);background:repeating-linear-gradient(135deg,transparent 0 2px,color-mix(in srgb,var(--vscode-descriptionForeground) 25%,transparent) 2px 4px)}
 .job-id:hover,.job-id:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--vscode-focusBorder)}
 button.button{border:0;font:inherit;cursor:pointer}
@@ -455,6 +462,7 @@ button.button{border:0;font:inherit;cursor:pointer}
   ${waitColorIndex.toString()}
   const dateFormat = ${JSON.stringify(dateFormat).replace(/</g, '\\u003c')};
   ${localTime.toString()}
+  ${metadataSameLine.toString()}
   ${isFailureGroup.toString()}
   ${progressView.toString()}
   const tick = () => {
@@ -479,6 +487,20 @@ button.button{border:0;font:inherit;cursor:pointer}
     });
   };
   setInterval(tick, 5000);
+  const metadataRows = [...document.querySelectorAll('.card-meta')];
+  const updateMetadataSeparators = (meta) => {
+    const fields = [...meta.querySelectorAll('.meta-field')];
+    fields.slice(1).forEach((field, index) => {
+      field.classList.toggle('same-line', metadataSameLine(fields[index].getBoundingClientRect(), field.getBoundingClientRect()));
+    });
+  };
+  metadataRows.forEach(updateMetadataSeparators);
+  if (typeof ResizeObserver !== 'undefined') {
+    const metadataObserver = new ResizeObserver((entries) => entries.forEach((entry) => updateMetadataSeparators(entry.target)));
+    metadataRows.forEach((meta) => metadataObserver.observe(meta));
+  }
+  window.addEventListener('resize', () => metadataRows.forEach(updateMetadataSeparators));
+  const partitionHighlightTimers = new WeakMap();
   // A not-modified check still prompts an immediate local progress update.
   window.addEventListener('message', (event) => {
     if (event.data?.type === 'checked') tick();
@@ -493,6 +515,11 @@ button.button{border:0;font:inherit;cursor:pointer}
         .find((item) => item.dataset.partition === partition);
       if (!card) { api.postMessage({ type: 'missingPartition', cluster, partition }); return; }
       card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      clearTimeout(partitionHighlightTimers.get(card));
+      card.classList.remove('jump-highlight');
+      void card.offsetWidth;
+      card.classList.add('jump-highlight');
+      partitionHighlightTimers.set(card, setTimeout(() => card.classList.remove('jump-highlight'), 1500));
       return;
     }
     if (event.data?.type !== 'jumpGroup') return;
@@ -522,6 +549,8 @@ button.button{border:0;font:inherit;cursor:pointer}
     details.addEventListener('toggle', () => {
       remember(details);
       if (!details.classList.contains('card')) return;
+      const meta = details.querySelector('.card-meta');
+      if (meta && details.open) requestAnimationFrame(() => updateMetadataSeparators(meta));
       details.classList.remove('layout-flash');
       void details.offsetWidth;
       details.classList.add('layout-flash');
@@ -771,7 +800,6 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
   const models = modelsKnown ? modelEntries.map((entry) => `${entry.name}${modelEntries.length > 1 ? `: ${entry.count}` : ''}`).join('\n')
     : totalGpus ? `${device} model unavailable` : `No ${device}s requested`;
   const gpuLabel = `<span class="job-gpu-count" data-fast-tooltip="${escapeHtml(models)}" aria-label="${escapeHtml(`${totalGpus} ${device}; ${models}`)}">${totalGpus} ${device}</span>`;
-  const resources = `${nodes} node · ${gpuLabel} · ${Number(job.cpus) || 0} CPU`;
   const archiveCommand = archived ? 'clusterWatcher.restoreJob' : 'clusterWatcher.archiveJob';
   const key = jobKey(job);
   const quickArchive = !archived && !['RUNNING', 'PENDING', 'DEPENDING'].includes(jobGroup(job));
@@ -796,7 +824,13 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
     ? `<button class="job-partition-link" ${commandButtonAttributes('clusterWatcher.showPartition', [job.cluster, partition])} aria-label="Show ${escapeHtml(partition)} in Cluster Status">${escapeHtml(partition)}</button>`
     : 'no partition';
   const clusterLabel = `<button class="job-cluster-link" ${commandButtonAttributes('clusterWatcher.showCluster', [job.cluster])} aria-label="Show ${escapeHtml(job.cluster)} in Cluster Status">${escapeHtml(job.cluster)}</button>`;
-  const metadata = `${clusterLabel} / ${partitionLabel} · ${resources}`;
+  const metadata = [
+    `<span class="meta-field meta-cluster">${clusterLabel}</span>`,
+    `<span class="meta-field meta-partition" data-separator="/">${partitionLabel}</span>`,
+    `<span class="meta-field meta-nodes" data-separator="·">${nodes} node</span>`,
+    `<span class="meta-field meta-accelerators" data-separator="·">${gpuLabel}</span>`,
+    `<span class="meta-field meta-cpus" data-separator="·">${Number(job.cpus) || 0} CPU</span>`,
+  ].join('');
   const priority = !archived && jobGroup(job) === 'PENDING' ? jobPriorityGauge(job, priorityJobs) : '';
   const noEstimatePriority = priority && progressSpec(job, asOf).expected == null
     && pendingExplanation(job) === 'no estimate available'
@@ -1147,4 +1181,4 @@ function renderStatus(payload, disclosures = {}, freshness = {}, server = {}) {
   return document('Cluster Status', body, freshness);
 }
 
-module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, isFailureGroup, jobGroup, jobRef, launchabilityStrip, openAttribute, parseDependency, relativeJobPriority, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderLoading, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };
+module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, isFailureGroup, jobGroup, jobRef, launchabilityStrip, metadataSameLine, openAttribute, parseDependency, relativeJobPriority, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderLoading, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };
