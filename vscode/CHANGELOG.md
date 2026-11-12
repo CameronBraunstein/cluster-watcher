@@ -4,6 +4,16 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
+## 0.2.3 - 2026-11-12
+
+- Show cached cluster and job summaries sooner while each cluster refreshes,
+  retaining the last successful data and a visible timeout warning when a
+  refresh fails. Make status collection more responsive and its terminal
+  readout consistent with the sidebar.
+- Rewrite the README around current screenshots, with detailed behavior moved
+  into a separate reference. Match the extension's green indicators to the
+  screenshot palette.
+
 ## 0.2.2 - 2026-11-11
 
 - Separate dependency-held jobs into **Depending** across the terminal, web,
