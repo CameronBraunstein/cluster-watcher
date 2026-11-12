@@ -26,6 +26,16 @@ test('first-collection loading views place service controls in the Cluster Statu
 });
 const { launchabilityStrip, waitColorIndex, waitEstimate } = require('../launchability');
 
+test('sidebar green indicators match the screenshot palette', () => {
+  const html = renderStatus({ clusters: [] });
+  assert.match(html, /:root\{--cluster-watcher-green:#16a34a\}/);
+  for (const selector of ['.available', '.completed', '.service-toggle.on', '.dependency-icon.satisfied']) {
+    assert.ok(html.includes(`${selector}{background:var(--cluster-watcher-green)}`)
+      || html.includes(`${selector}{color:var(--cluster-watcher-green)}`), selector);
+  }
+  assert.doesNotMatch(html, /var\(--vscode-testing-iconPassed\)/);
+});
+
 test('jobs retain terminal state grouping and lifecycle visibility', () => {
   const jobs = [
     {
@@ -408,7 +418,7 @@ test('matched fair-share factors have bars above GPU and node availability', () 
   assert.match(html, /\.fair-share-track\{[^}]*height:6px/);
   assert.match(html, /\.partition-fair-share\{display:flex;align-items:flex-start/);
   assert.match(html, /\.fair-share-bars\{[^}]*padding-top:3px/);
-  assert.match(html, /\.fair-share-track\{[^}]*linear-gradient\(90deg,var\(--vscode-editorError-foreground\),var\(--vscode-descriptionForeground\) 50%,var\(--vscode-testing-iconPassed\)\)/);
+  assert.match(html, /\.fair-share-track\{[^}]*linear-gradient\(90deg,var\(--vscode-editorError-foreground\),var\(--vscode-descriptionForeground\) 50%,var\(--cluster-watcher-green\)\)/);
   assert.ok(gpuCard.indexOf('FairShare:') < gpuCard.indexOf('GPUs:'));
   assert.ok(gpuCard.indexOf('GPUs:') < gpuCard.indexOf('Nodes:'));
   assert.doesNotMatch(apuCard, /gpu_a100_bs_default|unscoped/);
@@ -714,7 +724,7 @@ test('dependency icons reflect referenced outcomes and impossible jobs get their
   assert.match(html, /data-fast-tooltip="Satisfied: job 10 satisfied afterany"/);
   assert.match(html, /data-fast-tooltip="Failed: job 11 cannot satisfy afterok"/);
   assert.match(html, /data-fast-tooltip="Waiting: waiting for job 12 to satisfy afterok"/);
-  assert.match(html, /\.dependency-icon\.satisfied\{color:var\(--vscode-testing-iconPassed\)\}/);
+  assert.match(html, /\.dependency-icon\.satisfied\{color:var\(--cluster-watcher-green\)\}/);
   assert.match(html, /\.dependency-icon\.failed\{color:var\(--vscode-errorForeground\)\}/);
 });
 

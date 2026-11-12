@@ -75,7 +75,7 @@ class TerminalStatusTests(TimedTestCase):
         self.assertIn("PARTITION", output)
         self.assertIn("GPU NAME", output)
         self.assertIn("WAIT TIME · JOB UP TO 1 HOUR · GPU COUNT", output)
-        wait_header = output.splitlines()[4].split()
+        wait_header = next(line for line in output.splitlines() if line.strip().startswith("1  ")).split()
         self.assertEqual(wait_header, ["1", "2", "4", "8", "16", "32", "64"])
         self.assertIn("AMD Instinct MI300A", output)
         self.assertIn("128G", output)
@@ -88,6 +88,28 @@ class TerminalStatusTests(TimedTestCase):
         self.assertIn("2h", output)
         self.assertIn("\033[31m", output)
         self.assertIn("\033[32m", output)
+
+    def test_board_shows_job_mix_free_nodes_and_partition_fair_share(self):
+        """Match the sidebar's three job groups and physical availability cues."""
+        payload = capacity_payload()
+        cluster = payload["clusters"][0]
+        cluster["user_jobs"] = {"running": 2, "pending": 1, "depending": 1}
+        partition = cluster["partitions"][0]
+        partition["node_states"] = {"IDLE": 2, "MIXED": 1, "ALLOCATED": 1}
+        partition["fair_share"] = [
+            {"account": "lab", "factor": 0.725, "rank": 13, "total": 50},
+            {"account": "other", "factor": 0.4, "rank": 30, "total": 50},
+        ]
+
+        output = render_status_board(payload, use_color=True, width=180)
+
+        self.assertIn("2 running · 1 pending · 1 depending", output)
+        self.assertIn("\033[34m", output)
+        self.assertIn("\033[38;5;88m", output)
+        self.assertIn("Nodes:", output)
+        self.assertIn("2/4 Free", output)
+        self.assertIn("FairShare: lab factor 0.725 · rank 13/50", output)
+        self.assertIn("FairShare: other factor 0.4 · rank 30/50", output)
 
     def test_board_marks_and_explains_wait_probe_errors(self):
         """Never represent a known wait failure as an unexplained unknown value."""
@@ -120,7 +142,7 @@ class TerminalStatusTests(TimedTestCase):
             nonlocal status_calls
             status_calls += 1
             self.assertFalse(include_jobs)
-            self.assertFalse(personal)
+            self.assertTrue(personal)
             return ClusterStatus(
                 "cluster_1", "host", "alice",
                 partitions=[{"partition": "apu", "available": "up", "nodes": "2", "cpus": "0/192/0/192", "state": "idle"}],

@@ -74,7 +74,7 @@ def _submitted(job: dict[str, object]) -> object:
 
 
 def _sort_key(job: dict[str, object]) -> tuple[object, ...]:
-    """Sort by state group, then newest submission, cluster, and numeric job ID."""
+    """Sort active groups by cluster then newest submission, like My Jobs."""
     submitted = _parse_time(_submitted(job))
     if submitted is None:
         submitted_value = 0.0
@@ -84,10 +84,9 @@ def _sort_key(job: dict[str, object]) -> tuple[object, ...]:
         submitted_value = submitted.timestamp()
     job_id = str(job.get("job_id") or job.get("id") or "")
     numeric_id = tuple(int(value) for value in job_id.replace("_", ".").split(".") if value.isdigit())
-    return (
-        _state_rank(job.get("state"), job), -submitted_value,
-        str(job.get("cluster", "")).casefold(), numeric_id, job_id,
-    )
+    rank = _state_rank(job.get("state"), job)
+    cluster = str(job.get("cluster", "")).casefold() if rank <= 2 else ""
+    return rank, cluster, -submitted_value, numeric_id, job_id
 
 
 def _format_duration(seconds: object) -> str:

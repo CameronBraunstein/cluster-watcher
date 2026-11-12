@@ -87,6 +87,23 @@ class TerminalJobsTests(TimedTestCase):
         self.assertIn("10m / 1h0m", output)
         self.assertIn("30m waited · 30m left", output)
 
+    def test_active_jobs_sort_by_cluster_before_submission_time(self):
+        """Use the same cluster-first order as the sidebar's active groups."""
+        early_beta = job("RUNNING", "101")
+        early_beta["cluster"] = "beta"
+        early_beta["submit_at"] = "2026-09-25T09:00:00+00:00"
+        late_alpha = job("RUNNING", "102")
+        late_alpha["cluster"] = "alpha"
+        late_alpha["submit_at"] = "2026-09-25T10:00:00+00:00"
+        early_alpha = job("RUNNING", "103")
+        early_alpha["cluster"] = "alpha"
+        early_alpha["submit_at"] = "2026-09-25T08:00:00+00:00"
+
+        output = render_job_board({"jobs": [early_beta, early_alpha, late_alpha]}, now=NOW, width=180)
+
+        self.assertLess(output.index("102"), output.index("103"))
+        self.assertLess(output.index("103"), output.index("101"))
+
     def test_dependency_waits_have_a_section_after_pending(self):
         """Both terminal layouts place dependency-held jobs after ready jobs."""
         pending = job("PENDING", "1")

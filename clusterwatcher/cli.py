@@ -159,8 +159,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "jobs",
         help="show your recent jobs in the terminal",
         description=(
-            "Show jobs from the last 24 hours, ordered as running, pending, "
-            "completed, failed, then cancelled. Running progress is blue and "
+            "Show jobs from the last 24 hours, grouped as running, pending, "
+            "depending, completed, failed, then cancelled. Active jobs are "
+            "ordered by cluster and submission time. Running progress is blue and "
             "pending progress is red when output is a terminal. Live mode uses "
             "Up/Down, Page Up/Page Down, Home, and End to scroll; q exits."
         ),
@@ -174,8 +175,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "status",
         help="show GPU capacity and up-to-one-hour wait estimates",
         description=(
-            "Show a table per cluster with GPU model/specifications, red/green "
-            "availability, CPU threads, and up-to-one-hour wait estimates for 1, 2, "
+            "Show a table per cluster with your running/pending/depending job mix, "
+            "GPU model/specifications, free GPUs and nodes, mapped fair share, "
+            "CPU threads, and up-to-one-hour wait estimates for 1, 2, "
             "4, 8, 16, 32, and 64 GPUs. Pass SECONDS first for live refresh; "
             "failed wait probes are marked DENY, min, limit, n/a, or ERR (only ERR "
             "is a real failure) with their diagnostic below. "

@@ -283,12 +283,12 @@ class SnapshotTests(TimedTestCase):
         self.assertNotIn("function fairShareView(cluster)", PAGE)
         self.assertIn("function fairShareFactorBar(entry)", PAGE)
         self.assertIn("${partitionFairShareView(fairShare, name)}", PAGE)
-        self.assertIn("const label = factor.toFixed(6)", PAGE)
+        self.assertNotIn("const label = factor.toFixed(6)", PAGE)
         self.assertIn('role="progressbar"', PAGE)
         self.assertIn('class="fair-share-marker"', PAGE)
         self.assertIn('style="left:${(factor * 100).toFixed(2)}%"', PAGE)
         self.assertIn('background:linear-gradient(90deg,#dc2626,#777 50%,#16a34a)', PAGE)
-        self.assertIn("Account: ${entry.account}", PAGE)
+        self.assertIn("${entry.account}: ${rank}/${total}", PAGE)
         self.assertIn("entry.matched_partitions || [entry.partition]", PAGE)
 
     def test_browser_skips_unchanged_renders_and_materializes_open_partitions(self):
@@ -473,6 +473,33 @@ class SnapshotTests(TimedTestCase):
 
         self.assertEqual(response["status"], 200)
         self.assertEqual(dashboard["clusters"][0]["name"], "cluster_0")
+        self.assertEqual(dashboard["summary"]["clusters"][0]["name"], "cluster_0")
+        self.assertNotIn("nodes", dashboard["summary"]["clusters"][0]["partitions"][0])
+
+    def test_browser_status_embeds_sidebar_job_and_partition_summary(self):
+        """Keep browser counts and free-capacity values on the shared snapshot contract."""
+        status = example_status()
+        status.user_jobs = [
+            {"id": "1", "state": "RUNNING", "gpus": 2, "time_limit_seconds": 3600,
+             "elapsed_seconds": 600},
+            {"id": "2", "state": "PENDING", "reason": "Priority", "gpus": 1,
+             "time_limit_seconds": 3600},
+            {"id": "3", "state": "PENDING", "dependency": "afterok:1(unfulfilled)",
+             "gpus": 1, "time_limit_seconds": 3600},
+        ]
+        store = StatusStore([Machine("cluster_0", "slurm.example", "alice")], 5, False, 15)
+        store._statuses = [status]
+        store._updated_at = "2026-09-22T10:00:00+00:00"
+
+        browser = json.loads(store.json_document("status")[0])
+        summary = browser["summary"]["clusters"][0]
+        partition = summary["partitions"][0]
+
+        self.assertEqual(summary["user_jobs"], {"running": 1, "pending": 1, "depending": 1})
+        self.assertEqual(partition["gpus"]["total"], 8)
+        self.assertEqual(partition["gpus"]["schedulable_idle"], 3)
+        self.assertEqual(partition["node_states"], {"IDLE+DRAIN": 1, "MIXED": 1})
+        self.assertNotIn("nodes", partition)
 
     def test_jobs_endpoint_is_opt_in_and_forwards_repeatable_filters(self):
         disabled = StatusStore([Machine("a", "host", "user")], 5, False, 15)

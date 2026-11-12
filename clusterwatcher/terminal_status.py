@@ -19,6 +19,8 @@ from .wait_probes import WAIT_PROBE_REFRESH_SECONDS, classify_wait_error, collec
 
 ANSI_RED = "\033[31m"
 ANSI_GREEN = "\033[32m"
+ANSI_BLUE = "\033[34m"
+ANSI_MAROON = "\033[38;5;88m"
 ANSI_RESET = "\033[0m"
 WAIT_GPU_COUNTS = (1, 2, 4, 8, 16, 32, 64)
 TERMINAL_WAIT_PROBE_BUDGET_SECONDS = 10.0
@@ -184,6 +186,73 @@ def _partition_row(partition: dict[str, object], use_color: bool) -> tuple[list[
     return cells, styled_availability
 
 
+def _job_summary(cluster: dict[str, object], use_color: bool) -> str:
+    """Summarize the user's running, ready, and dependency-held jobs."""
+    counts = cluster.get("user_jobs") or {}
+    values = [max(0, int(counts.get(key) or 0)) for key in ("running", "pending", "depending")]
+    total = sum(values)
+    if total:
+        bounds = [round(sum(values[:index]) / total * 12) for index in range(4)]
+        blocks = ["█" * max(0, bounds[index + 1] - bounds[index]) for index in range(3)]
+        if use_color:
+            bar = "".join(
+                f"{color}{block}{ANSI_RESET}" for color, block in
+                zip((ANSI_BLUE, ANSI_RED, ANSI_MAROON), blocks) if block
+            )
+        else:
+            bar = "".join(blocks)
+        bar = f"[{bar}]"
+    else:
+        bar = "[            ]"
+    return (
+        f"My jobs {bar} "
+        f"{values[0]} running · {values[1]} pending · {values[2]} depending"
+    )
+
+
+def _free_nodes(partition: dict[str, object]) -> tuple[int, int]:
+    """Count idle nodes from the normalized partition state inventory."""
+    states = partition.get("node_states") or {}
+    if states:
+        total = sum(max(0, int(value)) for value in states.values())
+        free = sum(
+            max(0, int(value)) for state, value in states.items()
+            if str(state).lower().startswith("idle")
+        )
+    else:
+        nodes = partition.get("nodes") or []
+        total = len(nodes) or max(0, int(partition.get("reported_nodes") or 0))
+        free = sum(1 for node in nodes if str(node.get("state", "")).lower().startswith("idle"))
+    return (0 if partition.get("available") is False else free), total
+
+
+def _partition_notes(partition: dict[str, object], use_color: bool) -> list[str]:
+    """Give compact physical node availability and mapped fair-share ranks."""
+    free, total = _free_nodes(partition)
+    styled, _ = _availability_bar(free, total, use_color)
+    lines = [f"  Nodes: {styled} {free}/{total} Free"]
+    associations = partition.get("fair_share") or []
+    for entry in associations:
+        factor = entry.get("factor")
+        rank, population = entry.get("rank"), entry.get("total")
+        if factor is None or rank is None or population is None:
+            continue
+        try:
+            numeric_factor = float(factor)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(numeric_factor):
+            continue
+        factor_text = f"{numeric_factor:.3f}".rstrip("0").rstrip(".")
+        lines.append(
+            f"  FairShare: {entry.get('account') or 'account'} "
+            f"factor {factor_text} · rank {rank}/{population}"
+        )
+    if not any(line.startswith("  FairShare:") for line in lines):
+        lines.append("  FairShare: unavailable for this partition")
+    return lines
+
+
 def render_status_board(
     payload: dict[str, object],
     *,
@@ -214,15 +283,16 @@ def render_status_board(
         if not cluster.get("reachable", False):
             lines.append(f"ERROR: {cluster.get('error') or 'cluster is unreachable'}")
             continue
+        lines.append(_job_summary(cluster, use_color))
         if cluster.get("resource_error"):
             lines.append(f"WARNING: {cluster['resource_error']}")
         partitions = [item for item in cluster.get("partitions", []) if isinstance(item, dict)]
         if not partitions:
             lines.append("No partitions returned by Slurm.")
             continue
-        prepared = [_partition_row(partition, use_color) for partition in partitions]
+        prepared = [(partition, *_partition_row(partition, use_color)) for partition in partitions]
         widths = [
-            min(cap, max(len(heading), *(len(cells[index]) for cells, _ in prepared)))
+            min(cap, max(len(heading), *(len(cells[index]) for _, cells, _ in prepared)))
             for index, (heading, cap) in enumerate(zip(headings, caps))
         ]
         overflow = sum(widths) + 2 * (len(widths) - 1) - terminal_width
@@ -245,11 +315,12 @@ def render_status_board(
             + "  ".join(_fit(headings[index], widths[index]) for index in range(5, 12)).rstrip()
         )
         lines.append("─" * min(terminal_width, sum(widths) + 2 * (len(widths) - 1)))
-        for cells, styled_availability in prepared:
+        for partition, cells, styled_availability in prepared:
             values = [_fit(value, widths[index]) for index, value in enumerate(cells)]
             if use_color and len(cells[4]) <= widths[4]:
                 values[4] = styled_availability + " " * (widths[4] - len(cells[4]))
             lines.append("  ".join(values).rstrip())
+            lines.extend(_partition_notes(partition, use_color))
         lines.extend(_wait_error_lines(partitions))
         if cluster.get("job_states") is not None:
             jobs = cluster.get("job_states") or {}
@@ -293,7 +364,7 @@ class StatusBoardCollector:
                         machine,
                         self.timeout,
                         self.include_jobs,
-                        False,
+                        True,
                     )
                     for machine in self.machines
                 ]

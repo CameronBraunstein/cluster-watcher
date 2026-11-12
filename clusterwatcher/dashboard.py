@@ -52,8 +52,8 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .refresh-clock-hand { stroke:#2563eb; stroke-width:2; stroke-linecap:round; transform-origin:12px 12px; transition:transform .25s linear; }
 .refresh-clock-center { fill:#2563eb; }
 .cluster { border:1px solid #8885; border-radius:.5rem; margin:1rem 0; padding:1rem; }
-.partition-fair-share { margin:.45rem 0; } .fair-share-title { display:block; margin-bottom:.2rem; color:#666; font-size:.78rem; } .fair-share-bars { display:grid; gap:.35rem; }
-.fair-share-row { display:grid; grid-template-columns:minmax(4rem,10rem) max-content; align-items:center; gap:.35rem; min-width:0; } .fair-share-track { box-sizing:border-box; position:relative; display:block; width:100%; height:.62rem; overflow:visible; border-radius:999px; background:linear-gradient(90deg,#dc2626,#777 50%,#16a34a); cursor:help; } .fair-share-marker { position:absolute; top:-.18rem; width:2px; height:.98rem; transform:translateX(-1px); background:CanvasText; box-shadow:0 0 0 1px Canvas; } .fair-share-label { color:#666; font-size:.72rem; font-variant-numeric:tabular-nums; white-space:nowrap; } .fair-share-track.unavailable { background:#8883; }
+.partition-fair-share { display:flex; align-items:center; gap:.35rem; margin:.45rem 0; } .fair-share-title { flex:0 0 3.2rem; color:#666; font-size:.78rem; } .fair-share-bars { display:grid; flex:1 1 auto; gap:.35rem; min-width:0; }
+.fair-share-row { display:block; min-width:0; } .fair-share-track { box-sizing:border-box; position:relative; display:block; width:100%; height:.42rem; overflow:visible; border-radius:999px; background:linear-gradient(90deg,#dc2626,#777 50%,#16a34a); cursor:help; } .fair-share-marker { position:absolute; top:-.18rem; width:2px; height:.98rem; transform:translateX(-1px); background:CanvasText; box-shadow:0 0 0 1px Canvas; } .fair-share-track.unavailable { background:#8883; }
 .key { border:1px solid #8885; border-radius:.5rem; margin:1rem 0; padding:1rem; }
 .key h2 { margin-top:0; } .key-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:.5rem 1.5rem; }
 .key-grid p { margin:.35rem 0; }
@@ -90,7 +90,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .partition-specs { color:#666; font-size:.8rem; margin:.3rem 0; }
 .partition-availability { display:flex; align-items:center; gap:.35rem; margin:.22rem 0; font-size:.78rem; }
 .partition-availability-label { flex:0 0 3.2rem; color:#666; }
-.partition-availability-track { display:flex; flex:1 1 auto; max-width:18rem; min-width:2rem; height:.42rem; overflow:hidden; border-radius:999px; background:#8883; }
+.partition-availability-track { display:flex; flex:1 1 auto; min-width:2rem; height:.42rem; overflow:hidden; border-radius:999px; background:#8883; }
 .partition-availability-track .free { background:#16a34a; } .partition-availability-track .busy { background:#dc2626; }
 .partition-availability-count { white-space:nowrap; font-variant-numeric:tabular-nums; }
 .cluster > summary { cursor:pointer; list-style:none; } .cluster > summary::-webkit-details-marker { display:none; }
@@ -116,7 +116,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .gpu-cell { width:1.1rem; height:1.1rem; } .cpu-cell { width:.42rem; height:.42rem; }
 .powered-off { background:#000; } .drained { background:#8b4513; } .down { background:#991b1b; } .reserved { background:#7c3aed; } .maintenance, .rebooting { background:#2563eb; } .allocated { background:#dc2626; } .mixed-powered-off { background:#f97316; } .mixed { background:#eab308; } .idle { background:#16a34a; } .unknown { background:#6b7280; } .other { background:#eab308; }
 .legend { display:flex; flex-wrap:wrap; gap:.35rem .75rem; font-size:.85rem; }
-.legend-item { display:inline-flex; gap:.3rem; align-items:center; } .swatch { width:.7rem; height:.7rem; border-radius:50%; }
+.legend-item { display:inline-flex; gap:.3rem; align-items:center; } .swatch { display:inline-block; width:.7rem; height:.7rem; border-radius:50%; vertical-align:middle; }
 .error { color:#c33; white-space:pre-wrap; }
 .cluster-warning { color:#d9a400; margin-left:.35rem; font-weight:700; }
 .job-badges { display:flex; flex-wrap:wrap; gap:.35rem; } .job-badge { border:1px solid #8885; border-radius:.55rem; font-size:.82rem; padding:.2rem .5rem; white-space:nowrap; }
@@ -124,7 +124,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 @media (max-width:600px) { .title-row { flex-wrap:wrap; gap:.25rem .75rem; } .partition-heading { flex-wrap:wrap; } .job-badge .job-progress { display:none; } }
 </style></head><body><header><div class="title-row"><h1>Cluster Watcher</h1><span id="updated">Loading…</span><div class="refresh-countdown"><svg class="refresh-clock" viewBox="0 0 24 24" role="img" aria-labelledby="refresh-label"><circle class="refresh-clock-face" cx="12" cy="12" r="9.5"></circle><path class="refresh-clock-tick" d="M12 3.8v1.4M20.2 12h-1.4M12 20.2v-1.4M3.8 12h1.4"></path><line id="refresh-clock-hand" class="refresh-clock-hand" x1="12" y1="12" x2="12" y2="5"></line><circle class="refresh-clock-center" cx="12" cy="12" r="1.25"></circle></svg><span id="refresh-label">Waiting for first refresh…</span></div></div></header>
 <section class="my-jobs" id="my-jobs"><h2>My jobs</h2><div id="my-jobs-content">Waiting for job data…</div></section>
-<section class="key"><h2>How to read this dashboard</h2><div class="key-grid"><div><p><i class="swatch powered-off"></i> <b>Drained (powered off)</b> — unavailable and powered off.</p><p><i class="swatch drained"></i> <b>Drained</b> — removed from scheduling by an administrator.</p><p><i class="swatch allocated"></i> <b>Allocated</b> — fully assigned to jobs, including GPU-saturated nodes.</p></div><div><p><i class="swatch mixed-powered-off"></i> <b>Mixed~</b> — partly allocated and powered off/transitioning.</p><p><i class="swatch mixed"></i> <b>Mixed</b> — some resources are assigned to jobs and some remain free.</p><p><i class="swatch idle"></i> <b>Idle</b> — available for eligible new jobs.</p><p><b>Blue outlines</b> mark nodes and resource cells allocated to your running jobs. Pending-job times are Slurm scheduler estimates; node release times are only the earliest visible running-job end, not a promise.</p></div></div></section>
+<section class="key"><h2>How to read this dashboard</h2><div class="key-grid"><div><p><i class="swatch powered-off"></i> <b>Drained (powered off)</b> — unavailable and powered off.</p><p><i class="swatch drained"></i> <b>Drained</b> — removed from scheduling.</p><p><i class="swatch allocated"></i> <b>Allocated</b> — fully assigned to jobs, including GPU-saturated nodes.</p><p><i class="swatch mixed-powered-off"></i> <b>Mixed~</b> — partly allocated and powered off/transitioning.</p><p><i class="swatch mixed"></i> <b>Mixed</b> — assigned and free resources coexist.</p><p><i class="swatch idle"></i> <b>Idle</b> — available for eligible jobs.</p></div><div><p><b>Cluster job bar:</b> <span style="color:#2563eb">blue</span> running, <span style="color:#dc2626">red</span> pending, <span style="color:#6b1026">maroon</span> depending. Click a segment to find those jobs.</p><p><b>Free GPUs</b> excludes idle devices on unschedulable nodes. <b>Free Nodes</b> counts fully idle nodes.</p><p><b>FairShare</b> is account-specific: higher factors generally help, but do not predict a start time.</p><p><b>Wait squares</b> estimate one-hour GPU requests. A denied or missing probe is not a wait-time prediction.</p><p><b>Blue outlines</b> mark your resources. Slurm start and node-release times can change.</p></div></div></section>
 <main id="clusters"></main><script>
 const escapeHtml = value => String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const asNumber = value => /^\\d+$/.test(value) ? Number(value) : 0;
@@ -656,9 +656,24 @@ function renderJobs() {
   return `${jobWarnings}${activeContent}${archive}`;
 }
 
+let pendingJobJump = null;
+/** Open the matching My jobs section and reveal the first card on a cluster. */
+function revealJobGroup(group, cluster) {
+  const section = [...document.querySelectorAll('.job-group[data-job-disclosure-key]')]
+    .find(details => details.dataset.jobDisclosureKey === `group:active:${group}`);
+  if (!section) return false;
+  section.open = true;
+  const card = [...section.querySelectorAll('.job-card[data-job-ref]')]
+    .find(item => item.dataset.jobRef.startsWith(cluster + '/'));
+  if (!card) return false;
+  card.scrollIntoView({ behavior:'smooth', block:'center' });
+  return true;
+}
+
 function renderJobsIntoPage() {
   document.querySelectorAll('[data-job-disclosure-key]').forEach(details => jobDisclosure.set(details.dataset.jobDisclosureKey, details.open));
   document.querySelector('#my-jobs-content').innerHTML = renderJobs();
+  if (pendingJobJump && revealJobGroup(pendingJobJump.group, pendingJobJump.cluster)) pendingJobJump = null;
   updateDynamicDisplays();
 }
 
@@ -760,54 +775,102 @@ function compactGpuName(value) {
   return withoutBrand.split(/\\s+/).slice(0, 2).join(' ');
 }
 
-function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, estimates, estimatesUpdatedAt, fairShare) {
+/** Show the same physical free-capacity fraction as the VS Code partition card. */
+function capacityBar(label, free, total, tooltip) {
+  const available = Math.min(Math.max(0, Number(free) || 0), Math.max(0, Number(total) || 0));
+  const count = Math.max(0, Number(total) || 0);
+  const percent = count ? available / count * 100 : 0;
+  const description = escapeHtml(tooltip);
+  return `<div class="partition-availability"><span class="partition-availability-label">${label}:</span><span class="partition-availability-track fast-hover" role="img" aria-label="${description}" data-fast-tooltip="${description}"><span class="free" style="width:${percent}%"></span><span class="busy" style="width:${100 - percent}%"></span></span><span class="partition-availability-count">${available}/${count} Free</span></div>`;
+}
+
+function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, estimates, estimatesUpdatedAt, fairShare, snapshotPartition) {
   const availability = availabilityDescription(nodes);
-  const status = [...nodes].sort((left, right) => statePriority(left) - statePriority(right) || String(left.name).localeCompare(String(right.name))).map(node => `<i class="node-state-block ${summaryStateClass(node)}"></i>`).join('');
   const summary = compute.get(name);
-  const best = summary && summary.best_gpu;
+  const models = snapshotPartition?.gpus?.models || [];
+  const fallback = summary?.best_gpu;
+  const best = models[0] ? {
+    ...fallback, ...models[0],
+    vram_gb: models[0].vram_gb ?? fallback?.vram_gb,
+    fp16_bf16_tensor_tflops: models[0].fp16_bf16_tensor_tflops ?? fallback?.tensor_tflops,
+  } : fallback;
   const totalGpus = nodes.reduce((total, node) => total + asNumber(node.gpu?.total), 0);
-  const details = best ? `${summary.rank ? `#${summary.rank} · ` : ''}<span class="fast-hover" data-fast-tooltip="${escapeHtml(best.name)}" aria-label="${escapeHtml(best.name)}">${escapeHtml(compactGpuName(best.name))}</span> · ${escapeHtml(best.vram_gb)} GB VRAM/GPU · ${escapeHtml(best.tensor_tflops.toLocaleString())} FP16/BF16 Tensor TFLOPS/GPU · ${escapeHtml(summary.cpu_threads.toLocaleString())} CPU threads` : 'GPU model not catalogued';
+  const threads = snapshotPartition?.cpus?.total ?? summary?.cpu_threads ?? 0;
+  const tflops = best?.fp16_bf16_tensor_tflops ?? best?.tensor_tflops;
+  const details = best ? `<span class="fast-hover" data-fast-tooltip="${escapeHtml(best.name)}">${escapeHtml(compactGpuName(best.name))}</span> · <span class="fast-hover" data-fast-tooltip="VRAM: ${escapeHtml(best.vram_gb)} GB">${escapeHtml(best.vram_gb)} GB</span> · ${escapeHtml(tflops ?? '—')} TFLOPS/s · <span class="fast-hover" data-fast-tooltip="CPU threads: ${escapeHtml(threads)}">${escapeHtml(threads)} threads</span>` : `${totalGpus ? 'GPU model unavailable' : 'No GPUs'} · ${escapeHtml(threads)} threads`;
+  const gpu = snapshotPartition?.gpus || {};
+  const gpuTotal = Number(gpu.total) || totalGpus;
+  const freeGpu = snapshotPartition ? Number(gpu.schedulable_idle) || 0
+    : nodes.filter(node => ['idle', 'mixed'].includes(availabilityStateLabel(node))).reduce((sum, node) => sum + asNumber(node.gpu?.idle), 0);
+  const nodeStates = snapshotPartition?.node_states || {};
+  const nodeTotal = Object.values(nodeStates).reduce((sum, value) => sum + (Number(value) || 0), 0) || nodes.length;
+  const freeNodes = snapshotPartition?.available === false ? 0 : Object.keys(nodeStates).length
+    ? Object.entries(nodeStates).reduce((sum, [state, value]) => sum + (availabilityStateLabel({ state }) === 'idle' ? Number(value) || 0 : 0), 0)
+    : nodes.filter(node => availabilityStateLabel(node) === 'idle').length;
+  const gpuIdle = gpu.idle ?? nodes.reduce((sum, node) => sum + asNumber(node.gpu?.idle), 0);
+  const gpuAllocated = gpu.allocated ?? nodes.reduce((sum, node) => sum + asNumber(node.gpu?.allocated), 0);
+  const gpuTooltip = `${gpuIdle} idle, ${gpuAllocated} allocated, ${Math.max(0, gpuIdle - freeGpu)} unavailable`;
+  const nodeTooltip = availability.replace(/^Nodes: /, '');
   const badges = jobBadges(jobs, name, thresholds);
   const launchability = launchabilityStrip(estimates, name, totalGpus, estimatesUpdatedAt, thresholds);
-  const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}</h3>${launchability}<div class="partition-status" data-availability="${escapeHtml(availability)}" aria-label="${escapeHtml(availability)}">${status}</div>${badges ? `<div class="job-badges">${badges}</div>` : ''}</div>`;
+  const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}${summary?.aggregate ? ' (aggregate)' : ''}</h3>${launchability}</div><div class="partition-specs">${details}</div>${partitionFairShareView(fairShare, name)}${capacityBar('GPUs', freeGpu, gpuTotal, gpuTooltip)}${capacityBar('Nodes', freeNodes, nodeTotal, nodeTooltip)}${badges ? `<div class="job-badges">${badges}</div>` : ''}`;
   const disclosureKey = JSON.stringify([clusterName, name]);
-  partitionBodies.set(disclosureKey, () => `<div class="partition-compute">${details}</div><div class="node-grid">${nodesByAvailableGpu(nodes).map(nodeCard).join('')}</div>`);
-  return `<details class="partition-section${summary?.aggregate ? ' aggregate-partition' : ''}" data-partition-key="${escapeHtml(disclosureKey)}"${partitionDisclosure.get(disclosureKey) ? ' open' : ''}><summary>${heading}${partitionFairShareView(fairShare, name)}</summary><div class="partition-body"></div></details>`;
+  partitionBodies.set(disclosureKey, () => `<div class="node-grid">${nodesByAvailableGpu(nodes).map(nodeCard).join('')}</div>`);
+  return `<details class="partition-section${summary?.aggregate ? ' aggregate-partition' : ''}" data-partition-key="${escapeHtml(disclosureKey)}"${partitionDisclosure.get(disclosureKey) ? ' open' : ''}><summary>${heading}</summary><div class="partition-body"></div></details>`;
 }
 
 function fairShareFactorBar(entry) {
   const factor = Number(entry.factor), rank = Number(entry.rank), total = Number(entry.total);
   if (entry.factor == null || !Number.isFinite(factor) || factor < 0 || factor > 1 || !Number.isInteger(rank) || !Number.isInteger(total) || rank < 1 || total < rank) return '';
-  const label = factor.toFixed(6);
-  const details = [
-    `Account: ${entry.account}`,
-    `Visible rank: ${rank}/${total}`,
-    `Slurm partition: ${entry.partition || 'not specified'}`,
-    `Matched by: ${entry.mapping_source === 'account_qos' ? 'account hierarchy and QOS' : 'explicit association partition'}`,
-    'Higher factors favor jobs; they do not predict start time.',
-  ].join('\\n');
+  const details = `${entry.account}: ${rank}/${total}`;
   const tooltip = escapeHtml(details).replace(/\\n/g, '&#10;');
-  return `<div class="fair-share-row"><div class="fast-hover fair-share-track" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${factor}" aria-label="${tooltip}" data-fast-tooltip="${tooltip}"><i class="fair-share-marker" style="left:${(factor * 100).toFixed(2)}%"></i></div><span class="fair-share-label">${label}</span></div>`;
+  return `<div class="fair-share-row"><div class="fast-hover fair-share-track" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${factor}" aria-label="${tooltip}" data-fast-tooltip="${tooltip}"><i class="fair-share-marker" style="left:${(factor * 100).toFixed(2)}%"></i></div></div>`;
 }
 
 function partitionFairShareView(share, partition) {
   const associations = Array.isArray(share?.associations) ? share.associations : [];
   const bars = associations.filter(entry => (entry.matched_partitions || [entry.partition]).includes(partition)).map(fairShareFactorBar).filter(Boolean).join('');
   const explanation = escapeHtml(share?.mapping_error || share?.error || 'No confirmed association match for this partition.').replace(/\\n/g, '&#10;');
-  const unavailable = `<div class="fair-share-row"><div class="fast-hover fair-share-track unavailable" aria-label="${explanation}" data-fast-tooltip="${explanation}"></div><span class="fair-share-label">—</span></div>`;
+  const unavailable = `<div class="fair-share-row"><div class="fast-hover fair-share-track unavailable" aria-label="${explanation}" data-fast-tooltip="${explanation}"></div></div>`;
   return `<div class="partition-fair-share"><span class="fair-share-title">FairShare:</span><div class="fair-share-bars">${bars || unavailable}</div></div>`;
 }
 
-function clusterView(cluster, waitThresholds) {
+/** Summarize active jobs by the same three groups used in the VS Code sidebar. */
+function clusterJobRatio(summary) {
+  if (!summary || summary.collecting) return '<span class="cluster-collecting">Loading…</span>';
+  const counts = summary.user_jobs || {};
+  const total = ['running', 'pending', 'depending'].reduce((sum, key) => sum + (Number(counts[key]) || 0), 0);
+  const segments = ['running', 'pending', 'depending'].map(group => {
+    const count = Number(counts[group]) || 0;
+    if (!count) return '';
+    const hours = summary.user_gpu_hours?.[group];
+    const detail = hours == null ? 'GPU-hours unavailable' : `${Number(hours).toLocaleString()} GPU-hours ${group === 'running' ? 'remaining' : 'requested'}`;
+    const tooltip = `${count} ${group} job${count === 1 ? '' : 's'}\n${detail}`;
+    return `<button class="cluster-job-${group}" style="width:${count / total * 100}%" data-job-group="${group.toUpperCase()}" data-cluster="${escapeHtml(summary.name)}" title="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}"></button>`;
+  }).join('');
+  return `<span class="cluster-job-track" role="group" aria-label="${Number(counts.running) || 0} running, ${Number(counts.pending) || 0} pending, ${Number(counts.depending) || 0} depending">${segments}</span>`;
+}
+
+const clusterDisclosure = new Map();
+function rememberClusterDisclosure() {
+  document.querySelectorAll('details[data-cluster-key]').forEach(details => clusterDisclosure.set(details.dataset.clusterKey, details.open));
+}
+
+function clusterView(cluster, waitThresholds, summary) {
   let content;
   if (!cluster.nodes || !cluster.nodes.length) content = cluster.error ? '<p>No previous node information is available.</p>' : cluster.capacity_updated_at ? '<p>No individual node information was returned by scontrol.</p>' : '<p>Collecting cluster data…</p>';
-  else { const compute = new Map((cluster.partition_compute || []).map(summary => [summary.name, summary])); content = partitionGroups(cluster.nodes, compute).map(group => partitionView(cluster.name, group, compute, cluster.user_jobs, waitThresholds || [5, 30, 60, 120], cluster.wait_estimates, cluster.wait_estimates_updated_at, cluster.fair_share)).join(''); }
+  else {
+    const compute = new Map((cluster.partition_compute || []).map(item => [item.name, item]));
+    const snapshotPartitions = new Map((summary?.partitions || []).map(item => [item.name, item]));
+    content = partitionGroups(cluster.nodes, compute).map(group => partitionView(cluster.name, group, compute, cluster.user_jobs, waitThresholds || [5, 30, 60, 120], cluster.wait_estimates, cluster.wait_estimates_updated_at, cluster.fair_share, snapshotPartitions.get(group[0]))).join('');
+  }
   if (cluster.jobs) content += `<p><b>Jobs:</b> ${Object.entries(cluster.jobs).map(([state, count]) => `${escapeHtml(state)}=${count}`).join(', ') || 'none'}</p>`;
   const error = cluster.error || cluster.resource_error;
   const timeout = error && /timed?\\s*out|timeout/i.test(error);
-  const warningText = error ? `${timeout ? 'Cluster refresh timed out.' : 'Cluster refresh failed.'} ${cluster.capacity_updated_at ? 'Showing last known data.' : 'No previous data is available.'}${timeout ? '' : `\\n${error}`}` : '';
+  const latest = summary?.last_success_at ? `Latest update: ${new Date(summary.last_success_at).toLocaleString()}` : 'Latest update unavailable';
+  const warningText = error ? `${timeout ? 'Cluster refresh timed out.' : 'Cluster refresh failed.'}\\n${latest}${timeout ? '' : `\\n${error}`}` : '';
   const warning = error ? `<span class="fast-hover cluster-warning" role="img" aria-label="${escapeHtml(warningText)}" data-fast-tooltip="${escapeHtml(warningText)}">⚠</span>` : '';
-  return `<section class="cluster"><h2>${escapeHtml(cluster.name)}${warning} <small>${escapeHtml(cluster.username)}@${escapeHtml(cluster.host)}</small></h2>${content}</section>`;
+  return `<details class="cluster" data-cluster-key="${escapeHtml(cluster.name)}"${clusterDisclosure.get(cluster.name) ? ' open' : ''}><summary><span class="cluster-summary"><h2>${escapeHtml(cluster.name)}</h2>${clusterJobRatio(summary)}${warning}</span></summary><div class="cluster-detail"><small>${escapeHtml(cluster.username)}@${escapeHtml(cluster.host)}</small>${content}</div></details>`;
 }
 
 let refreshTimer, refreshDeadline = 0, refreshPeriodMs = 1;
@@ -855,16 +918,17 @@ async function refresh() {
     const thresholds = result.wait_threshold_minutes || [5, 30, 60, 120];
     if (!result.updated_at) { document.querySelector('#updated').textContent = 'Waiting for first result…'; scheduleRefresh(1); return; }
     if (!notModified) {
-      rememberPartitionDisclosure(); partitionBodies.clear();
-      document.querySelector('#clusters').innerHTML = result.clusters.map(cluster => clusterView(cluster, thresholds)).join('');
+      rememberClusterDisclosure(); rememberPartitionDisclosure(); partitionBodies.clear();
+      const summaries = new Map((result.summary?.clusters || []).map(cluster => [cluster.name, cluster]));
+      document.querySelector('#clusters').innerHTML = result.clusters.map(cluster => clusterView(cluster, thresholds, summaries.get(cluster.name))).join('');
       document.querySelectorAll('details[data-partition-key][open]').forEach(materializePartition);
     }
+    await refreshJobs(result, !notModified);
     if (result.clusters.some(cluster => !cluster.capacity_updated_at && !cluster.error)) {
       document.querySelector('#updated').textContent = 'Loading clusters as they respond…';
       scheduleRefresh(1, result.refresh_seconds);
       return;
     }
-    await refreshJobs(result, !notModified);
     const checked = notModified ? ` · checked ${new Date().toLocaleTimeString()}` : '';
     document.querySelector('#updated').textContent = `Updated ${new Date(result.updated_at).toLocaleTimeString()}${checked}`;
     // An unchanged (304) answer carries the old updated_at, which must not look overdue.
@@ -874,6 +938,14 @@ async function refresh() {
   } catch (error) { document.querySelector('#updated').textContent = `Dashboard error: ${error.message}`; scheduleRefresh(15); }
 }
 document.addEventListener('click', async event => {
+  const jobSegment = event.target.closest('[data-job-group][data-cluster]');
+  if (jobSegment) {
+    event.preventDefault(); event.stopPropagation();
+    pendingJobJump = { group: jobSegment.dataset.jobGroup, cluster: jobSegment.dataset.cluster };
+    if (revealJobGroup(pendingJobJump.group, pendingJobJump.cluster)) pendingJobJump = null;
+    else document.querySelector('#my-jobs').scrollIntoView({ behavior:'smooth', block:'start' });
+    return;
+  }
   const dependencyLink = event.target.closest('[data-job-jump]');
   if (dependencyLink) {
     event.preventDefault(); event.stopPropagation();
@@ -926,6 +998,8 @@ document.addEventListener('click', async event => {
   finally { button.disabled = false; }
 });
 document.addEventListener('toggle', event => {
+  const cluster = event.target.closest?.('details[data-cluster-key]');
+  if (cluster) clusterDisclosure.set(cluster.dataset.clusterKey, cluster.open);
   const details = event.target.closest?.('details[data-partition-key]');
   if (!details) return;
   partitionDisclosure.set(details.dataset.partitionKey, details.open);
