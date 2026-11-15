@@ -10,7 +10,8 @@ from typing import Callable, TextIO
 
 from .jobs import ACTIVE_JOB_STATES, JobService, has_failed_dependency, waits_for_dependency
 from .models import Machine
-from .slurm import collect_user_job_status, normalize_job_state
+from .scheduler import collect_user_job_status
+from .slurm import normalize_job_state
 from .terminal_ui import (
     draw_live_view as _draw_live_view,
     navigation_result as _navigation_result,
@@ -39,6 +40,8 @@ def _state_rank(state: object, job: dict[str, object] | None = None) -> int:
     normalized = normalize_job_state(str(state))
     if normalized == "RUNNING":
         return 0
+    if normalized == "HELD":
+        return 7
     if normalized == "PENDING" or normalized in ACTIVE_JOB_STATES:
         if job and has_failed_dependency(job):
             return 3

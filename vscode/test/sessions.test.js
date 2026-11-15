@@ -43,6 +43,17 @@ test('session dialog uses the compact cluster and account heading', () => {
   }] }), 'cluster_a: alice@login11.example.org\n🕒 01:59 left');
 });
 
+test('session dialog shows a configured submission hop after the login host', () => {
+  assert.equal(sessionDialogText({ machines: [{
+    name: 'atlas', username: 'alice', host: 'login.example', submission_host: 'submit.internal',
+    session_open: true, control_persist_seconds: null,
+  }] }), 'atlas: alice@login.example → submit.internal\nno idle limit');
+  assert.equal(sessionDialogText({ machines: [{
+    name: 'atlas', username: 'alice', host: 'login.example', submission_host: 'submit.internal',
+    session_open: false,
+  }] }), 'atlas: alice@login.example → submit.internal\nclosed');
+});
+
 test('session headings have no extra indentation and clock minutes use a colon', () => {
   const text = sessionDialogText({ machines: [{
     name: 'cluster_a', username: 'alice', host: 'login.example.org',

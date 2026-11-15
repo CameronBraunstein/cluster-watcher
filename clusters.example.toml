@@ -9,6 +9,11 @@
 name = "cluster-a"
 host = "login.cluster-a.example.org"
 username = "alice"
+# If Slurm commands belong on a second host, set its name or SSH alias here.
+# Cluster Watcher authenticates to `host`, then runs passwordless SSH from
+# that login node to `submission_host` for polling, logs, commands, and shells.
+# submission_host = "submit.cluster-a.example.org"
+# scheduler = "auto" # Use "slurm" or "condor" if both tools are installed.
 default_partition_max_time_minutes = 1440
 # Explicit `path=` log requests are limited to these remote directory trees.
 job_log_roots = ["/home/alice/jobs"]

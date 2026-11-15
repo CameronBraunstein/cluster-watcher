@@ -5,6 +5,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import shlex
 import socket
 import subprocess
 import tempfile
@@ -95,9 +96,33 @@ def _connection_options(machine: Machine, timeout: int, batch_mode: bool) -> lis
     return command
 
 
+def _submission_command(
+    machine: Machine, timeout: int, remote_command: str | None, *, allocate_tty: bool = False,
+) -> str | None:
+    """Run a command on the submission host through the authenticated login node.
+
+    The inner SSH client runs on the login node. It uses that node's SSH
+    configuration and noninteractive authentication; no second password prompt
+    can stall a dashboard refresh. POSIX quoting keeps the original command a
+    single remote-shell argument, including pipes, spaces, and newlines.
+    """
+    if machine.submission_host is None:
+        return remote_command
+    tokens = [
+        "ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={timeout}",
+        "-t" if allocate_tty else "-T", machine.submission_host,
+    ]
+    if remote_command is not None:
+        tokens.append(remote_command)
+    return shlex.join(tokens)
+
+
 def ssh_command(machine: Machine, timeout: int, remote_command: str) -> list[str]:
     """Build a non-interactive SSH command for a fixed remote command."""
-    return ["ssh", *_connection_options(machine, timeout, batch_mode=True), f"{machine.username}@{machine.host}", remote_command]
+    return [
+        "ssh", *_connection_options(machine, timeout, batch_mode=True),
+        f"{machine.username}@{machine.host}", _submission_command(machine, timeout, remote_command),
+    ]
 
 
 def existing_session_ssh_command(
@@ -129,8 +154,9 @@ def existing_session_ssh_command(
     if allocate_tty:
         command.append("-t")
     command.append(f"{machine.username}@{machine.host}")
-    if remote_command is not None:
-        command.append(remote_command)
+    routed_command = _submission_command(machine, timeout, remote_command, allocate_tty=allocate_tty)
+    if routed_command is not None:
+        command.append(routed_command)
     return command
 
 
@@ -211,7 +237,10 @@ def _run_remote_process(
     start the local client) advance to the next configured node. A nonzero
     remote-command status is never retried because the command did run.
     """
-    execution_timeout = timeout + 5 if process_timeout is None else process_timeout
+    # Each hop has its own ConnectTimeout. Give the outer process enough time
+    # to complete both handshakes when no caller supplied a stricter deadline.
+    default_timeout = timeout * (2 if machine.submission_host else 1) + 5
+    execution_timeout = default_timeout if process_timeout is None else process_timeout
     failures: list[str] = []
     candidates = _route_candidates(machine) if failover else [machine.for_host(active_host(machine))]
     for endpoint in candidates:
@@ -354,6 +383,7 @@ def _endpoint_session_status(machine: Machine, timeout: int) -> dict[str, object
         "username": machine.username,
         "interactive_auth": machine.interactive_auth,
         "credential_group": machine.credential_group,
+        "submission_host": machine.submission_host,
         "available": session_open,
         "session_open": session_open,
         "pid": int(pid_match.group(1)) if SSH_MULTIPLEXING_SUPPORTED and pid_match else None,
@@ -375,7 +405,8 @@ def session_status(machine: Machine, timeout: int = 5) -> dict[str, object]:
 
     An already-open control master wins and becomes the sticky endpoint. If no
     candidate is open, the configured order is retained and errors identify
-    the physical nodes that were checked.
+    the physical nodes that were checked. This checks the login session only;
+    a configured submission host is checked when a command actually runs.
     """
     failures: list[str] = []
     first: dict[str, object] | None = None

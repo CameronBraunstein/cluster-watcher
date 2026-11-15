@@ -296,14 +296,18 @@ function pendingExplanation(job) {
 
 /** Render state-appropriate elapsed/wait progress that the webview keeps current. */
 function jobProgress(job, asOf, now = Date.now(), noEstimatePriority = '') {
-  const spec = progressSpec(job, asOf);
+  const frozen = Boolean(job.refresh_error);
+  const lastObserved = Date.parse(job.last_success_at || '');
+  const sampledAt = frozen && Number.isFinite(lastObserved) ? lastObserved : asOf;
+  const spec = progressSpec(job, sampledAt);
   if (['DEPENDING', 'FAILED_DEPENDENCY'].includes(jobGroup(job)) || (spec.group === 'PENDING' && spec.expected == null)) {
     const explanation = pendingExplanation(job);
     if (explanation === 'no estimate available' && noEstimatePriority) return noEstimatePriority;
     return `<span class="muted progress-message">${explanation}</span>`;
   }
-  const view = progressView(spec, now);
-  return `<span class="job-progress" data-progress="${escapeHtml(JSON.stringify(spec))}"><span class="progress"><span class="progress-fill ${view.fill}" style="width:${view.percent}%"></span></span><span class="muted progress-label" title="${escapeHtml(view.label)}">${escapeHtml(view.label)}</span></span>`;
+  const view = progressView(spec, frozen ? sampledAt : now);
+  const live = frozen ? '' : ` data-progress="${escapeHtml(JSON.stringify(spec))}"`;
+  return `<span class="job-progress"${live}><span class="progress"><span class="progress-fill ${view.fill}" style="width:${view.percent}%"></span></span><span class="muted progress-label" title="${escapeHtml(view.label)}">${escapeHtml(view.label)}</span></span>`;
 }
 
 /** Render a running job's calculated deadline inside the expanded card. */
@@ -352,6 +356,7 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 .card[open] .name{white-space:normal;overflow-wrap:anywhere}
 .progress-message{display:block;max-width:100%;font-size:.72em;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
 .cluster-warning{flex:0 0 auto;color:var(--vscode-editorWarning-foreground,#d9a400);font-size:13px;line-height:1;cursor:help}.cluster-collecting{margin-left:auto;color:var(--vscode-descriptionForeground);font-size:.78em;font-weight:400;white-space:nowrap}
+.job-connection-warning{position:relative;z-index:11;flex:0 0 auto;margin-left:3px;color:var(--vscode-editorWarning-foreground,#d9a400);font-size:12px;line-height:1;cursor:help}
 .dependency-icon{display:inline-block;margin-left:2px;font-family:system-ui,sans-serif;font-weight:700;cursor:help}.dependency-icon.waiting{font-weight:400}.dependency-icon.satisfied{color:var(--cluster-watcher-green)}.dependency-icon.failed{color:var(--vscode-errorForeground)}
 .priority-context{display:flex;align-items:center;gap:5px;margin-top:6px;min-width:0}.priority-gauge{display:flex;align-items:center;flex:1 1 auto;min-width:54px;max-width:150px;cursor:help}.priority-track{position:relative;display:block;flex:1 1 auto;height:4px;border-radius:3px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--cluster-watcher-green))}.priority-marker{position:absolute;top:-3px;width:2px;height:10px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.priority-prominent{margin-top:5px}.priority-prominent .priority-track{height:6px}.priority-prominent .priority-marker{top:-3px;height:12px}.card[open] .card-summary-progress>.priority-prominent{display:none}.priority-help{color:var(--vscode-descriptionForeground);font-size:.8em;cursor:help}
 .partition-card{padding:5px;container-type:inline-size}.partition-title{align-items:center;flex-wrap:wrap;gap:4px 7px}.partition-title>.name{flex:0 1 auto;margin-right:auto}.partition-title>.launchability{flex:0 0 auto;margin-left:0}.partition-specs{display:block;margin-top:3px;font-size:.72em;white-space:normal;overflow-wrap:anywhere}.gpu-model,.vram-spec,.thread-spec{cursor:help}.partition-availability{display:flex;align-items:center;gap:0;margin-top:4px;font-size:.72em}.partition-availability-label{box-sizing:border-box;flex:0 0 36px;width:36px;padding-right:2px;color:var(--vscode-descriptionForeground);text-align:left;white-space:nowrap}.partition-availability>.availability-cell{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,max-content);column-gap:2px;flex:1 1 auto;min-width:0}.partition-availability .availability-cell>.availability{width:100%;min-width:0}.partition-availability .availability-count{width:max-content;min-width:min(var(--availability-count-width),45cqw);max-width:100%;overflow:hidden;text-overflow:ellipsis}.times dd>.availability-cell{justify-content:flex-end}
@@ -801,6 +806,10 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
   const identifier = String(job.job_id || job.id || 'unknown');
   const name = String(job.name || identifier);
   const hoverText = [job.cluster, identifier, name].filter(Boolean).join(' ');
+  const warningText = job.refresh_error && !archived
+    ? `Cluster connection issue.\nLatest update: ${job.last_success_at ? timeThenDate(job.last_success_at) : 'unavailable'}\n${job.refresh_error}` : '';
+  const warning = warningText
+    ? `<span class="job-connection-warning fast-hover" role="img" aria-label="${escapeHtml(warningText)}" data-fast-tooltip="${escapeHtml(warningText)}">⚠</span>` : '';
   const nodes = Number(job.node_count) || (job.nodes || []).length;
   const totalGpus = Number(job.gpu_total ?? (stateGroup(job.state) === 'RUNNING' || stateGroup(job.state) === 'PENDING'
     ? (Number(job.gpus) || 0) * Math.max(1, nodes) : job.gpus)) || 0;
@@ -819,14 +828,17 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
     : `<a class="button compact-action archive-action${quickArchive ? ' summary-archive-action' : ''}" role="button" ${commandAttributes(archiveCommand, [key])} title="Archive job" aria-label="Archive job">${archiveIcon()}</a>`;
   const actions = quickArchive ? [] : [archiveAction];
   if (stateGroup(job.state) !== 'PENDING') {
+    const logs = job.scheduler === 'condor' ? job.log_paths_available : null;
+    if (!logs || logs.err) {
     actions.push(
       `<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.openLog', [job.cluster, identifier, 'err'])} title="Open .err log" aria-label="Open .err log">.err</button>`,
-      `<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.openLog', [job.cluster, identifier, 'out'])} title="Open .out log" aria-label="Open .out log">.out</button>`,
     );
+    }
+    if (!logs || logs.out) actions.push(`<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.openLog', [job.cluster, identifier, 'out'])} title="Open .out log" aria-label="Open .out log">.out</button>`);
   }
-  actions.push(`<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.openScript', [job.cluster, identifier])} title="Open the Slurm batch script this job ran" aria-label="Open batch script">script</button>`);
+  if (job.scheduler !== 'condor' || job.script_available) actions.push(`<button class="button secondary compact-action" ${commandButtonAttributes('clusterWatcher.openScript', [job.cluster, identifier])} title="${job.scheduler === 'condor' ? 'Open current HTCondor submit file; it may have changed since submission' : 'Open the Slurm batch script this job ran'}" aria-label="${job.scheduler === 'condor' ? 'Open submit file' : 'Open batch script'}">script</button>`);
   const ending = cancelling.has(jobRef(job));
-  if (['RUNNING', 'PENDING'].includes(stateGroup(job.state)) && !ending) {
+  if (['RUNNING', 'PENDING'].includes(stateGroup(job.state)) && !ending && !job.refresh_error) {
     actions.push(`<a class="button danger compact-action end-job" role="button" ${commandAttributes('clusterWatcher.cancelJob', [job.cluster, identifier, job.name || identifier])} title="End job" aria-label="End job">End</a>`);
   }
   const disclosureKey = `card:${archived ? 'archive' : 'active'}:${key}`;
@@ -842,13 +854,13 @@ function jobCard(job, archived, disclosures, cancelling = new Set(), asOf = Date
     `<span class="meta-field meta-accelerators" data-separator="·">${gpuLabel}</span>`,
     `<span class="meta-field meta-cpus" data-separator="·">${Number(job.cpus) || 0} CPU</span>`,
   ].join('');
-  const priority = !archived && jobGroup(job) === 'PENDING' ? jobPriorityGauge(job, priorityJobs) : '';
+  const priority = !archived && job.scheduler !== 'condor' && jobGroup(job) === 'PENDING' ? jobPriorityGauge(job, priorityJobs) : '';
   const noEstimatePriority = priority && progressSpec(job, asOf).expected == null
     && pendingExplanation(job) === 'no estimate available'
     ? jobPriorityGauge(job, priorityJobs, true) : '';
   const expandedPriority = priority;
   const idBadge = `<span class="badge job-id${ending ? ' ending' : ''}" role="button" tabindex="0" data-copy="${escapeHtml(identifier)}" title="${escapeHtml(identifier)}${ending ? ' · ending' : ''} — click to copy">${escapeHtml(identifier)}</span>`;
-  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary><span class="card-summary-title" data-full-name="${escapeHtml(hoverText)}"><span class="name">${escapeHtml(name)}</span></span><span class="card-summary-progress">${quickArchive ? archiveAction : ''}${jobProgress(job, asOf, Date.now(), noEstimatePriority)}${idBadge}</span></summary><div class="card-body"><div class="muted card-meta">${metadata}</div>${expandedPriority}<dl class="times">${lifecycleRows(job, asOf)}${dependencyLinks(job, jobs)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
+  return `<details class="card" data-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(jobRef(job))}"${openAttribute(disclosures, disclosureKey, false)}><summary><span class="card-summary-title" data-full-name="${escapeHtml(hoverText)}"><span class="name">${escapeHtml(name)}</span>${warning}</span><span class="card-summary-progress">${quickArchive ? archiveAction : ''}${jobProgress(job, asOf, Date.now(), noEstimatePriority)}${idBadge}</span></summary><div class="card-body"><div class="muted card-meta">${metadata}</div>${expandedPriority}<dl class="times">${lifecycleRows(job, asOf)}${dependencyLinks(job, jobs)}</dl><div class="actions">${actions.join('')}</div></div></details>`;
 }
 
 /**
@@ -1062,7 +1074,7 @@ function availabilityBar(idle, total, title) {
  * Render one permanently expanded, compact partition card. Scheduling,
  * compute specifications, and physical availability remain visible together.
  */
-function partitionCard(partition, pending, asOf, thresholds, shareError = null) {
+function partitionCard(partition, pending, asOf, thresholds, shareError = null, scheduler = 'slurm', condorPriority = []) {
   const profile = bestGpu(partition);
   const name = `${partition.name}${partition.aggregate ? ' (aggregate)' : ''}`;
   const launchability = launchabilityStrip(partition, pending, asOf, thresholds);
@@ -1070,7 +1082,22 @@ function partitionCard(partition, pending, asOf, thresholds, shareError = null) 
   const idleGpus = Math.min(gpuTotal, Math.max(0, Number(partition.gpus?.schedulable_idle) || 0));
   const nodeCounts = nodeAvailabilityCounts(partition);
   const countWidth = Math.max(`${idleGpus}/${gpuTotal} Free`.length, `${nodeCounts.idle}/${nodeCounts.total} Free`.length);
-  return `<article class="card partition-card${partition.aggregate ? ' aggregate' : ''}" data-partition="${escapeHtml(partition.name)}" style="--availability-count-width:${countWidth}ch"><div class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${launchability}</div><div class="muted partition-specs">${partitionSpecs(partition, profile)}</div>${partitionFairShare(partition.fair_share, shareError)}<div class="partition-availability"><span class="partition-availability-label">GPUs:</span>${availabilityBar(idleGpus, gpuTotal, gpuAvailabilityTitle(partition))}</div><div class="partition-availability"><span class="partition-availability-label">Nodes:</span>${availabilityBar(nodeCounts.idle, nodeCounts.total, availabilityTitle(partition))}</div></article>`;
+  const priority = scheduler === 'condor' ? condorPoolShare(condorPriority) : partitionFairShare(partition.fair_share, shareError);
+  return `<article class="card partition-card${partition.aggregate ? ' aggregate' : ''}" data-partition="${escapeHtml(partition.name)}" style="--availability-count-width:${countWidth}ch"><div class="card-summary-title partition-title"><span class="name">${escapeHtml(name)}</span>${launchability}</div><div class="muted partition-specs">${partitionSpecs(partition, profile)}</div>${priority}<div class="partition-availability"><span class="partition-availability-label">GPUs:</span>${availabilityBar(idleGpus, gpuTotal, gpuAvailabilityTitle(partition))}</div><div class="partition-availability"><span class="partition-availability-label">Nodes:</span>${availabilityBar(nodeCounts.idle, nodeCounts.total, availabilityTitle(partition))}</div></article>`;
+}
+
+/** Show HTCondor's negotiator share without presenting it as a Slurm factor. */
+function condorPoolShare(rows) {
+  if (!Array.isArray(rows) || !rows.length) return '<div class="muted">Pool share unavailable</div>';
+  return rows.map((row) => {
+    const share = row.pool_share == null ? NaN : Number(row.pool_share);
+    const percent = Number.isFinite(share) && share >= 0 && share <= 1 ? `${(share * 100).toFixed(1)}%` : 'unavailable';
+    const priority = row.effective_priority == null ? 'unavailable' : Number(row.effective_priority).toLocaleString();
+    const title = escapeHtml(`${row.submitter || 'Submitter'}: pool-wide share, not reserved for this GPU model. Lower effective priority has precedence; matchmaking still applies.`);
+    const marker = Number.isFinite(share) && share >= 0 && share <= 1
+      ? `<i class="fair-share-marker" style="left:${(share * 100).toFixed(2)}%"></i>` : '';
+    return `<div class="partition-fair-share" title="${title}"><span class="fair-share-title">Share:</span><div class="fair-share-bars"><div class="fair-share-row"><div class="fair-share-track${marker ? '' : ' unavailable'}" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${Number.isFinite(share) ? share : 0}">${marker}</div><span class="muted">Pool share ${escapeHtml(percent)} · Effective priority ${escapeHtml(priority)}</span></div></div></div>`;
+  }).join('');
 }
 
 /** Return whether a Slurm association has a displayable fair-share factor. */
@@ -1201,7 +1228,7 @@ function renderStatus(payload, disclosures = {}, freshness = {}, server = {}) {
     // No probe round has finished for this cluster yet (they start with the service).
     const pending = !cluster.wait_estimates_updated_at;
     const partitions = [...(cluster.partitions || [])].sort((left, right) => (Number(left.rank) || 9999) - (Number(right.rank) || 9999) || String(left.name).localeCompare(String(right.name)));
-    const cards = partitions.map((partition) => partitionCard(partition, pending, asOf, thresholds, cluster.fair_share?.mapping_error || cluster.fair_share?.error)).join('');
+    const cards = partitions.map((partition) => partitionCard(partition, pending, asOf, thresholds, cluster.fair_share?.mapping_error || cluster.fair_share?.error, cluster.scheduler, cluster.condor_priority)).join('');
     clusters.push(`<details class="cluster-group" data-disclosure-key="${disclosureKey}"${open}><summary>${summary}</summary>${cards || '<p class="muted">No cluster status is available yet.</p>'}</details>`);
   }
   const content = clusters.join('') || '<p>No clusters returned.</p>';

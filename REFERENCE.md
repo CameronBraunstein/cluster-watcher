@@ -243,7 +243,7 @@ Run the guided setup once:
 cluster-watcher setup     # alias: set-up
 ```
 
-It asks for each machine's name, host, username, port, optional identity
+It asks for each machine's name, host, optional submission host, username, scheduler, port, optional identity
 file, whether it prompts for a password/OTP (and its shared credential group),
 and log directories. It then optionally asks for each machine's GPU/APU models,
 matching aliases, per-device VRAM, and dense FP16/BF16 Tensor throughput. It
@@ -283,6 +283,8 @@ username = "alice"
 | Setting | Purpose |
 | --- | --- |
 | `host` | One SSH host string, or an ordered array of physical login nodes for automatic selection and failover. |
+| `submission_host` | Optional host name or SSH alias reached **from** the login node; scheduler queries and remote commands run there. |
+| `scheduler = "auto"` | Detect `sinfo` or `condor_q` on the final submission host once per process. Set `"slurm"` or `"condor"` explicitly when both clients are installed. |
 | `port`, `identity_file` | Standard SSH options. |
 | `hidden = true` | Keep the entry but ignore the machine everywhere: no login, polling, listing, dashboard, or API. At least one machine must stay visible. |
 | `default_partition_max_time_minutes`, `[machine.partition_max_time_minutes]` | Cap wait-probe runtimes (see [Estimated queue waits](#estimated-queue-waits)). |
@@ -340,6 +342,59 @@ cluster before checking, so `..` and symlinks cannot escape a root:
 ```toml
 job_log_roots = ["/home/alice/jobs", "/scratch/alice"]
 ```
+
+### Two-hop SSH to a submission host
+
+Set `submission_host` when the SSH host used for authentication is separate
+from the node where scheduler commands must run:
+
+```toml
+[[machine]]
+name = "cluster-a"
+host = "login.cluster-a.example.org"
+username = "alice"
+interactive_auth = true
+control_persist = "8h"
+submission_host = "submit.cluster-a.internal"
+```
+
+`host` is still the login endpoint. Cluster Watcher opens and reuses its SSH
+control session there, then runs a noninteractive `ssh` command **on the login
+node** to `submission_host`. This covers status collection, job history, wait
+probes, logs, `cluster-watcher exec`, and `cluster-watcher shell`. The setup
+wizard can record this field, and `cluster-watcher sessions` and the VS Code
+session dialog display the route. With multiple login nodes, the same
+submission host is reached from whichever login node is active.
+
+The login node must be able to SSH to the submission host without another
+password or OTP. This might use host-based authentication, a key on the login
+node, or an SSH alias in that node's `~/.ssh/config`. Cluster Watcher does not
+copy credentials to the login node or enable agent forwarding. Before polling,
+log in to a login node and run `ssh submit.cluster-a.internal` once to verify
+the second hop and accept its host key. If that hop requires another secret,
+Cluster Watcher reports the SSH error; it will not prompt during refresh.
+The **open** session indicator checks the reusable login-node connection;
+reachability of the submission host is reported by the actual scheduler query.
+
+For HTCondor, `condor_status -json` supplies physical slot capacity and GPU
+model names, `condor_q -json` supplies live jobs, `condor_history -json` supplies
+recent terminal jobs, and `condor_userprio` may supply submitter priority and
+pool share. Display groups such as **pool: H200** divide physical hosts by
+advertised GPU model; **pool** aggregates all hosts. These are not Slurm
+partitions, and the same host appears in its model group and in pool. Free
+resources from partitionable slots and assigned resources from dynamic slots
+are combined without counting `TotalSlotGPUs` twice. `GPUs_GlobalMemoryMb` can
+provide per-device VRAM; TFLOPS still requires a `[[profile]]` catalog entry.
+HTCondor does not offer a generic equivalent of the Slurm wait probe. The
+FREE/BUSY/MULTI cells report current single-host GPU capacity by model, not an
+expected start time. A job's `JobSubmitFile` ClassAd may name a readable
+current `.sub` file; it is not an immutable copy of the submission.
+
+This differs from OpenSSH `ProxyJump`: ProxyJump tunnels a connection from the
+local SSH client through a jump host, so the destination still authenticates
+the local client. The two-hop route here uses the SSH client and credentials
+available on the login node. An existing `ProxyJump` in local OpenSSH config
+can still be used for the first hop if needed.
 
 ### Password + OTP clusters
 

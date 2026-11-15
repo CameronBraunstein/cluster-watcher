@@ -105,6 +105,22 @@ def request_handler(
 class SnapshotTests(TimedTestCase):
     """Verify stable API semantics separately from the dashboard payload."""
 
+    def test_two_hop_route_is_visible_in_compact_and_full_status(self):
+        """Clients should know where Slurm runs without losing the login host."""
+        status = example_status()
+        status.submission_host = "submit.internal"
+        store = StatusStore([Machine(
+            "cluster_0", "slurm.example", "alice", submission_host="submit.internal",
+        )], 5, False, 15)
+        store._statuses = [status]
+
+        compact = build_snapshot([status], "2026-09-22T10:00:00+00:00", 15, include_nodes=False)
+        full = json.loads(store.json_document("status")[0])
+
+        self.assertEqual(compact["clusters"][0]["host"], "slurm.example")
+        self.assertEqual(compact["clusters"][0]["submission_host"], "submit.internal")
+        self.assertEqual(full["clusters"][0]["submission_host"], "submit.internal")
+
     def test_snapshot_counts_dependency_waits_separately(self):
         """A queued dependency does not inflate the ready pending count."""
         status = example_status()
@@ -282,7 +298,7 @@ class SnapshotTests(TimedTestCase):
         self.assertNotIn("Other fair-share associations", PAGE)
         self.assertNotIn("function fairShareView(cluster)", PAGE)
         self.assertIn("function fairShareFactorBar(entry)", PAGE)
-        self.assertIn("${partitionFairShareView(fairShare, name)}", PAGE)
+        self.assertIn("scheduler === 'condor' ? condorPoolShareView(condorPriority) : partitionFairShareView(fairShare, name)", PAGE)
         self.assertNotIn("const label = factor.toFixed(6)", PAGE)
         self.assertIn('role="progressbar"', PAGE)
         self.assertIn('class="fair-share-marker"', PAGE)

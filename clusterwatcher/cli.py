@@ -11,6 +11,7 @@ from typing import Sequence, cast
 
 from .commands import RemoteCommandService, SessionUnavailableError, UnknownMachineError
 from .compute import configure_gpu_profiles, gpu_profiles
+from .condor import STATUS_COMMAND as CONDOR_STATUS_COMMAND
 from .config import DEFAULT_CONFIG, load_config, load_wait_threshold_minutes
 from .credentials import (
     CredentialPromptCancelled,
@@ -22,7 +23,8 @@ from .credentials import (
 from .dashboard import serve
 from .models import Machine
 from .setup_wizard import edit_config, run_setup
-from .slurm import SINFO_COMMAND, collect_status, print_status
+from .scheduler import collect_status
+from .slurm import SINFO_COMMAND, print_status
 from .ssh import ssh_command
 from .terminal_jobs import run_terminal_job_board
 from .terminal_status import run_terminal_status_board
@@ -76,6 +78,8 @@ def _print_sessions(payload: dict[str, object]) -> None:
         else:
             remaining = _format_duration(int(session["estimated_remaining_seconds"]))
         endpoint = f"{session['username']}@{session['host']}"
+        if session.get("submission_host"):
+            endpoint += f" -> {session['submission_host']}"
         print(f"{session['name']}\t{'open' if is_open else 'closed'}\t{remaining}\t{endpoint}")
         if not is_open and session.get("error"):
             error = str(session["error"]).replace("\n", " ")
@@ -131,7 +135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return askpass_main()
     parser = argparse.ArgumentParser(
         prog=os.environ.get("CLUSTER_WATCHER_COMMAND_NAME") or None,
-        description="Inspect Slurm clusters through SSH.",
+        description="Inspect Slurm and HTCondor clusters through SSH.",
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="TOML config path (default: clusters.toml)")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -173,12 +177,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     jobs_parser.add_argument("--timeout", type=int, default=15, help="SSH connect timeout in seconds (default: 15)")
     status_parser = subparsers.add_parser(
         "status",
-        help="show GPU capacity and up-to-one-hour wait estimates",
+        help="show GPU capacity and available scheduler wait estimates",
         description=(
             "Show a table per cluster with your running/pending/depending job mix, "
-            "GPU model/specifications, free GPUs and nodes, mapped fair share, "
-            "CPU threads, and up-to-one-hour wait estimates for 1, 2, "
+            "GPU model/specifications, free GPUs and nodes, scheduler priority, "
+            "CPU threads, and Slurm wait estimates for 1, 2, "
             "4, 8, 16, 32, and 64 GPUs. Pass SECONDS first for live refresh; "
+            "HTCondor pools report wait estimates as unavailable. "
             "failed wait probes are marked DENY, min, limit, n/a, or ERR (only ERR "
             "is a real failure) with their diagnostic below. "
             "live mode supports scrolling with Up/Down, Page Up/Page Down, "
@@ -261,7 +266,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         gpu_profiles()  # Populate the selected config's profile cache before polling.
         if args.command == "list":
             for machine in machines:
-                print(f"{machine.name}\t{machine.username}@{machine.host}\tport={machine.port}")
+                target = f"\tsubmission_host={machine.submission_host}" if machine.submission_host else ""
+                print(f"{machine.name}\t{machine.username}@{machine.host}\tport={machine.port}\tscheduler={machine.scheduler}{target}")
             return 0
         if args.command == "jobs":
             if args.timeout < 1:
@@ -342,7 +348,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         selected = select_machines(machines, requested)
         if args.dry_run:
             for machine in selected:
-                print(" ".join(ssh_command(machine, args.timeout, SINFO_COMMAND)))
+                if machine.scheduler == "condor":
+                    command = CONDOR_STATUS_COMMAND
+                elif machine.scheduler == "slurm":
+                    command = SINFO_COMMAND
+                else:
+                    command = (
+                        "if command -v sinfo >/dev/null 2>&1 && ! command -v condor_q >/dev/null 2>&1; "
+                        f"then {SINFO_COMMAND}; "
+                        "elif command -v condor_q >/dev/null 2>&1 && ! command -v sinfo >/dev/null 2>&1; "
+                        f"then {CONDOR_STATUS_COMMAND}; else echo 'set scheduler in clusters.toml' >&2; exit 1; fi"
+                    )
+                print(shlex.join(ssh_command(machine, args.timeout, command)))
             return 0
         statuses = [collect_status(machine, args.timeout, args.jobs) for machine in selected]
     except CredentialPromptCancelled as exc:

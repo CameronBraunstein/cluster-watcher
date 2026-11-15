@@ -30,8 +30,8 @@ class SetupWizardTests(TimedTestCase):
 
     def test_setup_writes_a_valid_multi_machine_configuration(self):
         prompt = scripted(
-            "cluster_0", "slurm.example", "", "", "", "n", "/work/logs", "y",
-            "cluster_1", "cluster_1.example", "bob", "2222", "~/.ssh/key", "y", "site_group", "", "n",
+            "cluster_0", "slurm.example", "", "", "", "", "", "n", "/work/logs", "y",
+            "cluster_1", "cluster_1.example", "", "bob", "", "2222", "~/.ssh/key", "y", "site_group", "", "n",
             "n", "n",
         )
         output: list[str] = []
@@ -49,7 +49,7 @@ class SetupWizardTests(TimedTestCase):
     def test_setup_writes_and_validates_gpu_profiles_in_same_file(self):
         """The wizard should collect several profiles without a second file."""
         prompt = scripted(
-            "gpu-site", "login.example", "alice", "", "", "n", "", "n",
+            "gpu-site", "login.example", "", "alice", "", "", "", "n", "", "n",
             "y", "NVIDIA H100", "", "h100, node-h", "bad", "80", "nan", "989.0",
             "y", "NVIDIA A100", "gpu", "a100", "40", "312", "n",
         )
@@ -64,10 +64,33 @@ class SetupWizardTests(TimedTestCase):
         self.assertEqual(len(gpu_profiles()), 2)
         self.assertEqual(profile_for("gpu-site", ["node-h01"]).vram_gb, 80)
 
+    def test_setup_records_a_submission_host_for_two_hop_ssh(self):
+        """The wizard should preserve the submission destination in one TOML file."""
+        prompt = scripted(
+            "atlas", "login.example", "submit.internal", "alice", "", "", "", "y", "", "", "n", "n",
+        )
+        self.assertEqual(run_setup(self.path, prompt, lambda _line: None, {}), 0)
+        machine = load_config(self.path)[0]
+        self.assertEqual(machine.submission_host, "submit.internal")
+        self.assertTrue(machine.interactive_auth)
+        self.assertEqual(tomllib.loads(self.path.read_text())["machine"][0]["submission_host"], "submit.internal")
+
+    def test_setup_records_condor_scheduler(self):
+        """An explicit Condor choice survives serialization and validation."""
+        prompt = scripted(
+            "saar", "login.example", "submit.internal", "cameronb", "invalid", "condor",
+            "", "", "n", "", "n", "n",
+        )
+        output: list[str] = []
+        self.assertEqual(run_setup(self.path, prompt, output.append, {}), 0)
+        self.assertEqual(load_config(self.path)[0].scheduler, "condor")
+        self.assertIn('scheduler = "condor"', self.path.read_text())
+        self.assertTrue(any("Scheduler must be" in line for line in output))
+
     def test_setup_writes_an_explicit_apu_profile(self):
         """The wizard preserves APU type in the single configuration file."""
         prompt = scripted(
-            "viper", "login.example", "alice", "", "", "n", "", "n",
+            "viper", "login.example", "", "alice", "", "", "", "n", "", "n",
             "y", "AMD Instinct MI300A", "other", "APU", "mi300a, apu", "128", "980.6", "n",
         )
         output: list[str] = []
@@ -101,7 +124,7 @@ class SetupWizardTests(TimedTestCase):
         self.assertEqual(run_setup(self.path, scripted("n"), output.append, {}), 1)
         self.assertEqual(self.path.read_text(), "existing")
 
-        prompt = scripted("y", "a", "a.example", "u", "", "", "n", "", "y", "a", "b", "b.example", "", "", "", "n", "", "n", "n", "n")
+        prompt = scripted("y", "a", "a.example", "", "u", "", "", "", "n", "", "y", "a", "b", "b.example", "", "", "", "", "", "n", "", "n", "n", "n")
         self.assertEqual(run_setup(self.path, prompt, output.append, {}), 0)
         self.assertEqual([machine.name for machine in load_config(self.path)], ["a", "b"])
         self.assertEqual(self.path.with_name("clusters.toml.bak").read_text(), "existing")

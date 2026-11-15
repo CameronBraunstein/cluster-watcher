@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from io import BytesIO
+import shlex
 import subprocess
 import tempfile
 import threading
@@ -55,6 +56,19 @@ class RemoteCommandTests(TimedTestCase):
         self.assertEqual(status["pid"], 4321)
         self.assertEqual(status["control_persist_seconds"], 7200)
         self.assertGreaterEqual(status["estimated_remaining_seconds"], 7198)
+
+    @patch("clusterwatcher.ssh.subprocess.run")
+    def test_submission_session_authenticates_only_the_login_host(self, run):
+        """Session checks describe the route but verify the login master only."""
+        run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="Master running (pid=12)")
+        machine = Machine("atlas", "login.example", "alice", submission_host="submit.internal")
+
+        status = session_status(machine)
+
+        self.assertTrue(status["session_open"])
+        self.assertEqual(status["submission_host"], "submit.internal")
+        self.assertEqual(run.call_args.args[0][-1], "alice@login.example")
+        self.assertNotIn("submit.internal", str(run.call_args.args[0]))
 
     @patch("clusterwatcher.ssh._read_last_activity", return_value=None)
     @patch("clusterwatcher.ssh.subprocess.run")
@@ -150,6 +164,37 @@ class RemoteCommandTests(TimedTestCase):
         shell_command = existing_session_ssh_command(machine, 45, allocate_tty=True)
         self.assertIn("-t", shell_command)
         self.assertEqual(shell_command[-1], "alice@alpha.example")
+
+    def test_submission_commands_and_shell_use_the_existing_login_master(self):
+        """Exec and shell routes share the login session and reach the target."""
+        machine = Machine("atlas", "login.example", "alice", submission_host="submit.internal")
+        command = existing_session_ssh_command(machine, 12, "hostname && id")
+        self.assertIn("ProxyCommand=false", command)
+        self.assertEqual(command[-2], "alice@login.example")
+        self.assertEqual(shlex.split(command[-1]), [
+            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=12", "-T",
+            "submit.internal", "hostname && id",
+        ])
+        shell = existing_session_ssh_command(machine, 12, allocate_tty=True)
+        self.assertEqual(shell[-2], "alice@login.example")
+        self.assertIn("-t", shell[:-2])
+        self.assertEqual(shlex.split(shell[-1]), [
+            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=12", "-t", "submit.internal",
+        ])
+
+    @patch("clusterwatcher.ssh._mark_activity")
+    @patch("clusterwatcher.ssh.subprocess.run")
+    def test_status_collection_reaches_submission_host_with_two_hop_budget(self, run, _activity):
+        """The regular collector invokes the inner hop and budgets both handshakes."""
+        run.return_value = subprocess.CompletedProcess([], 0, stdout="partition data\n", stderr="")
+        machine = Machine("atlas", "login.example", "alice", submission_host="submit.internal")
+
+        self.assertEqual(run_remote(machine, 6, "sinfo"), "partition data\n")
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[-2], "alice@login.example")
+        self.assertEqual(shlex.split(command[-1])[-2:], ["submit.internal", "sinfo"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 17)
 
     @patch("clusterwatcher.ssh.subprocess.run")
     def test_activity_estimate_is_shared_between_processes(self, run):

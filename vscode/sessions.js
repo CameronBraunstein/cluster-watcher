@@ -15,15 +15,17 @@ function sessionDialogEntries(inventory = {}) {
       const name = String(session.name || 'Unknown cluster');
       const username = String(session.username || 'Unknown account');
       const host = String(session.host || 'Unknown host');
+      const submissionHost = session.submission_host ? String(session.submission_host) : '';
       let remaining = 'closed';
       if (session.session_open && session.control_persist_seconds == null) remaining = 'no idle limit';
       else if (session.session_open && session.estimated_remaining_seconds != null
           && Number.isFinite(Number(session.estimated_remaining_seconds))) {
         remaining = sessionTimeLeft(session.estimated_remaining_seconds);
       } else if (session.session_open) remaining = 'remaining time unknown';
-      return { name, username, host, remaining };
+      return { name, username, host, submissionHost, remaining };
     });
-  return rows.map(({ name, username, host, remaining }) => `${name}: ${username}@${host}\n${remaining}`);
+  return rows.map(({ name, username, host, submissionHost, remaining }) =>
+    `${name}: ${username}@${host}${submissionHost ? ` → ${submissionHost}` : ''}\n${remaining}`);
 }
 
 /** Format SSH inventory as plain, selectable text for the sidebar dialog. */

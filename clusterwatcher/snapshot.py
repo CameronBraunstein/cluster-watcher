@@ -116,11 +116,16 @@ def _node_gpu_types(cluster: str, partition: str, node: dict[str, object]) -> li
     resource = _resource(gpu)
     raw_types = gpu.get("types", {}) if isinstance(gpu, dict) else {}
     raw_types = raw_types if isinstance(raw_types, dict) else {}
+    memory = gpu.get("memory_gb", {}) if isinstance(gpu, dict) else {}
     fallback = profile_for(cluster, [str(node.get("name", "")), partition, *(str(value) for value in raw_types)])
     records: list[dict[str, object]] = []
     for raw_type, count in raw_types.items():
         profile = profile_for(cluster, [str(raw_type)]) or fallback
-        records.append({"slurm_type": str(raw_type), "count": int(count), **_profile_dict(profile)})
+        details = _profile_dict(profile)
+        if profile is None and isinstance(memory, dict):
+            details["name"] = str(raw_type) if raw_type != "generic" else None
+            details["vram_gb"] = memory.get(raw_type)
+        records.append({"slurm_type": str(raw_type), "count": int(count), **details})
     typed_total = sum(int(record["count"]) for record in records)
     if resource["total"] > typed_total:
         profile = profile_for(cluster, [str(node.get("name", "")), partition]) or fallback
@@ -163,6 +168,7 @@ def _wait_estimates(status: ClusterStatus, partition: str, generated_at: str | N
             "expected_start_at": estimate.get("start_time"),
             "estimated_wait_seconds": _wait_seconds(estimate.get("start_time"), generated_at),
             "error": estimate.get("error"),
+            "capacity_state": estimate.get("capacity_state"),
             # Additive: denied | minimum | limit | unavailable | timeout | budget | error.
             "error_kind": estimate.get("error_kind") or classify_wait_error(estimate.get("error")),
         }
@@ -372,7 +378,9 @@ def build_snapshot(
         clusters.append(
             {
                 "name": status.name,
+                "scheduler": status.scheduler,
                 "host": status.host,
+                "submission_host": status.submission_host,
                 "hosts": list(status.hosts or (status.host,)),
                 "reachable": status.error is None,
                 "collecting": collecting,
@@ -387,6 +395,7 @@ def build_snapshot(
                 "user_jobs": active_job_counts(status),
                 "user_gpu_hours": active_gpu_hours(status),
                 "fair_share": status.fair_share,
+                "condor_priority": status.condor_priority,
                 "fair_share_updated_at": status.fair_share_updated_at,
                 "resources": _cluster_resources(status),
                 "partitions": [

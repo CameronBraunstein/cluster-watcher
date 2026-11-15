@@ -10,8 +10,9 @@ import sys
 import time
 from typing import Callable, TextIO
 
+from .condor import capacity_signals
 from .models import ClusterStatus, Machine
-from .slurm import collect_status
+from .scheduler import collect_status
 from .snapshot import build_snapshot
 from .terminal_ui import run_live_board
 from .wait_probes import WAIT_PROBE_REFRESH_SECONDS, classify_wait_error, collect_wait_estimates
@@ -68,7 +69,7 @@ def _format_wait(seconds: object) -> str:
 
 
 WAIT_ERROR_LABELS = {
-    "denied": "DENY", "minimum": "min", "limit": "limit", "unavailable": "n/a",
+    "denied": "DENY", "minimum": "min", "limit": "limit", "unavailable": "n/a", "capacity": "?",
     "timeout": "ERR", "error": "ERR", "budget": "?",
 }
 """Short wait-cell labels for each ``classify_wait_error`` kind.
@@ -129,11 +130,13 @@ def _wait_cells(partition: dict[str, object]) -> list[str]:
     }
     cells: list[str] = []
     for count in WAIT_GPU_COUNTS:
-        if count > total:
+        if count > total and not estimates.get(count, {}).get("capacity_state"):
             cells.append("—")
             continue
         estimate = estimates.get(count)
-        if estimate and estimate.get("error"):
+        if estimate and estimate.get("capacity_state"):
+            cells.append({"free": "FREE", "busy": "BUSY", "multi_node": "MULTI"}.get(str(estimate["capacity_state"]), "?"))
+        elif estimate and estimate.get("error"):
             cells.append(wait_error_label(estimate))
         else:
             cells.append(_format_wait(estimate.get("estimated_wait_seconds")) if estimate else "?")
@@ -144,15 +147,15 @@ def _wait_error_lines(partitions: list[dict[str, object]]) -> list[str]:
     """Summarize repeated per-shape wait failures without hiding their cause."""
     lines: list[str] = []
     for partition in partitions:
-        grouped: dict[str, list[int]] = {}
+        grouped: dict[tuple[str, str], list[int]] = {}
         for estimate in partition.get("wait_estimates", []):
-            if not isinstance(estimate, dict) or not estimate.get("error"):
+            if not isinstance(estimate, dict) or not estimate.get("error") or estimate.get("capacity_state"):
                 continue
             error = " ".join(str(estimate["error"]).split())
-            grouped.setdefault(error, []).append(int(estimate.get("gpus", 0)))
-        for error, counts in grouped.items():
+            label = wait_error_label(estimate)
+            grouped.setdefault((error, label), []).append(int(estimate.get("gpus", 0)))
+        for (error, short), counts in grouped.items():
             gpu_counts = ",".join(str(count) for count in counts)
-            short = wait_error_label({"error": error})
             label = "WAIT DENIED" if short == "DENY" else "WAIT ERROR" if short == "ERR" else f"WAIT {short.upper()}"
             lines.append(f"{label} {partition.get('name', 'unknown')} [{gpu_counts} GPU]: {error}")
     return lines
@@ -226,11 +229,19 @@ def _free_nodes(partition: dict[str, object]) -> tuple[int, int]:
     return (0 if partition.get("available") is False else free), total
 
 
-def _partition_notes(partition: dict[str, object], use_color: bool) -> list[str]:
-    """Give compact physical node availability and mapped fair-share ranks."""
+def _partition_notes(partition: dict[str, object], use_color: bool, scheduler: str = "slurm", condor_priority: object = None) -> list[str]:
+    """Give physical node availability and scheduler-specific priority context."""
     free, total = _free_nodes(partition)
     styled, _ = _availability_bar(free, total, use_color)
     lines = [f"  Nodes: {styled} {free}/{total} Free"]
+    if scheduler == "condor":
+        for row in condor_priority if isinstance(condor_priority, list) else []:
+            share = row.get("pool_share")
+            share_text = f"{float(share) * 100:.1f}%" if isinstance(share, (int, float)) else "unavailable"
+            lines.append(f"  Pool share: {share_text} · effective priority {row.get('effective_priority') or 'unavailable'}")
+        if len(lines) == 1:
+            lines.append("  Pool share: unavailable")
+        return lines
     associations = partition.get("fair_share") or []
     for entry in associations:
         factor = entry.get("factor")
@@ -288,7 +299,7 @@ def render_status_board(
             lines.append(f"WARNING: {cluster['resource_error']}")
         partitions = [item for item in cluster.get("partitions", []) if isinstance(item, dict)]
         if not partitions:
-            lines.append("No partitions returned by Slurm.")
+            lines.append("No pool slots returned by HTCondor." if cluster.get("scheduler") == "condor" else "No partitions returned by Slurm.")
             continue
         prepared = [(partition, *_partition_row(partition, use_color)) for partition in partitions]
         widths = [
@@ -304,9 +315,10 @@ def render_status_board(
             _fit(headings[index], widths[index]) for index in range(5)
         )
         wait_width = sum(widths[5:12]) + 2 * 6
+        wait_heading = "GPU FIT NOW · ONE HOST · GPU COUNT" if cluster.get("scheduler") == "condor" else "WAIT TIME · JOB UP TO 1 HOUR · GPU COUNT"
         lines.append(
             f"{leading_heading}  "
-            f"{'WAIT TIME · JOB UP TO 1 HOUR · GPU COUNT'.center(wait_width)}  "
+            f"{wait_heading.center(wait_width)}  "
             f"{_fit(headings[12], widths[12])}".rstrip()
         )
         wait_start = len(leading_heading) + 2
@@ -320,8 +332,10 @@ def render_status_board(
             if use_color and len(cells[4]) <= widths[4]:
                 values[4] = styled_availability + " " * (widths[4] - len(cells[4]))
             lines.append("  ".join(values).rstrip())
-            lines.extend(_partition_notes(partition, use_color))
+            lines.extend(_partition_notes(partition, use_color, str(cluster.get("scheduler") or "slurm"), cluster.get("condor_priority")))
         lines.extend(_wait_error_lines(partitions))
+        if cluster.get("scheduler") == "condor":
+            lines.append("FREE = enough GPUs on one host; BUSY = no free fit; MULTI = needs multiple hosts. No start time is promised.")
         if cluster.get("job_states") is not None:
             jobs = cluster.get("job_states") or {}
             summary = ", ".join(f"{state}={count}" for state, count in jobs.items()) or "none"
@@ -394,6 +408,8 @@ class StatusBoardCollector:
                         maximum_gpus=max(WAIT_GPU_COUNTS),
                         probe_timeout_seconds=TERMINAL_WAIT_PROBE_TIMEOUT_SECONDS,
                         time_budget_seconds=TERMINAL_WAIT_PROBE_BUDGET_SECONDS,
+                    ) if status.scheduler != "condor" else executor.submit(
+                        capacity_signals, status.nodes,
                     )
                     for machine, status in stale
                 }

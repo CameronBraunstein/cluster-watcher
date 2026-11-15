@@ -877,12 +877,12 @@ class JobScriptDocumentProvider {
     const payload = await this.client.get(scriptRequestPath(cluster, jobId), 30000);
     const uri = vscode.Uri.from({
       scheme: 'cluster-watcher-script',
-      path: virtualScriptPath(cluster, jobId),
+      path: virtualScriptPath(cluster, jobId, payload.scheduler),
       query: `updated=${Date.now()}`,
     });
     this.documents.set(uri.toString(), payload.content || '');
     while (this.documents.size > 50) this.documents.delete(this.documents.keys().next().value);
-    const document = await vscode.languages.setTextDocumentLanguage(await vscode.workspace.openTextDocument(uri), 'shellscript');
+    const document = await vscode.languages.setTextDocumentLanguage(await vscode.workspace.openTextDocument(uri), payload.scheduler === 'condor' ? 'plaintext' : 'shellscript');
     await vscode.window.showTextDocument(document, { preview: false });
     const message = scriptSourceMessage(payload);
     if (payload.source === 'file') vscode.window.showWarningMessage(message);

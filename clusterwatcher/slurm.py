@@ -561,6 +561,7 @@ def collect_status(
     status = ClusterStatus(
         machine.name, machine.host, machine.username,
         hosts=machine.candidate_hosts,
+        submission_host=machine.submission_host,
     )
     capacity = refresh_capacity or previous is None or previous.capacity_updated_at is None
     commands: dict[str, str] = {}
@@ -777,6 +778,7 @@ def collect_user_job_status(machine: Machine, timeout: int) -> ClusterStatus:
     status = ClusterStatus(
         machine.name, machine.host, machine.username,
         hosts=machine.candidate_hosts,
+        submission_host=machine.submission_host,
     )
     try:
         status.user_jobs = parse_jobs(run_remote(machine, timeout, SQUEUE_USER_JOBS_COMMAND))
@@ -788,11 +790,12 @@ def collect_user_job_status(machine: Machine, timeout: int) -> ClusterStatus:
 
 
 def print_status(status: ClusterStatus, include_jobs: bool) -> None:
-    print(f"\n{status.name} ({status.username}@{status.host})")
+    route = f" -> {status.submission_host}" if status.submission_host else ""
+    print(f"\n{status.name} ({status.username}@{status.host}{route})")
     if status.error:
         print(f"  ERROR: {status.error}")
     elif not status.partitions:
-        print("  No partitions returned by sinfo.")
+        print("  No pool slots returned by HTCondor." if status.scheduler == "condor" else "  No partitions returned by sinfo.")
     else:
         print("  PARTITION                 AVAIL  NODES  CPUS                 STATE")
         for partition in status.partitions:

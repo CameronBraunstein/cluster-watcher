@@ -7,7 +7,11 @@ from dataclasses import dataclass, field, replace
 
 @dataclass(frozen=True)
 class Machine:
-    """Connection and security settings for one configured Slurm cluster."""
+    """Connection settings for one scheduler and its optional second SSH hop.
+
+    ``host``/``hosts`` are login endpoints. ``submission_host``, when set, is
+    reached by an SSH client running on the authenticated login node.
+    """
 
     name: str
     host: str
@@ -21,6 +25,8 @@ class Machine:
     default_partition_max_time_minutes: int = 1440
     partition_max_time_minutes: tuple[tuple[str, int], ...] = ()
     hosts: tuple[str, ...] = ()
+    submission_host: str | None = None
+    scheduler: str = "auto"
 
     @property
     def candidate_hosts(self) -> tuple[str, ...]:
@@ -107,3 +113,7 @@ class ClusterStatus:
     # Logical routing metadata. ``host`` remains the physical node used by the
     # most recent successful operation for backwards-compatible clients.
     hosts: tuple[str, ...] = ()
+    # Slurm commands run here when the login endpoint is only a gateway.
+    submission_host: str | None = None
+    scheduler: str = "slurm"
+    condor_priority: list[dict[str, object]] | None = None

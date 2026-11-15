@@ -74,6 +74,19 @@ test('jobs retain terminal state grouping and lifecycle visibility', () => {
   assert.match(jobKey(jobs[0]), /cluster_1/);
 });
 
+test('a disconnected job shows a small warning and no stale End action', () => {
+  const job = { cluster: 'alpha', job_id: '7', name: 'training', state: 'RUNNING',
+    refresh_error: 'SSH timed out', last_success_at: '2026-11-13T10:00:00Z' };
+  const html = renderJobs({ jobs: [job], archived_jobs: [job] });
+  const activeCard = html.match(/data-job-ref="alpha\/7"[^>]*>.*?<\/details>/s)[0];
+  assert.match(activeCard, /class="job-connection-warning fast-hover"[^>]*>⚠<\/span>/);
+  assert.match(activeCard, /Cluster connection issue\.\nLatest update:/);
+  assert.doesNotMatch(activeCard, /clusterWatcher\.cancelJob/);
+  assert.doesNotMatch(activeCard, /data-progress=/);
+  const archiveCard = html.slice(html.indexOf('group:archive'));
+  assert.doesNotMatch(archiveCard, /job-connection-warning/);
+});
+
 test('dependency waits appear in Depending between Pending and failed dependencies', () => {
   const jobs = [
     { job_id: 'ready', cluster: 'c', state: 'PENDING', reason: 'Priority' },
@@ -241,6 +254,54 @@ test('cluster job ratio remains empty when no jobs are running or pending', () =
   const track = html.match(/<span class="cluster-job-track"[^>]*>.*?<\/span>/s)[0];
   assert.match(track, /aria-label="0 running, 0 pending, 0 depending"/);
   assert.doesNotMatch(track, /cluster-job-(?:running|pending|depending)/);
+});
+
+test('Condor pool cards show negotiator share and omit Slurm-only script actions', () => {
+  const partition = {
+    name: 'pool', available: true, rank: 1,
+    cpus: { total: 128 }, gpus: { total: 8, allocated: 5, idle: 3, schedulable_idle: 3, models: [] },
+    node_states: { mixed: 1 }, wait_estimates: [{ gpus: 1, error_kind: 'unavailable', error: 'HTCondor has no generic start-time estimate' }],
+  };
+  const status = renderStatus({ clusters: [{
+    name: 'saar', scheduler: 'condor', reachable: true, partitions: [partition],
+    condor_priority: [{ submitter: 'cameronb@submit', pool_share: 0.25, effective_priority: 2.5 }],
+  }] });
+  assert.match(status, /Pool share 25\.0% · Effective priority 2\.5/);
+  assert.doesNotMatch(status, /FairShare:<\/span>/);
+
+  const jobs = renderJobs({ jobs: [{
+    cluster: 'saar', scheduler: 'condor', job_id: '42.0', name: 'train', state: 'RUNNING',
+    partition: 'pool', node_count: 1, gpus: 1, cpus: 2,
+  }] });
+  assert.match(jobs, /42\.0/);
+  assert.doesNotMatch(jobs, /clusterWatcher\.openScript/);
+  assert.match(jobs, /clusterWatcher\.openLog/);
+});
+
+test('Condor model cards show current GPU fit and submit-file actions', () => {
+  const partition = {
+    name: 'pool: H200', cpus: { total: 128 },
+    gpus: { total: 8, allocated: 8, idle: 0, schedulable_idle: 0,
+      models: [{ name: 'NVIDIA H200 NVL', vram_gb: 141, fp16_bf16_tensor_tflops: 835.5 }] },
+    wait_estimates: [
+      { gpus: 1, capacity_state: 'busy', error_kind: 'capacity', error: 'No host currently advertises this many free GPUs; wait is unknown' },
+      { gpus: 16, capacity_state: 'multi_node', error_kind: 'capacity', error: 'No single host has this many GPUs; a multi-node workflow is required' },
+    ],
+  };
+  const status = renderStatus({ clusters: [{ name: 'lst', scheduler: 'condor', reachable: true,
+    partitions: [partition], condor_priority: [{ submitter: 'poweruser.cameronb@coli', pool_share: 0.135, effective_priority: 5 }] }] });
+  assert.match(status, /data-partition="pool: H200"/);
+  assert.match(status, /Pool share 13\.5%/);
+  assert.match(status, /Current single-host GPU capacity/);
+  assert.match(status, /multi-node workflow is required/);
+  assert.equal(waitCell(partition, 1), 'BUSY');
+  assert.equal(waitCell(partition, 16), 'MULTI');
+  const jobs = renderJobs({ jobs: [{ cluster: 'lst', scheduler: 'condor', job_id: '42.0', state: 'RUNNING',
+    script_available: true, log_paths_available: { out: true, err: false } }] });
+  assert.match(jobs, /Open current HTCondor submit file/);
+  assert.match(jobs, /clusterWatcher\.openScript/);
+  assert.match(jobs, />\.out<\/button>/);
+  assert.doesNotMatch(jobs, />\.err<\/button>/);
 });
 
 test('early cluster overview keeps clickable job segments while details load', () => {

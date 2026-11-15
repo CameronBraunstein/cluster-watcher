@@ -36,9 +36,10 @@ function waitFits(partition, count) {
 
 /** Return the concise text used in accessible strip summaries. */
 function waitCell(partition, count, pending = false) {
-  if (!waitFits(partition, count)) return '—';
   const estimate = waitEstimate(partition, count);
+  if (!waitFits(partition, count) && !estimate?.capacity_state) return '—';
   if (!estimate) return pending ? '…' : '?';
+  if (estimate.capacity_state) return { free: 'FREE', busy: 'BUSY', multi_node: 'MULTI' }[estimate.capacity_state] || '?';
   if (estimate.error) return WAIT_ERROR_LABELS[waitErrorKind(estimate)] || 'ERR';
   return formatDuration(estimate.estimated_wait_seconds);
 }
@@ -63,9 +64,10 @@ function runtimeLabel(estimate) {
 /** Build exact hover text for one standard job shape. */
 function waitTitle(partition, count, pending = false) {
   const estimate = waitEstimate(partition, count);
-  const label = `${count} GPU${count === 1 ? '' : 's'} · ${runtimeLabel(estimate)}`;
-  if (!waitFits(partition, count)) return `${label}: exceeds the partition's ${Number(partition.gpus?.total) || 0} GPUs`;
+  const label = `${count} GPU${count === 1 ? '' : 's'}${estimate?.capacity_state ? '' : ` · ${runtimeLabel(estimate)}`}`;
+  if (!waitFits(partition, count) && !estimate?.capacity_state) return `${label}: exceeds the partition's ${Number(partition.gpus?.total) || 0} GPUs`;
   if (!estimate) return `${label}: ${pending ? 'still checking' : 'not probed'}`;
+  if (estimate.capacity_state) return `${label}: ${estimate.error}`;
   if (estimate.error) return `${label}: ${estimate.error}`;
   return `${label}: ${formatDuration(estimate.estimated_wait_seconds)} estimated wait`;
 }
@@ -85,12 +87,15 @@ function launchabilityStrip(
     let state = 'launch-missing';
     let content = '?';
     let dynamic = '';
-    if (!waitFits(partition, count)) {
+    if (!waitFits(partition, count) && !estimate?.capacity_state) {
       state = 'launch-unsupported';
       content = '—';
     } else if (!estimate) {
       state = pending ? 'launch-pending' : 'launch-missing';
       content = pending ? '…' : '?';
+    } else if (estimate.capacity_state) {
+      state = estimate.capacity_state === 'free' ? 'launch-wait-1' : estimate.capacity_state === 'busy' ? 'launch-wait-3' : 'launch-unsupported';
+      content = estimate.capacity_state === 'free' ? '✓' : estimate.capacity_state === 'busy' ? '·' : '—';
     } else if (estimate.error) {
       const kind = waitErrorKind(estimate);
       state = ['denied', 'minimum', 'limit'].includes(kind) ? 'launch-blocked' : 'launch-missing';
@@ -105,7 +110,8 @@ function launchabilityStrip(
     return `<span class="launch-shape"><span class="launch-count">${count}</span><span class="launch-block ${state}" role="img" aria-label="${escapeHtml(title)}" data-fast-tooltip="${escapeHtml(title)}"${dynamic}>${content}</span></span>`;
   }).join('');
   const summary = WAIT_GPU_COUNTS.map((count) => `${count}: ${waitCell(partition, count, pending)}`).join(', ');
-  return `<span class="launchability" role="group" aria-label="Estimated launch wait by GPUs requested (${escapeHtml(summary)})">${blocks}</span>`;
+  const description = (partition.wait_estimates || []).some((row) => row.capacity_state) ? 'Current single-host GPU capacity' : 'Estimated launch wait by GPUs requested';
+  return `<span class="launchability" role="group" aria-label="${description} (${escapeHtml(summary)})">${blocks}</span>`;
 }
 
 module.exports = {

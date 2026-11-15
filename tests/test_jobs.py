@@ -212,6 +212,33 @@ class JobServiceTests(TimedTestCase):
         self.assertTrue(payload["clusters"][1]["reachable"])
         self.assertEqual(payload["jobs"][0]["job_id"], "42")
 
+    @patch("clusterwatcher.jobs.collect_accounting_jobs")
+    def test_disconnected_cluster_keeps_last_jobs_and_marks_only_its_cards(self, collect_accounting_jobs):
+        """Expose stale state per job while a healthy cluster updates normally."""
+        machines = [Machine("down", "down.example", "alice"), Machine("up", "up.example", "alice")]
+        statuses = [
+            ClusterStatus("down", "down.example", "alice", error="SSH timed out",
+                          last_success_at="2026-11-13T10:00:00+00:00",
+                          user_jobs=[{"id": "10", "name": "training", "state": "RUNNING", "partition": "gpu"}]),
+            ClusterStatus("up", "up.example", "alice",
+                          user_jobs=[{"id": "20", "name": "analysis", "state": "RUNNING", "partition": "cpu"}]),
+        ]
+
+        def accounting(machine, *_args):
+            if machine.name == "down":
+                raise RuntimeError("SSH timed out")
+            return []
+
+        collect_accounting_jobs.side_effect = accounting
+        payload = JobService(machines, 5, 0, lambda: statuses).query(since=SINCE)
+        jobs = {job["job_id"]: job for job in payload["jobs"]}
+
+        self.assertEqual(set(jobs), {"10", "20"})
+        self.assertEqual(jobs["10"]["refresh_error"], "SSH timed out")
+        self.assertEqual(jobs["10"]["last_success_at"], "2026-11-13T10:00:00+00:00")
+        self.assertNotIn("refresh_error", jobs["20"])
+        self.assertEqual(payload["clusters"][0]["last_success_at"], "2026-11-13T10:00:00+00:00")
+
     @patch("clusterwatcher.jobs.collect_accounting_jobs", return_value=[])
     @patch("clusterwatcher.jobs.collect_live_job_log_paths", return_value={})
     def test_queued_job_without_log_is_reported_as_not_found(self, _live_paths, _accounting):

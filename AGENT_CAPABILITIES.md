@@ -1,6 +1,6 @@
 # Cluster Watcher operating guide for agents
 
-Cluster Watcher is the user's local gateway to several Slurm clusters. Use its
+Cluster Watcher is the user's local gateway to Slurm and HTCondor clusters. Use its
 versioned loopback APIs for structured observations instead of inventing SSH
 commands or scraping the HTML dashboard. The normal service address is
 `http://127.0.0.1:8080`; a different port may be configured by the user.
@@ -14,11 +14,12 @@ interactive MFA is required.
 
 | Goal | Preferred interface | Requirement | Changes remote state? |
 | --- | --- | --- | --- |
-| Inspect cluster, partition, node, CPU, and GPU capacity | `GET /api/v1/snapshot` | Running `serve` process | No |
+| Inspect cluster, partition/pool, node, CPU, and GPU capacity | `GET /api/v1/snapshot` | Running `serve` process | No |
 | Compare cluster-scoped GPU/APU models, VRAM, and Tensor throughput | `GET /api/v1/snapshot` | Cataloged hardware profile | No |
-| Read advisory GPU-job wait projections | `GET /api/v1/snapshot` | Completed wait probes | No; probes use `sbatch --test-only` |
+| Read advisory GPU-job wait projections or Condor single-host capacity signals | `GET /api/v1/snapshot` | Slurm wait probes or Condor slot ads | No; Slurm probes use `sbatch --test-only` |
 | Inspect active and recent personal jobs | `GET /api/v1/jobs` | Service started with `--jobs-api` | No |
 | Read stdout or stderr | `GET /api/v1/jobs/{cluster}/{job_id}/log` | `--jobs-api`; resolvable or allowed path | No |
+| Read a submitted script or current Condor submit file | `GET /api/v1/jobs/{cluster}/{job_id}/script` | `--jobs-api`; controller copy or readable file | No |
 | Cancel one personal job | `POST /api/v1/jobs/{cluster}/{job_id}/cancel` | `--jobs-api` and explicit user approval | **Yes** |
 | Inspect reusable SSH sessions | `cluster-watcher sessions --json` | Local configuration | No |
 | Inspect sessions over HTTP | `GET /api/v1/sessions` | Loopback client | No |
@@ -28,7 +29,7 @@ interactive MFA is required.
 
 The browser and VS Code extension are human interfaces, not automation
 contracts. Their archives and expanded/collapsed state are local UI state and
-do not archive, hold, or modify jobs in Slurm.
+do not archive, hold, or modify remote jobs.
 
 ## Service modes
 
@@ -68,13 +69,19 @@ the versioned `/api/v1/*` routes rather than the dashboard's private
 The snapshot includes:
 
 - Per-cluster reachability and partial collection errors.
-- Partitions and nodes, administrative/node states, CPU threads, GPU/APU
+- Slurm partitions or HTCondor model display groups plus an aggregate `pool`, physical nodes,
+  CPU threads, GPU/APU
   allocation, and `schedulable_idle` resources.
 - Cluster-scoped model names and cataloged per-device VRAM and dense
   FP16/BF16 Tensor/Matrix TFLOPS.
 - Aggregate-partition markers and advisory queue-wait probes for representative
   GPU counts, node shapes, memory requests, and walltimes.
-- The logged-in user's association-specific fair-share factors and global
+- HTCondor `condor_priority` rows when `condor_userprio` exposes the submitter:
+  `pool_share` estimates a negotiator share assuming matching jobs; lower
+  `effective_priority` values have precedence. These are pool-wide, not
+  GPU-model-specific, and are not Slurm factors. HTCondor wait cells report
+  FREE/BUSY/MULTI based on single-host GPU capacity, not a start-time ETA.
+- For Slurm, the logged-in user's association-specific fair-share factors and global
   visible-association ranks. `partitions[].fair_share` contains entries with an
   explicit Slurm partition or a match inferred from cached account ancestry
   (including the user-visible `sshare` tree when `sacctmgr` hides account rows),
@@ -96,7 +103,8 @@ Do not add an `aggregate: true` partition's capacity to its constituent
 partitions: those entries can refer to the same physical nodes.
 
 Hardware specifications come from cluster-scoped `[[profile]]` entries in
-`clusters.toml`. A missing/null profile field is unknown, not zero. A model
+`clusters.toml`. HTCondor slot ads may also provide a GPU model and per-device
+memory; TFLOPS still needs a catalogued profile. A missing/null field is unknown, not zero. A model
 name on one cluster must not be assumed to identify the same hardware on
 another cluster.
 Cluster Watcher's default compute ordering emphasizes per-device VRAM first
@@ -110,6 +118,10 @@ projections. They account for the configured user/account, current QOS and
 fairshare, requested GPU/node shape, host-memory request, and requested
 walltime. They are cached more slowly than capacity data; inspect
 `wait_estimates_updated_at`, the request shape, and each estimate's `error`.
+HTCondor's cells carry `capacity_state: free|busy|multi_node`: they test
+advertised single-host GPU fit per model. They cannot predict matchmaking,
+negotiation, or a start time for a hypothetical job. Do not treat FREE as a
+guarantee or add aggregate `pool` counts to model-group counts.
 
 An expected start is not a reservation or guarantee. Priority changes, new
 jobs, reservations, dependencies, topology, licenses, and jobs ending early or
@@ -127,10 +139,12 @@ The personal jobs API is absent unless the service was started with
 GET /api/v1/jobs
 ```
 
-By default it merges the live queue with the preceding 24 hours of accounting.
+By default it merges the live queue with the preceding 24 hours of accounting
+or HTCondor history.
 It includes canonical array-task IDs, state, partition, resource requests,
 submission/start/end times, elapsed time, exit status, scheduler reason,
-dependency, and an expected start when Slurm provides one. One cluster's
+dependency when known, and an expected start when Slurm provides one. Condor
+jobs use `ClusterId.ProcId` IDs and a `pool` display group. One cluster's
 failure does not invalidate successful results from other clusters.
 
 Supported filters are repeatable `cluster` and `job_id`, `state` equal to
@@ -147,7 +161,7 @@ GET /api/v1/jobs/{cluster}/{job_id}/log?stream=err&tail=2000&before=0
 `stream` is `out` or `err`. `tail` is capped at 2,000 lines. If `more_before`
 is true, increment `before` by the returned line count to request the preceding
 page. This pages backward on the remote machine instead of repeatedly
-downloading newer output. Do not implement rapid log polling. Automatic Slurm
+downloading newer output. Do not implement rapid log polling. Automatic scheduler
 paths are resolved from job metadata; a caller-supplied absolute `path` must
 canonicalize beneath that cluster's configured `job_log_roots`.
 

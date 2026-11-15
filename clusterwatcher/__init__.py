@@ -1,1 +1,1 @@
-"""Cluster Watcher: inspect Slurm clusters through SSH."""
+"""Cluster Watcher: inspect Slurm and HTCondor clusters through SSH."""

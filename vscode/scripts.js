@@ -6,9 +6,9 @@ function scriptRequestPath(cluster, jobId) {
 }
 
 /** Build a safe virtual-document path; `.sh` lets VS Code pick shell highlighting. */
-function virtualScriptPath(cluster, jobId) {
+function virtualScriptPath(cluster, jobId, scheduler = 'slurm') {
   const safe = (value) => String(value).replace(/[^A-Za-z0-9_.-]/g, '_');
-  return `/${safe(cluster)}/${safe(jobId)}.sbatch.sh`;
+  return `/${safe(cluster)}/${safe(jobId)}${scheduler === 'condor' ? '.sub' : '.sbatch.sh'}`;
 }
 
 /**
@@ -18,7 +18,8 @@ function virtualScriptPath(cluster, jobId) {
 function scriptSourceMessage(payload) {
   const truncated = payload.truncated ? ' It was cut off at 1 MiB.' : '';
   if (payload.source === 'file') {
-    return `Job ${payload.job_id}: Slurm kept no copy of the submitted script, so this is the current file ${payload.path}; it may have been edited since the job was submitted.${truncated}`;
+    const holder = payload.scheduler === 'condor' ? 'HTCondor' : 'Slurm';
+    return `Job ${payload.job_id}: ${holder} kept no copy of the submitted script, so this is the current file ${payload.path}; it may have been edited since the job was submitted.${truncated}`;
   }
   const holder = payload.source === 'accounting' ? 'Slurm accounting' : 'the Slurm controller';
   return `Job ${payload.job_id}: exact script as submitted, from ${holder}.${truncated}`;

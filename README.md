@@ -1,10 +1,10 @@
 # Cluster Watcher
 
-**See your Slurm jobs and find usable GPU capacity across several clusters without checking each one separately.**
+**See your Slurm and HTCondor jobs and find usable GPU capacity across several clusters without checking each one separately.**
 
-When you work across multiple Slurm systems, the same questions recur: *Which jobs are running? Why is one still pending? Which partition has the GPUs I need? Will my account be able to use it?* Cluster Watcher brings the answers into a VS Code sidebar, a browser dashboard, and terminal boards. All three use your configured SSH connections; on systems with password and one-time-code login, reusable sessions avoid prompting on every refresh.
+When you work across multiple clusters, the same questions recur: *Which jobs are running? Why is one still pending? Which machines have free GPUs?* Cluster Watcher brings the answers into a VS Code sidebar, a browser dashboard, and terminal boards. All three use your configured SSH connections; on systems with password and one-time-code login, reusable sessions avoid prompting on every refresh.
 
-Cluster Watcher observes jobs and capacity. It does not submit jobs or choose a partition for you. Waits and start times are estimates from Slurm, not reservations.
+Cluster Watcher observes jobs and capacity. It does not submit jobs or choose a partition for you. Slurm waits and start times are estimates, not reservations. HTCondor does not provide an equivalent generic start-time prediction for hypothetical jobs.
 
 <p align="center">
   <img src="docs/images/vscode-my-jobs.png" alt="Current VS Code My Jobs view: Running, Pending, Depending, and Completed cards with progress and actions" width="300">
@@ -31,7 +31,7 @@ Open a new terminal after installation. On Windows, use the [PowerShell installe
 cluster-watcher setup
 ```
 
-The wizard asks for each cluster's name, SSH host, and your username. It can also record GPU or APU profiles, login groups, and partition time limits. It writes **one** private `clusters.toml` file. To review or change it later, run `cluster-watcher config`.
+The wizard asks for each cluster's name, SSH host, username, and scheduler. It can also record GPU or APU profiles, login groups, and Slurm partition time limits. It writes **one** private `clusters.toml` file. To review or change it later, run `cluster-watcher config`.
 
 A minimal entry looks like this:
 
@@ -40,6 +40,7 @@ A minimal entry looks like this:
 name = "atlas"
 host = "login.atlas.example.org"
 username = "alex"
+# scheduler = "auto"  # Or "slurm" / "condor".
 ```
 
 Do not put passwords or one-time codes in the TOML file. Cluster Watcher uses SSH keys, your existing SSH setup, or interactive prompts. See [Authentication and shared sessions](#authentication-and-shared-sessions).
@@ -60,7 +61,9 @@ The VS Code extension can install a matching backend on first use. A development
 
 **My Jobs** separates Running, Pending, and Depending jobs. Pending jobs are eligible to wait in the scheduler; Depending jobs are held by a dependency. Failed dependencies, completed jobs, failures, and cancellations have their own sections. Active jobs are ordered by cluster, then newest submission time.
 
-Running cards show elapsed time against the Slurm time limit. Pending cards show a start estimate when Slurm supplies one. Expand a card to see its partition, requested resources, submission and launch times, dependency, and priority information. In VS Code, cards can open their `.out` and `.err` files and submitted script; cancellation asks for confirmation. Archive hides a card from the main list and can be undone.
+Running cards show elapsed time against a time limit when the scheduler supplies one. Pending cards show a start estimate when Slurm supplies one. Expand a card to see its partition or Condor pool, requested resources, submission and launch times, and available scheduler details. In VS Code, cards can open their `.out` and `.err` files; Slurm cards can also open a submitted script when recoverable. Cancellation asks for confirmation. Archive hides a card from the main list and can be undone.
+
+If a cluster disconnects, My Jobs keeps its last known cards and places a yellow ⚠ beside jobs from that cluster. Hover over it for the connection error and latest successful update. Other clusters continue to refresh. If the local jobs API itself becomes unreachable, all previously loaded cards remain visible with warnings. These cards show **last known state** and frozen progress, which may have changed; VS Code hides the End action until the cluster reconnects. Warnings clear when fresh data arrives. Before the first successful load, there are no previous cards to retain.
 
 <p align="center"><img src="docs/images/vscode-title-hover.png" alt="VS Code job card showing the full job name on hover" width="390"></p>
 
@@ -68,12 +71,12 @@ The browser has its own sortable, collapsible job cards and a browser-local arch
 
 ### Cluster and partition status
 
-Each cluster has a thin job bar: **blue** for Running, **red** for Pending, and **dark maroon** for Depending. Click a segment in VS Code or the browser to jump to those jobs for that cluster. Each partition then shows:
+Each cluster has a thin job bar: **blue** for Running, **red** for Pending, and **dark maroon** for Depending. Click a segment in VS Code or the browser to jump to those jobs for that cluster. Slurm partitions and HTCondor's GPU-model display groups then show:
 
 - GPU or APU model, per-device VRAM, FP16/BF16 Tensor throughput, and total CPU threads.
-- A **FairShare** scale for each account association that can be mapped to that partition.
+- Slurm **FairShare** for mapped account associations, or HTCondor **pool share** and effective user priority when the negotiator reports them.
 - **GPUs:** schedulable free devices out of the partition total, and **Nodes:** fully idle nodes out of the total.
-- Wait estimates for one-hour jobs requesting 1, 2, 4, 8, 16, 32, or 64 GPUs, when the site permits a probe. The configured partition wall-time cap applies to development partitions.
+- Slurm wait estimates for one-hour jobs requesting 1, 2, 4, 8, 16, 32, or 64 GPUs, when the site permits a probe. The configured partition wall-time cap applies to development partitions. HTCondor shows **FREE** when one host advertises enough free GPUs, **BUSY** when that GPU count fits a host but none is currently free, and **MULTI** when no single host has enough GPUs. These are capacity observations, not start-time estimates; matchmaking, access rules, and other users still apply.
 
 Green availability and completion indicators in the VS Code sidebar use the same shade shown in the screenshots.
 
@@ -89,11 +92,12 @@ The browser preserves the node-level view below each compact partition summary. 
 
 | Signal | Interpretation |
 | --- | --- |
-| Free GPUs | Devices reported idle **and schedulable**. An idle GPU on a drained or reserved node does not count as free. |
+| Free GPUs | Devices reported idle **and schedulable**. For HTCondor, free GPUs are the resources advertised by partitionable or unclaimed static slots; dynamic slots account for assigned GPUs. |
 | Free Nodes | Nodes reported fully idle on a usable partition. A mixed node may still have free GPUs. |
-| FairShare | A factor from 0 to 1 for a mapped account association. Higher factors generally help; a lower displayed rank number is better among visible associations. Your job uses its submitted account, which may differ from another bar shown. |
+| FairShare | Slurm: a factor from 0 to 1 for a mapped account association. Higher factors generally help; a lower displayed rank number is better among visible associations. |
+| Pool share | HTCondor: the negotiator's estimated share for your submitter, assuming jobs can match the pool. Lower **effective priority** values get precedence. This is different from a Slurm FairShare factor. |
 | Pending priority | A relative queue rank, not a probability of starting soon. QOS, reservations, age, backfill, and resource fit also matter. |
-| Wait estimate | Slurm's current prediction or test-only result for a specified request. It can change and does not guarantee a start time. |
+| Wait estimate | Slurm's current prediction or test-only result for a specified request. It can change and does not guarantee a start time. HTCondor instead reports current single-host fit as FREE, BUSY, or MULTI. |
 | GPU hours | GPU count multiplied by remaining time for Running jobs, or requested time limit for Pending and Depending jobs. It is an upper-limit resource measure. |
 
 Free capacity is only one part of scheduling. A job can remain pending even when some devices are green because its node count, memory, account, QOS, or requested wall time cannot fit the available shape. [The detailed reference](REFERENCE.md#reading-the-numbers) explains the estimates and failure labels.
@@ -136,6 +140,48 @@ control_persist = "8h"
 ```
 
 `cluster-watcher login` opens reusable SSH control sessions; `cluster-watcher sessions` shows their state. The VS Code sidebar offers per-cluster login controls and a group login when credentials are shared. The extension's service runs in tmux, so closing one VS Code window does not stop it. Sessions survive while their SSH masters remain alive; a machine reboot or expired site authentication still requires a new login. VS Code Remote SSH runs the extension and backend on the remote development host, so laptop and remote-host sessions are separate.
+
+If scheduler commands run on a submission host behind the login node, set `submission_host` on that machine. Cluster Watcher authenticates to `host` once, then SSHes from there to `submission_host` for status, jobs, logs, commands, and shells:
+
+```toml
+[[machine]]
+name = "atlas"
+host = "login.atlas.example.org"
+username = "alex"
+interactive_auth = true
+submission_host = "submit.atlas.internal"
+```
+
+The second hop must work without another password or OTP. Check it once with `ssh submit.atlas.internal` while logged into the login node; its host key and SSH alias are managed on that login node. The session view shows the login-to-submission route. See [Two-hop SSH](REFERENCE.md#two-hop-ssh-to-a-submission-host) for details.
+
+### HTCondor machines
+
+For a Condor submit host, use the same `[[machine]]` entry and select `scheduler = "condor"`; `scheduler = "auto"` is the default. Auto detection checks for `sinfo` and `condor_q` on the final submission host once per process. If both are installed, set the scheduler explicitly. If neither is present, check the SSH route and remote `PATH`.
+
+```toml
+[[machine]]
+name = "lst"
+host = "login.lst.uni-saarland.de"
+username = "cameronb"
+submission_host = "your-submit-host" # Omit when `host` already runs Condor commands.
+scheduler = "condor"
+```
+
+HTCondor has slots rather than Slurm partitions. The dashboard shows **pool: H200**, **pool: H100**, and other GPU-model groups based on each host's advertised model. **pool** remains an aggregate of all hosts; do not add its counts to the model groups. These names are display groups, not submit targets. Hosts with unknown or mixed GPU models remain only in pool. It reads live jobs with `condor_q -json`, recent completed jobs with `condor_history -json`, capacity and GPU names with `condor_status -json`, and pool-wide submitter priority with `condor_userprio`. An empty queue is normal. `ClusterId.ProcId` keeps individual jobs in one submit cluster distinct. Add a `[[profile]]` with the reported model as an alias to display TFLOPS/s. HTCondor user priority is **lower is better**; pool share is an estimate from the negotiator, not a GPU-model-specific entitlement.
+
+Condor `.out` and `.err` files are read from the submit host when a job ad contains their paths. A running job may not have created a file yet, and file transfer or site policy may delay its appearance. The first read needs an SSH round trip; recent job history and resolved paths are cached to avoid repeating slow `condor_history` lookups on each click. When a job advertises `JobSubmitFile`, its card offers **script** to open the current `.sub` file. Condor does not retain an immutable copy here, so this file may have changed since submission or may no longer exist. Held Condor jobs are shown as Held; they are not labeled Depending without dependency evidence.
+
+The `lst` configuration now includes these five models. Values are **per GPU**; the node table's memory column summed eight devices. The throughput column uses dense FP16/BF16 Tensor performance, excluding the vendor's sparsity multiplier.
+
+| LST GPU | VRAM | Dense Tensor TFLOPS/s |
+| --- | ---: | ---: |
+| H200 NVL | 141 GB | 835.5 |
+| H100 PCIe | 80 GB | 756 |
+| A100 PCIe 80 GB | 80 GB | 312 |
+| A100 PCIe 40 GB | 40 GB | 312 |
+| V100 PCIe 32 GB | 32 GB | 112 |
+
+Sources: [H200 NVL datasheet](https://www.nvidia.com/en-in/data-center/h200/), [H100 PCIe whitepaper](https://resources.nvidia.com/en-us-hopper-architecture), [A100 datasheet](https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf), [V100 PCIe datasheet](https://images.nvidia.com/content/technologies/volta/pdf/tesla-volta-v100-datasheet-letter-fnl-web.pdf). H200's published BF16 value includes sparsity, so the dense value is half of 1,671 TFLOPS/s.
 
 Multiple login nodes, optional identity files, GPU/APU profiles, time limits, wait thresholds, and log roots are documented in [Configuration](REFERENCE.md#configure). The setup wizard validates the file and retains a backup when replacing one.
 

@@ -12,7 +12,7 @@ import time
 from typing import Callable
 
 from .compute import profile_for
-from .job_scripts import fetch_batch_script
+from .job_scripts import JobScriptNotFound, fetch_batch_script
 from .models import ClusterStatus, Machine
 from .slurm import (
     canonical_job_id,
@@ -29,9 +29,9 @@ DEFAULT_JOB_LOOKBACK_HOURS = 24
 MAX_LOG_TAIL_LINES = 2000
 ACTIVE_JOB_STATES = {
     "CONFIGURING", "PENDING", "REQUEUED", "REQUEUE_FED", "REQUEUE_HOLD",
-    "RESIZING", "RUNNING", "SIGNALING", "STAGE_OUT", "SUSPENDED",
+    "RESIZING", "RUNNING", "SIGNALING", "STAGE_OUT", "SUSPENDED", "HELD",
 }
-_JOB_ID_PATTERN = re.compile(r"\d+(?:_\d+)?")
+_JOB_ID_PATTERN = re.compile(r"\d+(?:[_.]\d+)?")
 _MISSING_VALUES = {"", "Unknown", "N/A", "None", "(null)", "NULL"}
 
 
@@ -106,10 +106,10 @@ def parse_since(value: str | None, now: datetime | None = None) -> datetime:
 
 
 def validate_job_ids(job_ids: tuple[str, ...]) -> tuple[str, ...]:
-    """Validate and de-duplicate Slurm job and array-task identifiers."""
+    """Validate Slurm array IDs and HTCondor ``ClusterId.ProcId`` IDs."""
     unique = tuple(dict.fromkeys(job_ids))
     if any(not _JOB_ID_PATTERN.fullmatch(job_id) for job_id in unique):
-        raise ValueError("job_id must be a numeric Slurm job or array-task identifier")
+        raise ValueError("job_id must be a numeric Slurm or HTCondor job identifier")
     return unique
 
 
@@ -281,7 +281,12 @@ def _unknown_record(cluster: str, job_id: str, reason: str) -> dict[str, object]
 
 def _matches_requested(job_id: str, requested: tuple[str, ...]) -> bool:
     """Match an exact ID or array children requested through their parent ID."""
-    return not requested or any(job_id == value or ("_" not in value and job_id.startswith(f"{value}_")) for value in requested)
+    return not requested or any(
+        job_id == value or (
+            "_" not in value and "." not in value
+            and job_id.startswith((f"{value}_", f"{value}."))
+        ) for value in requested
+    )
 
 
 def _public_record(record: dict[str, object]) -> dict[str, object]:
@@ -385,6 +390,12 @@ class JobService:
             """Fetch one cluster's accounting without holding another query."""
             machine = machines[name]
             status = statuses.get(name)
+            if status is not None and status.scheduler == "condor":
+                from .condor import collect_history
+                try:
+                    return collect_history(machine, self.timeout, since, requested_ids), None
+                except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+                    return [], str(exc)
             if default_window and not requested_ids and status is not None and status.accounting is not None:
                 return deepcopy(status.accounting.records), None
             try:
@@ -399,8 +410,10 @@ class JobService:
                 accounting_results = list(pool.map(accounting_for, selected_names))
         for name, (accounting, accounting_error) in zip(selected_names, accounting_results):
             status = statuses.get(name)
+            status_error = status.error if status else "No cluster status has been collected"
+            error = accounting_error or status_error
             active_records = [
-                _active_record(name, job)
+                ({**job, "cluster": name} if status and status.scheduler == "condor" else _active_record(name, job))
                 for job in (status.user_jobs if status and status.user_jobs else [])
             ]
             for source, record in zip((status.user_jobs if status and status.user_jobs else []), active_records):
@@ -417,7 +430,7 @@ class JobService:
                 job_id = str(record["job_id"])
                 if _matches_requested(job_id, requested_ids):
                     merged[job_id] = record
-                    if record.get("_stdout") or record.get("_stderr"):
+                    if record.get("_stdout") or record.get("_stderr") or record.get("_submit_file"):
                         log_records[(name, job_id)] = record.copy()
             for job_id, record in active.items():
                 accounting_record = merged.get(job_id, {})
@@ -434,6 +447,16 @@ class JobService:
                         merged[job_id] = _unknown_record(name, job_id, f"Accounting unavailable: {accounting_error}")
 
             for record in merged.values():
+                record["scheduler"] = status.scheduler if status is not None else machines[name].scheduler
+                if error:
+                    record["refresh_error"] = error
+                    record["last_success_at"] = status.last_success_at if status is not None else None
+                if record["scheduler"] == "condor":
+                    record["script_available"] = bool(record.get("_submit_file"))
+                    record["log_paths_available"] = {
+                        "out": bool(record.get("_stdout")),
+                        "err": bool(record.get("_stderr")),
+                    }
                 _annotate_accelerator(name, record)
                 is_active = str(record["state"]) in ACTIVE_JOB_STATES
                 if state_filter == "active" and not is_active:
@@ -442,14 +465,13 @@ class JobService:
                     continue
                 jobs.append(_public_record(record))
 
-            status_error = status.error if status else "No cluster status has been collected"
             reachable = not (status_error and accounting_error)
-            error = accounting_error if accounting_error else status_error
             cluster_results.append({
                 "name": name,
                 "reachable": reachable,
                 "accounting_available": accounting_error is None,
                 "error": error,
+                "last_success_at": status.last_success_at if status is not None else None,
             })
 
         jobs.sort(key=lambda job: (str(job["cluster"]), str(job["job_id"])))
@@ -480,11 +502,19 @@ class JobService:
         machine = next((machine for machine in self.machines if machine.name == cluster), None)
         if machine is None:
             raise ValueError(f"unknown cluster: {cluster}")
-        run_remote(
-            machine, self.timeout,
-            f"scancel --user={shlex.quote(machine.username)} -- {shlex.quote(job_id)}",
-            failover=False,
-        )
+        status = next((item for item in self.status_provider() if item.name == cluster), None)
+        if status is not None and status.scheduler == "condor":
+            from .condor import _ads
+            ad = _ads(run_remote(machine, self.timeout, f"condor_q -json {shlex.quote(job_id)}", failover=False))
+            if len(ad) != 1 or str(ad[0].get("Owner")) != machine.username:
+                raise ValueError("HTCondor job is absent or does not belong to the configured user")
+            run_remote(machine, self.timeout, f"condor_rm {shlex.quote(job_id)}", failover=False)
+        else:
+            run_remote(
+                machine, self.timeout,
+                f"scancel --user={shlex.quote(machine.username)} -- {shlex.quote(job_id)}",
+                failover=False,
+            )
         with self._lock:
             self._cache.clear()
             self._inflight.clear()
@@ -500,6 +530,18 @@ class JobService:
         machine = next((machine for machine in self.machines if machine.name == cluster), None)
         if machine is None:
             raise ValueError(f"unknown cluster: {cluster}")
+        status = next((item for item in self.status_provider() if item.name == cluster), None)
+        if status is not None and status.scheduler == "condor":
+            from .condor import collect_history, fetch_submit_file
+            records = [job for job in (status.user_jobs or []) if str(job.get("job_id")) == job_id]
+            if not records:
+                with self._lock:
+                    cached = self._log_records.get((cluster, job_id))
+                records = [cached] if cached else collect_history(machine, self.timeout, parse_since(None), (job_id,))
+            if not records:
+                raise JobScriptNotFound(f"HTCondor has no record of job {job_id}")
+            return {"cluster": cluster, "job_id": job_id,
+                    **fetch_submit_file(machine, self.timeout, records[0])}
         return {"cluster": cluster, "job_id": job_id, **fetch_batch_script(machine, self.timeout, job_id)}
 
     def log_tail(
@@ -607,6 +649,24 @@ class JobService:
                 return self._log_path_cache[cache_key]
         statuses = {status.name: status for status in self.status_provider()}
         status = statuses.get(machine.name)
+        if status is not None and status.scheduler == "condor":
+            from .condor import collect_history
+            records = [job for job in (status.user_jobs or []) if str(job.get("job_id")) == job_id]
+            if not records:
+                with self._lock:
+                    cached = self._log_records.get((machine.name, job_id))
+                records = [cached] if cached else collect_history(machine, self.timeout, parse_since(None), (job_id,))
+            record = records[0] if records else None
+            raw = str(record.get("_stdout" if stream == "out" else "_stderr") or "") if record else ""
+            workdir = str(record.get("_workdir") or "") if record else ""
+            if not raw:
+                raise JobLogNotFound(f"No {stream} log path is available for job {job_id}")
+            path = posixpath.join(workdir, raw) if not raw.startswith("/") and workdir else raw
+            if not path.startswith("/"):
+                raise JobLogNotFound(f"No absolute {stream} log path is available for job {job_id}")
+            with self._lock:
+                self._log_path_cache[cache_key] = path
+            return path
         live = any(str(job.get("id")) == job_id for job in (status.user_jobs if status and status.user_jobs else []))
         if live:
             try:

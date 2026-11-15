@@ -27,6 +27,8 @@ HEADER = """\
 # SSH keys, agent forwarding, host verification, ProxyJump, etc. remain managed
 # by your normal OpenSSH configuration.
 # Add `hidden = true` to any machine entry to skip its login, polling, and display.
+# Set `submission_host` if scheduler commands run on a passwordless SSH hop behind `host`.
+# Set `scheduler` to slurm or condor if automatic command detection is ambiguous.
 # Optional `[[profile]]` entries below describe one GPU/APU model per cluster.
 # Set `device_type = "apu"` for an APU profile; GPU is the default.
 # VRAM and dense FP16/BF16 Tensor throughput are per device, not partition totals.
@@ -48,6 +50,10 @@ def render_config(
         lines = ["[[machine]]"]
         for key in ("name", "host", "username"):
             lines.append(f"{key} = {_toml_string(str(machine[key]))}")
+        if machine.get("submission_host"):
+            lines.append(f"submission_host = {_toml_string(str(machine['submission_host']))}")
+        if machine.get("scheduler", "auto") != "auto":
+            lines.append(f"scheduler = {_toml_string(str(machine['scheduler']))}")
         if machine.get("port", 22) != 22:
             lines.append(f"port = {int(machine['port'])}")
         if machine.get("identity_file"):
@@ -110,8 +116,18 @@ def _ask_machine(prompt: Prompt, output: Output, taken: set[str], default_userna
     machine: dict[str, object] = {
         "name": name,
         "host": _ask(prompt, "SSH host name"),
+        "submission_host": _ask(
+            prompt, "Submission host reached from the login node (blank runs scheduler commands on the login node)",
+            required=False,
+        ),
         "username": _ask(prompt, "Username", default_username or None),
     }
+    while True:
+        scheduler = _ask(prompt, "Scheduler (auto/slurm/condor)", "auto").lower()
+        if scheduler in {"auto", "slurm", "condor"}:
+            machine["scheduler"] = scheduler
+            break
+        output("Scheduler must be auto, slurm, or condor.")
     while True:
         port = _ask(prompt, "SSH port", "22")
         if port.isdecimal() and 1 <= int(port) <= 65535:
@@ -139,7 +155,7 @@ def _ask_profile(prompt: Prompt, output: Output, cluster: str) -> dict[str, obje
             break
         output("Device type must be GPU or APU.")
     while True:
-        aliases = [alias.strip() for alias in _ask(prompt, "Slurm GRES, partition, or node-name aliases (comma-separated)").split(",")]
+        aliases = [alias.strip() for alias in _ask(prompt, "GPU model, Slurm GRES, partition/pool, or node-name aliases (comma-separated)").split(",")]
         if all(aliases):
             break
         output("Provide at least one non-empty alias; remove trailing commas.")

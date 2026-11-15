@@ -29,7 +29,7 @@ from .credentials import SecretPrompt, establish_interactive_sessions
 from .job_scripts import JobScriptNotFound
 from .jobs import JobLogNotFound, JobService, parse_since
 from .models import ClusterStatus, Machine
-from .slurm import collect_status
+from .scheduler import collect_status
 from .ssh import session_status
 from .snapshot import active_job_counts, build_snapshot
 from .wait_probes import (
@@ -119,6 +119,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .legend-item { display:inline-flex; gap:.3rem; align-items:center; } .swatch { display:inline-block; width:.7rem; height:.7rem; border-radius:50%; vertical-align:middle; }
 .error { color:#c33; white-space:pre-wrap; }
 .cluster-warning { color:#d9a400; margin-left:.35rem; font-weight:700; }
+.job-connection-warning { position:relative; z-index:11; color:#d9a400; margin-left:.3rem; font-weight:700; flex:0 0 auto; }
 .job-badges { display:flex; flex-wrap:wrap; gap:.35rem; } .job-badge { border:1px solid #8885; border-radius:.55rem; font-size:.82rem; padding:.2rem .5rem; white-space:nowrap; }
 .job-badge .job-progress { display:inline-grid; grid-template-columns:70px auto; align-items:center; gap:.35rem; margin:0 0 0 .35rem; } .job-badge .job-progress-track { width:70px; height:.4rem; } .job-badge .job-progress-text { margin:0; }
 @media (max-width:600px) { .title-row { flex-wrap:wrap; gap:.25rem .75rem; } .partition-heading { flex-wrap:wrap; } .job-badge .job-progress { display:none; } }
@@ -240,7 +241,14 @@ function runningJobProgress(job, compact = false) {
   const total = Number(job.time_limit_seconds), reportedElapsed = Number(job.elapsed_seconds), reportedRemaining = Number(job.time_left_seconds);
   const elapsed = job.elapsed_seconds != null ? reportedElapsed : job.time_left_seconds != null ? Math.max(0, total - reportedRemaining) : NaN;
   if (job.time_limit_seconds == null || !Number.isFinite(total) || total <= 0 || !Number.isFinite(elapsed)) {
-    return `<span class="job-progress-text">${escapeHtml(allottedRuntime(job))}</span>`;
+    const label = Number.isFinite(elapsed) ? `${formatSeconds(elapsed)} elapsed · ${allottedRuntime(job)}` : allottedRuntime(job);
+    return `<span class="job-progress-text">${escapeHtml(label)}</span>`;
+  }
+  if (job.refresh_error) {
+    const observed = Math.max(0, Math.min(total, elapsed)), remaining = Math.max(0, total - observed);
+    const label = compact ? `${formatSeconds(remaining, true)} left / ${formatSeconds(total)}`
+      : `${formatSeconds(observed, true)} elapsed · ${formatSeconds(remaining, true)} remaining · ${formatSeconds(total)} allotted`;
+    return `<span class="job-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${observed}"><span class="job-progress-track"><span class="job-progress-fill" style="width:${observed / total * 100}%"></span></span><span class="job-progress-text">${escapeHtml(label)}</span></span>`;
   }
   return `<span class="job-progress" data-running-progress data-total-seconds="${total}" data-elapsed-seconds="${Math.max(0, elapsed)}" data-sampled-at="${Date.now()}" data-compact="${compact}" role="progressbar" aria-valuemin="0" aria-valuemax="${total}"><span class="job-progress-track"><span class="job-progress-fill"></span></span><span class="job-progress-text"></span></span>`;
 }
@@ -362,6 +370,14 @@ function pendingJobProgress(job, noEstimatePriority = '') {
     return '<span class="job-progress-message">no estimate available</span>';
   }
   const waitSeconds = Math.max(1, Math.round((startAt - submittedAt) / 1000));
+  if (job.refresh_error) {
+    const sampledAt = Date.parse(job.last_success_at || '');
+    const observedAt = Number.isFinite(sampledAt) ? sampledAt : Date.now();
+    const waited = Math.max(0, Math.min(waitSeconds, (observedAt - submittedAt) / 1000));
+    const remaining = Math.max(0, (startAt - observedAt) / 1000);
+    const label = remaining > 0 ? `${formatSeconds(remaining, true)} estimated wait` : 'estimate passed';
+    return `<span class="job-progress pending" role="progressbar" aria-valuemin="0" aria-valuemax="${waitSeconds}" aria-valuenow="${Math.floor(waited)}"><span class="job-progress-track"><span class="job-progress-fill" style="width:${waited / waitSeconds * 100}%"></span></span><span class="job-progress-text">${escapeHtml(label)}</span></span>`;
+  }
   return `<span class="job-progress pending" data-pending-progress data-submitted-at="${submittedAt}" data-start-at="${startAt}" data-wait-seconds="${waitSeconds}" data-runtime-label="${escapeHtml(runtime)}" role="progressbar" aria-valuemin="0" aria-valuemax="${waitSeconds}"><span class="job-progress-track"><span class="job-progress-fill"></span></span><span class="job-progress-text"></span></span>`;
 }
 
@@ -405,12 +421,16 @@ function launchabilityStrip(estimates, partition, totalGpus, updatedAt, threshol
   const blocks = launchGpuCounts.map(gpus => {
     const row = baselineWaitEstimate(rows, gpus), minutes = probeMinutes(row);
     const runtime = minutes < 60 ? `${minutes}m job` : '1h job';
-    const label = `${gpus} GPU${gpus === 1 ? '' : 's'} · ${runtime}`;
+    const label = `${gpus} GPU${gpus === 1 ? '' : 's'}${row?.capacity_state ? '' : ` · ${runtime}`}`;
     let state = 'launch-missing', content = '?', detail;
-    if (gpus > totalGpus) {
+    if (gpus > totalGpus && !row?.capacity_state) {
       state = 'launch-unsupported'; content = '—'; detail = `exceeds the partition's ${totalGpus} GPUs`;
     } else if (!row) {
       state = pending ? 'launch-pending' : 'launch-missing'; content = pending ? '…' : '?'; detail = pending ? 'still checking' : 'not probed';
+    } else if (row.capacity_state) {
+      state = row.capacity_state === 'free' ? 'launch-wait-1' : row.capacity_state === 'busy' ? 'launch-wait-3' : 'launch-unsupported';
+      content = row.capacity_state === 'free' ? '✓' : row.capacity_state === 'busy' ? '·' : '—';
+      detail = row.error;
     } else if (row.error) {
       const kind = row.error_kind || 'error';
       state = ['denied', 'minimum', 'limit'].includes(kind) ? 'launch-blocked' : 'launch-missing';
@@ -427,7 +447,7 @@ function launchabilityStrip(estimates, partition, totalGpus, updatedAt, threshol
     const title = `${label}: ${detail}`;
     return `<span class="launch-shape"><span class="launch-count">${gpus}</span><span class="fast-hover launch-block ${state}" role="img" aria-label="${escapeHtml(title)}" data-fast-tooltip="${escapeHtml(title)}">${content}</span></span>`;
   }).join('');
-  return `<span class="launchability" role="group" aria-label="Estimated launch wait for GPU requests">${blocks}</span>`;
+  return `<span class="launchability" role="group" aria-label="${rows.some(row => row.capacity_state) ? 'Current single-host GPU capacity' : 'Estimated launch wait for GPU requests'}">${blocks}</span>`;
 }
 
 const JOB_ARCHIVE_STORAGE_KEY = 'cluster-watcher.archived-jobs.v1';
@@ -606,10 +626,13 @@ function jobDisclosureAttribute(key, defaultOpen = false) {
 function jobCard(job, listName, jobs) {
   const identifier = jobId(job), name = job.name || identifier;
   const hoverText = [job.cluster, identifier, name].filter(Boolean).join(' ');
+  const warningText = job.refresh_error && listName !== 'archived'
+    ? `Cluster connection issue.\\nLatest update: ${job.last_success_at ? new Date(job.last_success_at).toLocaleString() : 'unavailable'}\\n${job.refresh_error}` : '';
+  const warning = warningText ? `<span class="job-connection-warning fast-hover" role="img" aria-label="${escapeHtml(warningText)}" data-fast-tooltip="${escapeHtml(warningText)}">⚠</span>` : '';
   const nodes = nodeCount(job), gpus = Number(job.gpus) || 0, cpus = Number(job.cpus) || 0;
   const resources = job.id || gpus || cpus ? `${nodes} node${nodes === 1 ? '' : 's'} · ${gpus} GPU${gpus === 1 ? '' : 's'} · ${cpus} CPU${cpus === 1 ? '' : 's'}` : `${nodes} node${nodes === 1 ? '' : 's'}`;
   const group = jobGroup(job);
-  const priority = listName === 'active' && group === 'PENDING' ? jobPriorityGauge(job, jobs) : '';
+  const priority = listName === 'active' && job.scheduler !== 'condor' && group === 'PENDING' ? jobPriorityGauge(job, jobs) : '';
   const dependency = String(job.dependency || '').trim();
   const hasDependency = dependency && !['(null)', 'NULL', 'None', 'N/A'].includes(dependency);
   const submittedMs = new Date(job.submit_time).getTime(), startMs = new Date(job.start_time).getTime();
@@ -632,7 +655,7 @@ function jobCard(job, listName, jobs) {
   const actionButton = `<button data-job-action="${action}" data-job-key="${escapeHtml(jobArchiveKey(job))}">${actionLabel}</button>`;
   const logButtons = jobsApiEnabled && !['PENDING', 'DEPENDING', 'FAILED_DEPENDENCY'].includes(group) ? `<button class="log-button" data-log-stream="err" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .err</button><button class="log-button" data-log-stream="out" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .out</button>` : '';
   const disclosureKey = `card:${listName}:${jobArchiveKey(job)}`;
-  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(`${job.cluster}/${identifier}`)}"${jobDisclosureAttribute(disclosureKey)}><summary><span class="job-card-summary-title" data-full-name="${escapeHtml(hoverText)}"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span></span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}${noEstimatePriority ? '' : priority}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}${expandedDependency(job)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
+  return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(`${job.cluster}/${identifier}`)}"${jobDisclosureAttribute(disclosureKey)}><summary><span class="job-card-summary-title" data-full-name="${escapeHtml(hoverText)}"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span>${warning}</span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}${noEstimatePriority ? '' : priority}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}${expandedDependency(job)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
 }
 
 function jobGroups(jobs, listName) {
@@ -699,14 +722,33 @@ function setCurrentJobs(jobs, warnings, apiEnabled) {
 
 function jobsView(clusters, warning = '') {
   const jobs = clusters.flatMap(cluster => (cluster.user_jobs || []).map(job => ({ ...job, cluster: cluster.name })));
-  setCurrentJobs(jobs, warning, false);
+  setCurrentJobs(mergeJobRefresh(jobs, clusters, warning), '', false);
 }
 
 function recentJobsView(payload, clusters) {
   const active = new Map(clusters.flatMap(cluster => (cluster.user_jobs || []).map(job => [`${cluster.name}|${job.id}`, { ...job, cluster: cluster.name }])));
   const jobs = (payload.jobs || []).map(job => ({ ...job, ...(active.get(`${job.cluster}|${job.job_id}`) || {}) }));
-  const warnings = (payload.clusters || []).filter(cluster => cluster.error).map(cluster => `<p class="error">${escapeHtml(cluster.name)}: ${escapeHtml(cluster.error)}</p>`).join('');
-  setCurrentJobs(jobs, warnings, true);
+  setCurrentJobs(mergeJobRefresh(jobs, payload.clusters || [], '', payload.generated_at), '', true);
+}
+
+const jobSuccessAt = new Map();
+/** Retain only the failed clusters' prior cards and flag them until recovery. */
+function mergeJobRefresh(incoming, clusters, globalError = '', generatedAt = '') {
+  const problems = new Map(clusters.filter(cluster => globalError || cluster.error || cluster.reachable === false)
+    .map(cluster => [cluster.name, cluster]));
+  const fresh = incoming.filter(job => !problems.has(job.cluster)).map(job => {
+    const clean = { ...job }; delete clean.refresh_error; delete clean.last_success_at; return clean;
+  });
+  for (const cluster of clusters) {
+    if (!problems.has(cluster.name)) jobSuccessAt.set(cluster.name, cluster.last_success_at || generatedAt || new Date().toISOString());
+  }
+  for (const [name, cluster] of problems) {
+    const known = currentJobs.filter(job => job.cluster === name);
+    const source = known.length ? known : incoming.filter(job => job.cluster === name);
+    for (const job of source) fresh.push({ ...job, refresh_error: String(globalError || cluster.error || 'Cluster disconnected'),
+      last_success_at: cluster.last_success_at || jobSuccessAt.get(name) || job.last_success_at });
+  }
+  return fresh;
 }
 
 // Conditional GET: unchanged data comes back as 304 and is served from this cache.
@@ -728,7 +770,8 @@ async function refreshJobs(result, statusChanged) {
     if (!response.ok && response.status !== 304) throw new Error(payload.error || `HTTP ${response.status}`);
     if (!notModified) recentJobsView(payload, result.clusters);
   } catch (error) {
-    jobsView(result.clusters, `<p class="error">Could not load recent jobs: ${escapeHtml(error.message)}</p>`);
+    responseCache.delete('/api/v1/jobs');
+    jobsView(result.clusters, `Could not load recent jobs: ${error.message}`);
   }
 }
 
@@ -784,7 +827,7 @@ function capacityBar(label, free, total, tooltip) {
   return `<div class="partition-availability"><span class="partition-availability-label">${label}:</span><span class="partition-availability-track fast-hover" role="img" aria-label="${description}" data-fast-tooltip="${description}"><span class="free" style="width:${percent}%"></span><span class="busy" style="width:${100 - percent}%"></span></span><span class="partition-availability-count">${available}/${count} Free</span></div>`;
 }
 
-function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, estimates, estimatesUpdatedAt, fairShare, snapshotPartition) {
+function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, estimates, estimatesUpdatedAt, fairShare, snapshotPartition, scheduler = 'slurm', condorPriority = []) {
   const availability = availabilityDescription(nodes);
   const summary = compute.get(name);
   const models = snapshotPartition?.gpus?.models || [];
@@ -813,7 +856,8 @@ function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, es
   const nodeTooltip = availability.replace(/^Nodes: /, '');
   const badges = jobBadges(jobs, name, thresholds);
   const launchability = launchabilityStrip(estimates, name, totalGpus, estimatesUpdatedAt, thresholds);
-  const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}${summary?.aggregate ? ' (aggregate)' : ''}</h3>${launchability}</div><div class="partition-specs">${details}</div>${partitionFairShareView(fairShare, name)}${capacityBar('GPUs', freeGpu, gpuTotal, gpuTooltip)}${capacityBar('Nodes', freeNodes, nodeTotal, nodeTooltip)}${badges ? `<div class="job-badges">${badges}</div>` : ''}`;
+  const priority = scheduler === 'condor' ? condorPoolShareView(condorPriority) : partitionFairShareView(fairShare, name);
+  const heading = `<div class="partition-heading"><h3>${escapeHtml(name)}${summary?.aggregate ? ' (aggregate)' : ''}</h3>${launchability}</div><div class="partition-specs">${details}</div>${priority}${capacityBar('GPUs', freeGpu, gpuTotal, gpuTooltip)}${capacityBar('Nodes', freeNodes, nodeTotal, nodeTooltip)}${badges ? `<div class="job-badges">${badges}</div>` : ''}`;
   const disclosureKey = JSON.stringify([clusterName, name]);
   partitionBodies.set(disclosureKey, () => `<div class="node-grid">${nodesByAvailableGpu(nodes).map(nodeCard).join('')}</div>`);
   return `<details class="partition-section${summary?.aggregate ? ' aggregate-partition' : ''}" data-partition-key="${escapeHtml(disclosureKey)}"${partitionDisclosure.get(disclosureKey) ? ' open' : ''}><summary>${heading}</summary><div class="partition-body"></div></details>`;
@@ -833,6 +877,17 @@ function partitionFairShareView(share, partition) {
   const explanation = escapeHtml(share?.mapping_error || share?.error || 'No confirmed association match for this partition.').replace(/\\n/g, '&#10;');
   const unavailable = `<div class="fair-share-row"><div class="fast-hover fair-share-track unavailable" aria-label="${explanation}" data-fast-tooltip="${explanation}"></div></div>`;
   return `<div class="partition-fair-share"><span class="fair-share-title">FairShare:</span><div class="fair-share-bars">${bars || unavailable}</div></div>`;
+}
+
+function condorPoolShareView(rows) {
+  if (!Array.isArray(rows) || !rows.length) return '<div class="partition-specs">Pool share unavailable</div>';
+  return rows.map(row => {
+    const share = row.pool_share == null ? NaN : Number(row.pool_share);
+    const priority = row.effective_priority == null ? NaN : Number(row.effective_priority);
+    const percent = Number.isFinite(share) && share >= 0 && share <= 1 ? `${(share * 100).toFixed(1)}%` : 'unavailable';
+    const marker = Number.isFinite(share) && share >= 0 && share <= 1 ? `<i class="fair-share-marker" style="left:${(share * 100).toFixed(2)}%"></i>` : '';
+    return `<div class="partition-fair-share" title="Pool-wide share, not reserved for this GPU model. Lower effective priority has precedence; matchmaking and access rules still apply."><span class="fair-share-title">Share:</span><div class="fair-share-bars"><div class="fair-share-row"><div class="fair-share-track${marker ? '' : ' unavailable'}" role="progressbar" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${Number.isFinite(share) ? share : 0}">${marker}</div><span class="partition-specs">Pool share ${escapeHtml(percent)} · Effective priority ${Number.isFinite(priority) ? escapeHtml(priority) : 'unavailable'}</span></div></div></div>`;
+  }).join('');
 }
 
 /** Summarize active jobs by the same three groups used in the VS Code sidebar. */
@@ -862,7 +917,7 @@ function clusterView(cluster, waitThresholds, summary) {
   else {
     const compute = new Map((cluster.partition_compute || []).map(item => [item.name, item]));
     const snapshotPartitions = new Map((summary?.partitions || []).map(item => [item.name, item]));
-    content = partitionGroups(cluster.nodes, compute).map(group => partitionView(cluster.name, group, compute, cluster.user_jobs, waitThresholds || [5, 30, 60, 120], cluster.wait_estimates, cluster.wait_estimates_updated_at, cluster.fair_share, snapshotPartitions.get(group[0]))).join('');
+    content = partitionGroups(cluster.nodes, compute).map(group => partitionView(cluster.name, group, compute, cluster.user_jobs, waitThresholds || [5, 30, 60, 120], cluster.wait_estimates, cluster.wait_estimates_updated_at, cluster.fair_share, snapshotPartitions.get(group[0]), cluster.scheduler, cluster.condor_priority)).join('');
   }
   if (cluster.jobs) content += `<p><b>Jobs:</b> ${Object.entries(cluster.jobs).map(([state, count]) => `${escapeHtml(state)}=${count}`).join(', ') || 'none'}</p>`;
   const error = cluster.error || cluster.resource_error;
@@ -870,7 +925,7 @@ function clusterView(cluster, waitThresholds, summary) {
   const latest = summary?.last_success_at ? `Latest update: ${new Date(summary.last_success_at).toLocaleString()}` : 'Latest update unavailable';
   const warningText = error ? `${timeout ? 'Cluster refresh timed out.' : 'Cluster refresh failed.'}\\n${latest}${timeout ? '' : `\\n${error}`}` : '';
   const warning = error ? `<span class="fast-hover cluster-warning" role="img" aria-label="${escapeHtml(warningText)}" data-fast-tooltip="${escapeHtml(warningText)}">⚠</span>` : '';
-  return `<details class="cluster" data-cluster-key="${escapeHtml(cluster.name)}"${clusterDisclosure.get(cluster.name) ? ' open' : ''}><summary><span class="cluster-summary"><h2>${escapeHtml(cluster.name)}</h2>${clusterJobRatio(summary)}${warning}</span></summary><div class="cluster-detail"><small>${escapeHtml(cluster.username)}@${escapeHtml(cluster.host)}</small>${content}</div></details>`;
+  return `<details class="cluster" data-cluster-key="${escapeHtml(cluster.name)}"${clusterDisclosure.get(cluster.name) ? ' open' : ''}><summary><span class="cluster-summary"><h2>${escapeHtml(cluster.name)}</h2>${clusterJobRatio(summary)}${warning}</span></summary><div class="cluster-detail"><small>${escapeHtml(cluster.username)}@${escapeHtml(cluster.host)}${cluster.submission_host ? ` → ${escapeHtml(cluster.submission_host)}` : ''}</small>${content}</div></details>`;
 }
 
 let refreshTimer, refreshDeadline = 0, refreshPeriodMs = 1;
@@ -1010,7 +1065,7 @@ setInterval(updateDynamicDisplays, 1000); refresh();
 
 
 class StatusStore:
-    """Thread-safe cache periodically populated using the Slurm collector."""
+    """Thread-safe cache periodically populated by scheduler-specific collectors."""
 
     def __init__(self, machines: list[Machine], timeout: int, include_jobs: bool, refresh_seconds: int, wait_threshold_minutes: tuple[int, ...] = DEFAULT_WAIT_THRESHOLD_MINUTES, jobs_api_enabled: bool = False, command_api_enabled: bool = False):
         self.machines, self.timeout = machines, timeout
@@ -1066,6 +1121,7 @@ class StatusStore:
 
         ordered = [previous.get(machine.name) or ClusterStatus(
             machine.name, machine.host, machine.username, hosts=machine.candidate_hosts,
+            submission_host=machine.submission_host,
         ) for machine in self.machines]
         positions = {machine.name: index for index, machine in enumerate(self.machines)}
         with ThreadPoolExecutor(max_workers=max(1, len(self.machines)), thread_name_prefix="collect") as pool:
@@ -1111,7 +1167,7 @@ class StatusStore:
             return True
         fields = (
             "name", "host", "hosts", "partitions", "nodes", "partition_compute",
-            "scheduling", "fair_share", "fair_share_updated_at",
+            "scheduling", "fair_share", "fair_share_updated_at", "condor_priority", "scheduler",
             "resource_error", "error", "login_required",
         )
         return any(
@@ -1179,7 +1235,11 @@ class StatusStore:
     def _probe_cluster(self, status: ClusterStatus) -> None:
         """Probe one cluster's wait estimates and publish them."""
         machine = next(machine for machine in self.machines if machine.name == status.name)
-        estimates = collect_wait_estimates(machine, status.nodes, self.timeout)
+        if status.scheduler == "condor":
+            from .condor import capacity_signals
+            estimates = capacity_signals(status.nodes or [])
+        else:
+            estimates = collect_wait_estimates(machine, status.nodes, self.timeout)
         updated_at = datetime.now(timezone.utc).isoformat()
         with self._lock:
             self._wait_estimates[status.name] = estimates
@@ -1199,6 +1259,11 @@ class StatusStore:
             for cluster in clusters:
                 cluster.pop("accounting", None)  # Server-internal sacct cache.
                 cluster.pop("fair_share_rules", None)  # Includes other users' account hierarchy.
+                if cluster.get("scheduler") == "condor":
+                    cluster["user_jobs"] = [
+                        {key: value for key, value in job.items() if not key.startswith("_")}
+                        for job in cluster.get("user_jobs") or []
+                    ]
             return {"clusters": clusters, "updated_at": self._updated_at, "refresh_seconds": self.refresh_seconds, "wait_threshold_minutes": self.wait_threshold_minutes, "jobs_api_enabled": self.jobs_api_enabled, "command_api_enabled": self.command_api_enabled}
 
     def is_ready(self) -> bool:
@@ -1256,6 +1321,11 @@ class StatusStore:
                 for cluster in payload["clusters"]:
                     cluster.pop("accounting", None)
                     cluster.pop("fair_share_rules", None)
+                    if cluster.get("scheduler") == "condor":
+                        cluster["user_jobs"] = [
+                            {key: value for key, value in job.items() if not key.startswith("_")}
+                            for job in cluster.get("user_jobs") or []
+                        ]
             elif kind == "snapshot":
                 payload = build_snapshot(
                     self._statuses, self._updated_at, self.refresh_seconds,

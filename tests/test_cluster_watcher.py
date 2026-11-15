@@ -7,6 +7,7 @@ from io import StringIO
 import hashlib
 import json
 import os
+import shlex
 from pathlib import Path
 import sys
 from threading import Barrier
@@ -17,7 +18,7 @@ from clusterwatcher.config import load_config, load_wait_threshold_minutes
 from clusterwatcher.cli import main
 from clusterwatcher.dashboard import PAGE, StatusStore, serve as serve_dashboard
 from clusterwatcher.models import ClusterStatus, Machine
-from clusterwatcher.slurm import collect_status
+from clusterwatcher.slurm import SINFO_COMMAND, collect_status
 from clusterwatcher.ssh import ssh_command, start_interactive_session
 from helpers import TEST_CONFIG, TimedTestCase
 
@@ -412,9 +413,10 @@ class ClusterWatcherTests(TimedTestCase):
 
         self.assertEqual(exit_context.exception.code, 0)
         help_text = " ".join(stdout.getvalue().split())
-        self.assertIn("free GPUs and nodes, mapped fair share", help_text)
+        self.assertIn("free GPUs and nodes, scheduler priority", help_text)
         self.assertIn("running/pending/depending job mix", help_text)
-        self.assertIn("one-hour wait estimates", help_text)
+        self.assertIn("Slurm wait estimates", help_text)
+        self.assertIn("HTCondor pools report wait estimates as unavailable", help_text)
         self.assertIn("1, 2, 4, 8, 16, 32, and 64 GPUs", help_text)
         self.assertIn("Pass SECONDS first for live refresh", help_text)
         self.assertIn("only ERR", " ".join(help_text.split()))
@@ -441,6 +443,7 @@ class ClusterWatcherTests(TimedTestCase):
             "machines": [{
                 "name": "cluster_3",
                 "host": "cluster_3.example",
+                "submission_host": "submit.internal",
                 "username": "alice",
                 "session_open": True,
                 "control_persist_seconds": 7200,
@@ -460,7 +463,10 @@ class ClusterWatcherTests(TimedTestCase):
         with redirect_stdout(output):
             result = main(["--config", str(TEST_CONFIG), "sessions"])
         self.assertEqual(result, 0)
-        self.assertIn("cluster_3\topen\t1h 1m 1s\talice@cluster_3.example", output.getvalue())
+        self.assertIn(
+            "cluster_3\topen\t1h 1m 1s\talice@cluster_3.example -> submit.internal",
+            output.getvalue(),
+        )
 
     @patch("clusterwatcher.cli.load_config", return_value=[Machine("cluster_3", "cluster_3.example", "alice")])
     @patch("clusterwatcher.cli.RemoteCommandService")
@@ -615,6 +621,72 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertEqual(machine.candidate_hosts, ("login12.example", "login13.example"))
         command = ssh_command(machine, 5, "true")
         self.assertIn("alice@login12.example", command)
+
+    def test_submission_host_routes_slurm_queries_from_the_login_node(self):
+        """A configured second hop uses the login node's passwordless SSH."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "clusters.toml"
+            path.write_text(
+                '[[machine]]\nname="atlas"\nhost="login.example"\n'
+                'username="alice"\nsubmission_host="submit.internal"\n'
+                'interactive_auth=true\n'
+            )
+            machine = load_config(path)[0]
+
+        remote_command = 'squeue --me | sed "s/one/two/"'
+        command = ssh_command(machine, 8, remote_command)
+        self.assertEqual(command[-2], "alice@login.example")
+        self.assertEqual(shlex.split(command[-1]), [
+            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-T",
+            "submit.internal", remote_command,
+        ])
+        self.assertEqual(machine.for_host("login2.example").submission_host, "submit.internal")
+
+    def test_submission_host_rejects_options_and_shell_syntax(self):
+        """A destination must be one host or alias, never an SSH option or command."""
+        for value in ("", "-oProxyCommand=evil", "submit node", "submit;echo", "bob@submit", 17):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "clusters.toml"
+                path.write_text(
+                    '[[machine]]\nname="atlas"\nhost="login.example"\nusername="alice"\n'
+                    f'submission_host={json.dumps(value)}\n'
+                )
+                with self.assertRaisesRegex(ValueError, "submission_host"):
+                    load_config(path)
+
+    @patch("clusterwatcher.ssh.subprocess.run")
+    def test_interactive_login_opens_only_the_reusable_login_session(self, run):
+        """Only the first hop may ask for the user's password and OTP."""
+        machine = Machine(
+            "atlas", "login.example", "alice", interactive_auth=True,
+            submission_host="submit.internal",
+        )
+        run.return_value.returncode = 0
+
+        start_interactive_session(machine, 8)
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[-1], "alice@login.example")
+        self.assertNotIn("submit.internal", command)
+
+    def test_status_dry_run_prints_a_copyable_two_hop_command(self):
+        """Shell quoting preserves the nested command in dry-run output."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "clusters.toml"
+            path.write_text(
+                '[[machine]]\nname="atlas"\nhost="login.example"\n'
+                'username="alice"\nsubmission_host="submit.internal"\n'
+            )
+            output = StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(main(["--config", str(path), "status", "--dry-run"]), 0)
+
+        outer = shlex.split(output.getvalue().strip())
+        self.assertEqual(outer[-2], "alice@login.example")
+        inner = shlex.split(outer[-1])
+        self.assertEqual(inner[-2], "submit.internal")
+        self.assertIn(SINFO_COMMAND, inner[-1])
+        self.assertIn("condor_status -json", inner[-1])
 
     def test_login_node_pool_configuration_rejects_obsolete_or_invalid_values(self):
         """Reject malformed pools and explain the superseded plural spelling."""

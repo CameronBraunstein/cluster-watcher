@@ -77,9 +77,20 @@ def load_config(path: Path) -> list[Machine]:
             hosts = (raw_host.strip(),)
         if "ssh_alias" in raw:
             raise ValueError(f"machine {name!r} uses obsolete ssh_alias; remove it")
+        submission_host = raw.get("submission_host")
+        if submission_host is not None and (
+            not isinstance(submission_host, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", submission_host)
+        ):
+            raise ValueError(
+                f"machine {name!r} submission_host must be a host name or SSH alias without a username"
+            )
         hidden = raw.get("hidden", False)
         if not isinstance(hidden, bool):
             raise ValueError(f"machine {name!r} has an invalid hidden value")
+        scheduler = raw.get("scheduler", "auto")
+        if not isinstance(scheduler, str) or scheduler not in {"auto", "slurm", "condor"}:
+            raise ValueError(f"machine {name!r} scheduler must be auto, slurm, or condor")
         port = raw.get("port", 22)
         if not isinstance(port, int) or not 1 <= port <= 65535:
             raise ValueError(f"machine {name!r} has an invalid port")
@@ -143,6 +154,8 @@ def load_config(path: Path) -> list[Machine]:
                     default_partition_max_time_minutes=default_max_time,
                     partition_max_time_minutes=partition_max_times,
                     hosts=hosts if isinstance(raw_host, list) else (),
+                    submission_host=submission_host,
+                    scheduler=scheduler,
                 )
             )
     if not machines:

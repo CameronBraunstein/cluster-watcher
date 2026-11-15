@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { RefreshCoordinator, RefreshFeedback, clusterOverviewFromJobs, initialCollectionPending, refreshResultMessage } = require('../refresh');
+const { RefreshCoordinator, RefreshFeedback, clusterOverviewFromJobs, initialCollectionPending, retainJobsOnFailure, refreshResultMessage } = require('../refresh');
 
 /** Build a coordinator whose collaborators record every observable update. */
 function harness(poll, refreshServer, options = {}) {
@@ -67,6 +67,48 @@ test('early cluster overview counts active job groups in configuration order', (
   assert.deepEqual(overview.clusters[1].user_jobs, { running: 1, pending: 0, depending: 0 });
   assert.equal(overview.clusters[1].error, 'Timed out');
   assert.deepEqual(overview.clusters[2].user_jobs, { running: 0, pending: 0, depending: 0 });
+});
+
+test('a failed cluster retains only its own prior jobs until it recovers', () => {
+  const previous = { generated_at: '2026-11-13T10:00:00Z',
+    clusters: [{ name: 'down' }, { name: 'up' }],
+    jobs: [{ cluster: 'down', job_id: '1', state: 'RUNNING' },
+      { cluster: 'up', job_id: '2', state: 'PENDING' }] };
+  const partial = retainJobsOnFailure(previous, {
+    generated_at: '2026-11-13T10:01:00Z',
+    clusters: [{ name: 'down', error: 'SSH timed out', last_success_at: '2026-11-13T10:00:00Z' },
+      { name: 'up' }],
+    jobs: [{ cluster: 'up', job_id: '3', state: 'RUNNING' }],
+  });
+  assert.deepEqual(partial.jobs.map((job) => job.job_id).sort(), ['1', '3']);
+  assert.equal(partial.jobs.find((job) => job.job_id === '1').refresh_error, 'SSH timed out');
+  assert.equal(partial.jobs.find((job) => job.job_id === '1').last_success_at, '2026-11-13T10:00:00Z');
+  assert.equal(partial.jobs.find((job) => job.job_id === '3').refresh_error, undefined);
+
+  const recovered = retainJobsOnFailure(partial, {
+    clusters: [{ name: 'down' }, { name: 'up' }], jobs: [{ cluster: 'down', job_id: '4' }],
+  });
+  assert.deepEqual(recovered.jobs.map((job) => job.job_id), ['4']);
+  assert.equal(recovered.jobs[0].refresh_error, undefined);
+});
+
+test('a jobs API connection error keeps the existing cards with warnings', async () => {
+  let calls = 0;
+  const state = harness(async () => {
+    calls += 1;
+    if (calls === 2) throw new Error('connection refused');
+    return { payload: { generated_at: '2026-11-13T10:00:00Z',
+      clusters: [{ name: 'alpha' }], jobs: [{ cluster: 'alpha', job_id: '7', state: 'RUNNING' }] },
+    etag: `jobs-${calls}` };
+  });
+
+  await state.coordinator.refreshJobs();
+  assert.equal((await state.coordinator.refreshJobs()).outcome, 'error');
+  assert.equal(state.jobsProvider.errors.length, 0);
+  assert.equal(state.jobsProvider.updates[1].payload.jobs[0].job_id, '7');
+  assert.match(state.jobsProvider.updates[1].payload.jobs[0].refresh_error, /connection refused/);
+  await state.coordinator.refreshJobs();
+  assert.equal(state.jobsProvider.updates[2].payload.jobs[0].refresh_error, undefined);
 });
 
 test('jobs show collapsed cluster summaries before status arrives, then status replaces them', async () => {

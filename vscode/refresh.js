@@ -31,6 +31,30 @@ function initialCollectionPending(error) {
   return error?.status === 503 && /first cluster status collection has not completed/i.test(error.message || '');
 }
 
+/** Keep each failed cluster's last known jobs until that cluster answers again. */
+function retainJobsOnFailure(previous, incoming, connectionError) {
+  const oldJobs = previous?.jobs || [];
+  const oldClusters = new Map((previous?.clusters || []).map((cluster) => [cluster.name, cluster]));
+  const previousClusters = oldClusters.size ? [...oldClusters.values()]
+    : [...new Set(oldJobs.map((job) => job.cluster).filter(Boolean))].map((name) => ({ name }));
+  const clusters = connectionError
+    ? previousClusters.map((cluster) => ({ ...cluster, reachable: false, error: String(connectionError) }))
+    : (incoming.clusters || []);
+  const failures = new Map(clusters.filter((cluster) => cluster.error || cluster.reachable === false)
+    .map((cluster) => [cluster.name, cluster]));
+  const fresh = connectionError ? [] : (incoming.jobs || []);
+  const jobs = fresh.filter((job) => !failures.has(job.cluster));
+  for (const [name, cluster] of failures) {
+    const known = oldJobs.filter((job) => job.cluster === name);
+    const source = known.length ? known : fresh.filter((job) => job.cluster === name);
+    const lastSuccess = cluster.last_success_at || oldClusters.get(name)?.last_success_at
+      || known[0]?.last_success_at || previous?.generated_at;
+    for (const job of source) jobs.push({ ...job, refresh_error: String(cluster.error || 'Cluster disconnected'),
+      last_success_at: lastSuccess });
+  }
+  return { ...incoming, clusters, jobs, generated_at: connectionError ? previous?.generated_at : incoming.generated_at };
+}
+
 /**
  * Coordinate independent jobs and cluster-status polling.
  *
@@ -74,6 +98,7 @@ class RefreshCoordinator {
     this.timer = undefined;
     this.disposed = false;
     this.serviceGeneration = 0;
+    this.lastJobsPayload = undefined;
   }
 
   /** Replace stale offline indicators as soon as a service becomes reachable. */
@@ -156,12 +181,14 @@ class RefreshCoordinator {
         return { outcome: 'unchanged', checkedAt };
       }
       this.etags.jobs = result.etag;
+      const payload = retainJobsOnFailure(this.lastJobsPayload, result.payload);
+      this.lastJobsPayload = payload;
       if (!this.statusProvider.hasSuccessfulData || this.statusProvider.payload?.overview_only) {
-        this.statusProvider.updateOverview(clusterOverviewFromJobs(result.payload), checkedAt);
+        this.statusProvider.updateOverview(clusterOverviewFromJobs(payload), checkedAt);
       }
       // The monitor reads the cancelling set before the provider prunes it.
-      this.monitor.update(result.payload, this.jobsProvider.cancelling, checkedAt);
-      this.jobsProvider.update(result.payload, checkedAt);
+      this.monitor.update(payload, this.jobsProvider.cancelling, checkedAt);
+      this.jobsProvider.update(payload, checkedAt);
       return { outcome: 'updated', checkedAt };
     } catch (error) {
       this.etags.jobs = undefined;
@@ -178,7 +205,10 @@ class RefreshCoordinator {
         this.jobsProvider.jobsApiDisabled();
       } else {
         this.monitor.offline();
-        this.jobsProvider.error(error);
+        if (this.lastJobsPayload) {
+          this.jobsProvider.update(retainJobsOnFailure(this.lastJobsPayload, this.lastJobsPayload,
+            error instanceof Error ? error.message : String(error)), Date.now());
+        } else this.jobsProvider.error(error);
       }
       return { outcome: 'error', checkedAt: Date.now(), error };
     }
@@ -277,4 +307,4 @@ function refreshResultMessage(result, formattedAt) {
   return undefined;
 }
 
-module.exports = { RefreshCoordinator, RefreshFeedback, clusterOverviewFromJobs, initialCollectionPending, refreshResultMessage };
+module.exports = { RefreshCoordinator, RefreshFeedback, clusterOverviewFromJobs, initialCollectionPending, retainJobsOnFailure, refreshResultMessage };
