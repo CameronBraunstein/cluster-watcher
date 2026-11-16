@@ -5,6 +5,7 @@ const extensionManifest = require('./package.json');
 const { JobArchive } = require('./archive');
 const { BackgroundCliProcess } = require('./background');
 const { BackendManager } = require('./backend');
+const { BackendClient } = require('./client');
 const { LOG_TAIL_LINES, logDocumentContent, logRequestPath, prependLogPage, virtualLogPath } = require('./logs');
 const { jobTransitions, notificationMessage, shouldNotify, statusSummary } = require('./events');
 const { scriptRequestPath, scriptSourceMessage, virtualScriptPath } = require('./scripts');
@@ -13,7 +14,7 @@ const { hasServiceSession, serviceSessionName, startOrRecoverServiceSession } = 
 const { isFailureGroup, jobRef, localTime, setDateFormat, renderJobs, renderJobsApiDisabled, renderLoading, renderStatus, renderWelcome, stateGroup } = require('./renderers');
 const {
   ExecutableValidationError, backgroundLoginArguments, cliArguments,
-  jobsApiDisabled, responseError, cliTerminalOptions, configurationError, inspectionState, resolveConfigPath,
+  jobsApiDisabled, cliTerminalOptions, configurationError, inspectionState, serviceHealth, resolveConfigPath,
   persistentServiceCommand, runCli, serviceCommand, validateBackgroundCredentialSupport, validateExecutable,
   validatePersistentServiceSupport,
 } = require('./service');
@@ -50,97 +51,6 @@ function configuration() {
   };
 }
 
-/** Fetch JSON from the configured loopback service with a bounded wait. */
-class BackendClient {
-  async get(path, timeoutMilliseconds = 12000) {
-    return this.request(path, { headers: { Accept: 'application/json' } }, timeoutMilliseconds);
-  }
-
-  /**
-   * Conditional GET: sends ``If-None-Match`` when an ETag is known and
-   * resolves ``{ notModified: true }`` on HTTP 304, otherwise
-   * ``{ payload, etag }``. Unchanged data then costs no transfer or render.
-   */
-  async poll(path, etag, timeoutMilliseconds = 12000) {
-    const headers = { Accept: 'application/json' };
-    if (etag) headers['If-None-Match'] = etag;
-    return this.request(path, { headers }, timeoutMilliseconds, true);
-  }
-
-  /** POST a JSON body; the JSON content type is what the service requires for writes. */
-  async post(path, body = {}, timeoutMilliseconds = 30000) {
-    return this.request(path, {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }, timeoutMilliseconds);
-  }
-
-  async request(path, init, timeoutMilliseconds, conditional = false) {
-    const base = new URL(configuration().backendUrl);
-    const url = new URL(path.replace(/^\//, ''), base.href.endsWith('/') ? base : `${base.href}/`);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMilliseconds);
-    try {
-      const response = await fetch(url, { ...init, signal: controller.signal });
-      if (conditional && response.status === 304) return { notModified: true };
-      let payload;
-      try {
-        payload = await response.json();
-      } catch (_error) {
-        throw responseError(response.status, null);
-      }
-      if (!response.ok) throw responseError(response.status, payload);
-      return conditional ? { payload, etag: response.headers.get('etag') || undefined } : payload;
-    } catch (error) {
-      if (error && error.name === 'AbortError') throw new Error('Cluster Watcher service request timed out');
-      throw error;
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  async isClusterWatcherService() {
-    try {
-      const payload = await this.get('/api/v1/snapshot', 2500);
-      return Boolean(payload && payload.schema_version);
-    } catch (error) {
-      // A 503 during the initial collection is still our service. Probe the
-      // unversioned status route and accept its characteristic JSON response.
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2500);
-      try {
-        const base = new URL(configuration().backendUrl);
-        const response = await fetch(
-          new URL('api/status', base.href.endsWith('/') ? base : `${base.href}/`),
-          { signal: controller.signal, headers: { Accept: 'application/json' } },
-        );
-        const payload = await response.json();
-        return Boolean(payload && ('updated_at' in payload || 'refresh_seconds' in payload));
-      } catch (_probeError) {
-        return false;
-      } finally {
-        clearTimeout(timeout);
-      }
-    }
-  }
-
-  /** Return process identity, falling back gracefully for an older backend. */
-  async serviceInfo() {
-    try {
-      return await this.get('/api/v1/service', 2500);
-    } catch (error) {
-      if (await this.isClusterWatcherService()) return {};
-      throw error;
-    }
-  }
-
-  /** Read the server's cached, loopback-only SSH control-master inventory. */
-  async sessionInfo() {
-    return this.get('/api/v1/sessions');
-  }
-}
-
 /** Start a persistent tmux service and attach to any reachable local service. */
 class ServiceController {
   constructor(client, refresh, manager, provider, onReachable = () => {}, onAvailabilityChange = () => {}) {
@@ -160,6 +70,7 @@ class ServiceController {
     };
     this.sessions = undefined;
     this.sessionsError = undefined;
+    this.healthTimeouts = 0;
   }
 
   /** Publish lifecycle changes immediately to Cluster Status. */
@@ -364,7 +275,13 @@ class ServiceController {
       this.client.serviceInfo(),
       this.client.sessionInfo(),
     ]);
-    const reachable = serviceResult.status === 'fulfilled';
+    const health = serviceHealth(serviceResult, inventoryResult, this.lifecycle.state, this.healthTimeouts);
+    this.healthTimeouts = health.timeouts;
+    if (health.holdPrevious) {
+      this.publish({ activity: 'Service check timed out; retrying…', error: undefined });
+      return { outcome: 'degraded', checkedAt };
+    }
+    const reachable = health.reachable;
     this.onAvailabilityChange(reachable);
     const serviceInfo = reachable && serviceResult.value && typeof serviceResult.value === 'object'
       ? serviceResult.value : {};
@@ -374,8 +291,8 @@ class ServiceController {
     if (reachable) {
       this.publish({
         state: 'attached', owned: false,
-        pid: serviceInfo.pid,
-        startedAt: serviceInfo.started_at,
+        pid: serviceInfo.pid ?? this.lifecycle.pid,
+        startedAt: serviceInfo.started_at ?? this.lifecycle.startedAt,
         activity: this.loginProcess ? this.lifecycle.activity : undefined, error: undefined,
       });
     } else if (!this.starting && this.lifecycle.state !== 'error') {
@@ -453,11 +370,12 @@ class SidebarProvider {
    * which advances its own times, and tell it when the check happened.
    */
   checked(at) {
+    const hadRefreshError = this.errorState?.kind === 'refresh';
     this.checkedAt = at;
     this.loadingState = false;
     this.errorState = undefined;
     if (!this.view) return;
-    if (!this.showingData && this.payload) this.render();
+    if ((hadRefreshError || !this.showingData) && this.payload) this.render();
     else void this.view.webview.postMessage({ type: 'checked', at });
   }
 
@@ -599,7 +517,16 @@ class SidebarProvider {
   render() {
     if (!this.view || !this.payload || this.sessionDialogOpen) return;
     this.showingData = true;
-    this.view.webview.html = renderStatus(this.payload, this.disclosures, this.freshness(), this.server);
+    const server = this.errorState?.kind === 'refresh'
+      ? { ...this.server, refreshError: this.errorState.detail } : this.server;
+    this.view.webview.html = renderStatus(this.payload, this.disclosures, this.freshness(), server);
+  }
+
+  /** Keep the last status visible when only its next API response is slow. */
+  refreshError(error) {
+    this.loadingState = false;
+    this.errorState = { kind: 'refresh', detail: error instanceof Error ? error.message : String(error) };
+    this.render();
   }
 
   error(error) {
@@ -973,7 +900,7 @@ function activate(context) {
     void vscode.commands.executeCommand('setContext', 'clusterWatcher.serviceAvailable', available);
   };
   setServiceAvailable(false);
-  const client = new BackendClient();
+  const client = new BackendClient(() => configuration().backendUrl);
   const jobsProvider = new JobsSidebarProvider(context.globalState);
   const statusProvider = new SidebarProvider('status');
   const offlineJobsProvider = new OfflineSidebarProvider('jobs');
@@ -1111,4 +1038,4 @@ function activate(context) {
 /** VS Code disposes all registered resources through the extension context. */
 function deactivate() {}
 
-module.exports = { activate, deactivate, SidebarProvider };
+module.exports = { activate, deactivate, SidebarProvider, ServiceController };

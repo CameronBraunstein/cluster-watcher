@@ -50,6 +50,27 @@ function inspectionState(reachable, inventoryResult) {
   return { sessions: inventoryResult.value, error: undefined };
 }
 
+const HEALTH_TIMEOUTS_BEFORE_OFFLINE = 3;
+
+/** Recognize a slow local API response separately from a refused connection. */
+function serviceRequestTimedOut(error) {
+  return /^Cluster Watcher service request timed out/.test(error?.message || '');
+}
+
+/** Treat one slow health check as a transient delay, not a stopped service. */
+function serviceHealth(serviceResult, inventoryResult, previousState, priorTimeouts = 0) {
+  const reachable = serviceResult.status === 'fulfilled' || inventoryResult.status === 'fulfilled';
+  if (reachable) return { reachable: true, holdPrevious: false, timeouts: 0 };
+  const timedOut = serviceRequestTimedOut(serviceResult.reason);
+  const timeouts = timedOut ? priorTimeouts + 1 : 0;
+  return {
+    reachable: false,
+    holdPrevious: timedOut && ['running', 'attached'].includes(previousState)
+      && timeouts < HEALTH_TIMEOUTS_BEFORE_OFFLINE,
+    timeouts,
+  };
+}
+
 /** Build actionable guidance for an invalid executable setting. */
 function executableError(executable, detail) {
   return new ExecutableValidationError(
@@ -246,7 +267,7 @@ function persistentServiceCommand(settings) {
 
 module.exports = {
   ExecutableValidationError, ServiceResponseError, backgroundLoginArguments,
-  cliArguments, jobsApiDisabled, responseError, cliCommand, cliTerminalOptions, configurationError, inspectionState,
+  cliArguments, jobsApiDisabled, responseError, cliCommand, cliTerminalOptions, configurationError, inspectionState, serviceHealth, serviceRequestTimedOut,
   configFileExists, persistentServiceCommand, resolveConfigPath, runCli, serviceArguments, serviceCommand, shellQuote,
   validateBackgroundCredentialSupport, validateExecutable, validatePersistentServiceSupport,
 };

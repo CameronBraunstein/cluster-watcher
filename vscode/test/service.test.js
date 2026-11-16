@@ -6,10 +6,25 @@ const path = require('node:path');
 const test = require('node:test');
 const {
   ServiceResponseError, backgroundLoginArguments, cliArguments, cliCommand,
-  cliTerminalOptions, configFileExists, inspectionState, jobsApiDisabled, persistentServiceCommand, responseError, serviceArguments, serviceCommand,
+  cliTerminalOptions, configFileExists, inspectionState, jobsApiDisabled, persistentServiceCommand, responseError, serviceArguments, serviceCommand, serviceHealth,
   shellQuote, validateBackgroundCredentialSupport, validateExecutable, validatePersistentServiceSupport,
 } = require('../service');
 const manifest = require('../package.json');
+
+test('transient service timeouts retain the attached view, but hard failures do not', () => {
+  const timeout = { status: 'rejected', reason: new Error('Cluster Watcher service request timed out (/api/v1/service)') };
+  const failedInventory = { status: 'rejected', reason: new Error('session request timed out') };
+  assert.deepEqual(serviceHealth(timeout, failedInventory, 'attached', 0),
+    { reachable: false, holdPrevious: true, timeouts: 1 });
+  assert.deepEqual(serviceHealth(timeout, failedInventory, 'attached', 1),
+    { reachable: false, holdPrevious: true, timeouts: 2 });
+  assert.deepEqual(serviceHealth(timeout, failedInventory, 'attached', 2),
+    { reachable: false, holdPrevious: false, timeouts: 3 });
+  assert.deepEqual(serviceHealth(timeout, { status: 'fulfilled', value: {} }, 'attached', 2),
+    { reachable: true, holdPrevious: false, timeouts: 0 });
+  assert.deepEqual(serviceHealth({ status: 'rejected', reason: new Error('connect ECONNREFUSED') }, failedInventory, 'attached', 0),
+    { reachable: false, holdPrevious: false, timeouts: 0 });
+});
 
 test('service command enables jobs API and preserves paths containing spaces', () => {
   const command = serviceCommand({
@@ -177,7 +192,7 @@ test('extension runs beside the workspace so remote sessions remain reusable', (
   assert.equal(commands.get('clusterWatcher.stopService').title, 'Cluster Watcher: Stop Service');
   const extensionSource = readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
   assert.match(extensionSource, /this\.view\.description = undefined/);
-  assert.match(extensionSource, /renderStatus\(this\.payload, this\.disclosures, this\.freshness\(\), this\.server\)/);
+  assert.match(extensionSource, /renderStatus\(this\.payload, this\.disclosures, this\.freshness\(\), server\)/);
   assert.doesNotMatch(extensionSource, /renderServerStatus|ServerSidebarProvider|clusterWatcher\.server/);
   assert.match(extensionSource, /new ClusterStatusStatePublisher\(statusProvider, offlineStatusProvider\)/);
   assert.match(extensionSource, /registerWebviewViewProvider\('clusterWatcher\.jobsOffline', offlineJobsProvider\)/);

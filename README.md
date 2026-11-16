@@ -141,6 +141,8 @@ control_persist = "8h"
 
 `cluster-watcher login` opens reusable SSH control sessions; `cluster-watcher sessions` shows their state. The VS Code sidebar offers per-cluster login controls and a group login when credentials are shared. The extension's service runs in tmux, so closing one VS Code window does not stop it. Sessions survive while their SSH masters remain alive; a machine reboot or expired site authentication still requires a new login. VS Code Remote SSH runs the extension and backend on the remote development host, so laptop and remote-host sessions are separate.
 
+The sidebar checks the lightweight `/api/v1/service` endpoint to see whether that local process is running. A single slow check shows **Service check timed out; retrying…** while keeping the current views; the third consecutive timeout marks it offline. A definite connection refusal marks it offline immediately. The SSH session inventory can also confirm that the service is reachable when the identity check is slow. A timed-out cluster snapshot keeps the last Cluster Status visible with a warning; before the first snapshot, it stays on Loading and retries. This prevents a busy host from briefly collapsing My Jobs and Cluster Status. If the sidebar reports repeated timeouts, compare `curl --max-time 10 http://127.0.0.1:8080/api/v1/service` with your configured `clusterWatcher.backendUrl` and check whether the host or tmux service is overloaded.
+
 If scheduler commands run on a submission host behind the login node, set `submission_host` on that machine. Cluster Watcher authenticates to `host` once, then SSHes from there to `submission_host` for status, jobs, logs, commands, and shells:
 
 ```toml

@@ -658,7 +658,9 @@ function serverNotices(server = {}) {
   const error = service.error ? `<p class="error">${escapeHtml(withoutSshUsernames(service.error))}</p>` : '';
   const sessionsError = server.sessionsError
     ? `<p class="error">Could not inspect SSH sessions: ${escapeHtml(withoutSshUsernames(server.sessionsError))}</p>` : '';
-  return activity + error + sessionsError;
+  const refreshError = server.refreshError
+    ? `<p class="muted service-refresh-warning" role="status">Status check timed out; showing the last update.</p>` : '';
+  return activity + error + sessionsError + refreshError;
 }
 
 /** Render startup progress without suggesting that the service is offline. */

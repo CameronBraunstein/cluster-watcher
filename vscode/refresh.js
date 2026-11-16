@@ -1,6 +1,7 @@
 'use strict';
 
 const { jobGroup } = require('./renderers');
+const { serviceRequestTimedOut } = require('./service');
 
 /** Build collapsible cluster summaries from jobs already fetched at startup. */
 function clusterOverviewFromJobs(payload) {
@@ -110,14 +111,14 @@ class RefreshCoordinator {
   }
 
   /** Retry a known first-collection 503 without waiting for the normal interval. */
-  retryFirstCollection(kind) {
+  retryFirstCollection(kind, delay = 1000) {
     if (this.disposed) return;
     const key = kind === 'jobs' ? 'jobsRetry' : 'statusRetry';
     if (this[key] !== undefined) return;
     this[key] = this.setTimeout(() => {
       this[key] = undefined;
       void (kind === 'jobs' ? this.refreshJobs() : this.refreshStatus());
-    }, 1000);
+    }, delay);
   }
 
   /** A manual or startup refresh supersedes a scheduled first-load retry. */
@@ -239,6 +240,15 @@ class RefreshCoordinator {
         if (collecting) this.onServiceAvailable();
         this.statusProvider.loading();
         this.retryFirstCollection('status');
+        return { outcome: 'loading', checkedAt: Date.now() };
+      }
+      if (serviceRequestTimedOut(error)) {
+        if (this.statusProvider.hasSuccessfulData) {
+          this.statusProvider.refreshError(error);
+          return { outcome: 'degraded', checkedAt: Date.now() };
+        }
+        this.statusProvider.loading();
+        this.retryFirstCollection('status', 5000);
         return { outcome: 'loading', checkedAt: Date.now() };
       }
       this.statusProvider.error(error);

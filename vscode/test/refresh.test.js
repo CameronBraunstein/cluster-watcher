@@ -25,12 +25,14 @@ function harness(poll, refreshServer, options = {}) {
     updates: [],
     checks: [],
     errors: [],
+    refreshErrors: [],
     loadings: 0,
     loading() { this.loadings += 1; },
     update(payload, checkedAt) { this.payload = payload; this.hasSuccessfulData = true; this.updates.push({ payload, checkedAt }); },
     updateOverview(payload, checkedAt) { this.payload = payload; this.hasSuccessfulData = true; this.overviewUpdates.push({ payload, checkedAt }); },
     checked(checkedAt) { this.checks.push(checkedAt); },
     error(error) { this.errors.push(error); },
+    refreshError(error) { this.refreshErrors.push(error); },
   };
   const monitor = {
     updates: [],
@@ -143,6 +145,34 @@ test('a reachable service immediately replaces stale offline indicators with loa
   assert.equal(state.jobsProvider.loadings, 1);
   assert.equal(state.statusProvider.loadings, 1);
   assert.equal(state.monitor.loadings, 1);
+});
+
+test('a snapshot timeout retains previously loaded Cluster Status', async () => {
+  let calls = 0;
+  const state = harness(async () => {
+    calls += 1;
+    if (calls === 2) throw new Error('Cluster Watcher service request timed out (/api/v1/snapshot?detail=summary)');
+    return { payload: { clusters: [{ name: 'alpha' }] }, etag: `snapshot-${calls}` };
+  });
+
+  await state.coordinator.refreshStatus();
+  assert.equal((await state.coordinator.refreshStatus()).outcome, 'degraded');
+  assert.equal(state.statusProvider.errors.length, 0);
+  assert.equal(state.statusProvider.refreshErrors.length, 1);
+  assert.equal(state.statusProvider.updates.length, 1);
+  assert.equal((await state.coordinator.refreshStatus()).outcome, 'updated');
+  assert.equal(state.statusProvider.updates.length, 2);
+});
+
+test('a first snapshot timeout stays in loading and retries after five seconds', async () => {
+  const delays = [];
+  const state = harness(async () => { throw new Error('Cluster Watcher service request timed out'); },
+    undefined, { setTimeout: (_callback, delay) => { delays.push(delay); return 1; } });
+
+  assert.equal((await state.coordinator.refreshStatus()).outcome, 'loading');
+  assert.equal(state.statusProvider.loadings, 1);
+  assert.equal(state.statusProvider.errors.length, 0);
+  assert.deepEqual(delays, [5000]);
 });
 
 test('the initial-collection 503 is loading and retries promptly without an offline state', async () => {
