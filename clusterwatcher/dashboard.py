@@ -1137,8 +1137,13 @@ class StatusStore:
                     retained.login_required = status.login_required
                     status = retained
                 if status.error or status.resource_error:
+                    status.error_since = (
+                        old.error_since if old is not None and (old.error or old.resource_error)
+                        and old.error_since else datetime.now(timezone.utc).isoformat()
+                    )
                     status.last_success_at = old.last_success_at if old is not None else None
                 else:
+                    status.error_since = None
                     status.last_success_at = datetime.now(timezone.utc).isoformat()
                 if due[status.name] and status.error is None:
                     self._capacity_collected[status.name] = now
@@ -1168,7 +1173,7 @@ class StatusStore:
         fields = (
             "name", "host", "hosts", "partitions", "nodes", "partition_compute",
             "scheduling", "fair_share", "fair_share_updated_at", "condor_priority", "scheduler",
-            "resource_error", "error", "login_required",
+            "resource_error", "error", "error_since", "login_required",
         )
         return any(
             any(getattr(before, field) != getattr(after, field) for field in fields)

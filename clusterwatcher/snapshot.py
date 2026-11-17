@@ -390,6 +390,7 @@ def build_snapshot(
                 "error": status.error,
                 "resource_error": status.resource_error,
                 "last_success_at": status.last_success_at,
+                "error_since": status.error_since,
                 "wait_estimates_updated_at": status.wait_estimates_updated_at,
                 "scheduling": status.scheduling or {},
                 "user_jobs": active_job_counts(status),

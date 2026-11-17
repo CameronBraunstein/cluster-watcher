@@ -463,14 +463,26 @@ class SnapshotTests(TimedTestCase):
         self.assertEqual(current.accounting, prior.accounting)
         self.assertEqual(current.wait_estimates, prior.wait_estimates)
         self.assertEqual(current.last_success_at, prior.last_success_at)
+        self.assertIsNotNone(current.error_since)
         cluster = store.snapshot_payload()["clusters"][0]
         self.assertFalse(cluster["reachable"])
         self.assertFalse(cluster["collecting"])
         self.assertEqual(cluster["last_success_at"], prior.last_success_at)
+        self.assertEqual(cluster["error_since"], current.error_since)
         self.assertEqual(cluster["partitions"][0]["name"], "gpu-a100")
         response, jobs = request_handler(store, "/api/v1/jobs")
         self.assertEqual(response["status"], 200)
         self.assertEqual([job["job_id"] for job in jobs["jobs"]], ["42"])
+
+        with patch("clusterwatcher.dashboard.collect_status", return_value=failure):
+            store.refresh()
+        self.assertEqual(store.statuses()[0].error_since, current.error_since)
+
+        recovered = example_status()
+        with patch("clusterwatcher.dashboard.collect_status", return_value=recovered):
+            store.refresh()
+        self.assertIsNone(store.statuses()[0].error_since)
+        self.assertIsNone(store.snapshot_payload()["clusters"][0]["error_since"])
 
     def test_dashboard_endpoint_retries_until_first_collection(self):
         store = StatusStore([Machine("a", "host", "user")], 5, False, 15)

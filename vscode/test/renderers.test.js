@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, renderLoading, jobGroup, jobKey, jobRef, renderWelcome, metadataSameLine, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
+const { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, clusterWarningSeverity, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, renderJobsApiDisabled, renderLoading, jobGroup, jobKey, jobRef, renderWelcome, metadataSameLine, openAttribute, parseDependency, relativeJobPriority, lifecycle, renderJobs, renderStatus, stateGroup, viewFreshness, waitCell } = require('../renderers');
 
 test('first-collection loading views place service controls in the Cluster Status footer', () => {
   const jobs = renderLoading('My Jobs');
@@ -206,7 +206,7 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /querySelectorAll\('\[data-fast-tooltip\]'\)/);
   assert.doesNotMatch(html, /0 mixed/);
   assert.doesNotMatch(html, /<table/);
-  assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary><span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">cluster_0<\/span><span class="cluster-job-track" role="group" aria-label="3 running, 1 pending, 0 depending"/);
+  assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary><span class="cluster-summary"><span class="cluster-summary-main cluster-summary-with-bar"><span class="cluster-summary-name">cluster_0<\/span><span class="cluster-job-track" role="group" aria-label="3 running, 1 pending, 0 depending"/);
   assert.match(html, /class="cluster-job-running" style="width:75%"/);
   assert.match(html, /class="cluster-job-pending" style="width:25%"/);
   assert.match(html, /class="cluster-job-running"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;RUNNING&quot;,&quot;cluster_0&quot;\]"/);
@@ -1193,11 +1193,33 @@ test('a timed-out cluster keeps its job bar and partition cards with a warning h
   }] });
   assert.match(html, /class="cluster-job-running"/);
   assert.match(html, /class="cluster-job-pending"/);
-  assert.match(html, /class="cluster-warning fast-hover"[^>]*data-fast-tooltip="Cluster refresh timed out\.\nLatest update: 14:05:23 08\.10\.2026"/);
+  assert.match(html, /class="cluster-warning cluster-warning-stale fast-hover"[^>]*data-fast-tooltip="Cluster refresh timed out\.\nLatest update: 14:05:23 08\.10\.2026\nRefresh has failed for over 3 minutes\."[^>]*>!<\/span>/);
   assert.doesNotMatch(html, /35 seconds/);
   assert.match(html, /class="card partition-card/);
   assert.doesNotMatch(html, /<p class="error">/);
   assert.doesNotMatch(html, /alice@login\.example/);
+});
+
+test('cluster warnings turn red after three minutes without moving their job bars', () => {
+  const now = Date.parse('2026-11-16T12:00:00Z');
+  assert.equal(clusterWarningSeverity({ error_since: '2026-11-16T11:57:01Z' }, now), 'recent');
+  assert.equal(clusterWarningSeverity({ error_since: '2026-11-16T11:57:00Z' }, now), 'recent');
+  assert.equal(clusterWarningSeverity({ error_since: '2026-11-16T11:56:59Z' }, now), 'stale');
+  assert.equal(clusterWarningSeverity({}, now), 'stale');
+
+  const recent = renderStatus({ clusters: [
+    { name: 'short', user_jobs: { running: 1 }, partitions: [] },
+    { name: 'long-name', error: 'SSH timeout', error_since: new Date(Date.now() - 60_000).toISOString(),
+      last_success_at: '2026-11-16T11:50:00Z', user_jobs: { running: 1 }, partitions: [{ name: 'gpu' }] },
+  ] });
+  assert.equal((recent.match(/class="cluster-summary-main cluster-summary-with-bar"/g) || []).length, 2);
+  assert.match(recent, /grid-template-columns:minmax\(0,1fr\) minmax\(40px,140px\) 13px/);
+  assert.match(recent, /class="cluster-warning cluster-warning-recent fast-hover"[^>]*data-warning-since="\d+"[^>]*>⚠<\/span>/);
+  assert.match(recent, /target\.classList\.replace\('cluster-warning-recent', 'cluster-warning-stale'\)/);
+
+  const stale = renderStatus({ clusters: [{ name: 'old', error: 'SSH timeout',
+    error_since: new Date(Date.now() - 181_000).toISOString(), partitions: [{ name: 'gpu' }] }] });
+  assert.match(stale, /class="cluster-warning cluster-warning-stale fast-hover"[^>]*>!<\/span>/);
 });
 
 test('an unfinished cluster shows a loading placeholder beside completed clusters', () => {

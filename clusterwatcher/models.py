@@ -101,6 +101,8 @@ class ClusterStatus:
     error: str | None = None
     # Last complete status refresh; retained when a later attempt fails.
     last_success_at: str | None = None
+    # First failed refresh in the current uninterrupted failure period.
+    error_since: str | None = None
     # When partitions/nodes were last collected; they refresh less often than jobs.
     capacity_updated_at: str | None = None
     # Checksum of the user's queued job IDs and states (see slurm.accounting_gate_command).

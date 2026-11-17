@@ -356,6 +356,7 @@ body{padding:0 10px 18px;color:var(--vscode-foreground);font-family:var(--vscode
 .card[open] .name{white-space:normal;overflow-wrap:anywhere}
 .progress-message{display:block;max-width:100%;font-size:.72em;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
 .cluster-warning{flex:0 0 auto;color:var(--vscode-editorWarning-foreground,#d9a400);font-size:13px;line-height:1;cursor:help}.cluster-collecting{margin-left:auto;color:var(--vscode-descriptionForeground);font-size:.78em;font-weight:400;white-space:nowrap}
+.cluster-summary-with-bar{display:grid;grid-template-columns:minmax(0,1fr) minmax(40px,140px) 13px;column-gap:7px}.cluster-summary-with-bar .cluster-job-track{width:100%;min-width:0;max-width:none;margin-left:0}.cluster-warning-stale{color:var(--vscode-editorError-foreground,#f14c4c);font-size:15px;font-weight:800;text-align:center}
 .job-connection-warning{position:relative;z-index:11;flex:0 0 auto;margin-left:3px;color:var(--vscode-editorWarning-foreground,#d9a400);font-size:12px;line-height:1;cursor:help}
 .dependency-icon{display:inline-block;margin-left:2px;font-family:system-ui,sans-serif;font-weight:700;cursor:help}.dependency-icon.waiting{font-weight:400}.dependency-icon.satisfied{color:var(--cluster-watcher-green)}.dependency-icon.failed{color:var(--vscode-errorForeground)}
 .priority-context{display:flex;align-items:center;gap:5px;margin-top:6px;min-width:0}.priority-gauge{display:flex;align-items:center;flex:1 1 auto;min-width:54px;max-width:150px;cursor:help}.priority-track{position:relative;display:block;flex:1 1 auto;height:4px;border-radius:3px;background:linear-gradient(90deg,var(--vscode-editorError-foreground),var(--vscode-descriptionForeground) 50%,var(--cluster-watcher-green))}.priority-marker{position:absolute;top:-3px;width:2px;height:10px;transform:translateX(-1px);background:var(--vscode-foreground);box-shadow:0 0 0 1px var(--vscode-sideBar-background)}.priority-prominent{margin-top:5px}.priority-prominent .priority-track{height:6px}.priority-prominent .priority-marker{top:-3px;height:12px}.card[open] .card-summary-progress>.priority-prominent{display:none}.priority-help{color:var(--vscode-descriptionForeground);font-size:.8em;cursor:help}
@@ -482,6 +483,13 @@ button.button{border:0;font:inherit;cursor:pointer}
   ${progressView.toString()}
   const tick = () => {
     const now = Date.now();
+    document.querySelectorAll('.cluster-warning-recent[data-warning-since]').forEach((target) => {
+      if (now - Number(target.dataset.warningSince) <= 3 * 60 * 1000) return;
+      target.classList.replace('cluster-warning-recent', 'cluster-warning-stale');
+      target.textContent = '!';
+      target.dataset.fastTooltip = target.dataset.staleTooltip;
+      target.setAttribute('aria-label', target.dataset.staleTooltip);
+    });
     document.querySelectorAll('[data-progress]').forEach((element) => {
       const view = progressView(JSON.parse(element.dataset.progress), now);
       element.querySelector('.progress-fill').style.width = view.percent + '%';
@@ -1180,25 +1188,37 @@ function clusterLoginActions(cluster, session) {
   return `<span class="cluster-login-actions">${buttons.join('')}</span>`;
 }
 
+/** Classify an active cluster warning by the age of its current failure. */
+function clusterWarningSeverity(cluster, now = Date.now()) {
+  const since = Date.parse(cluster.error_since || cluster.last_success_at || '');
+  return Number.isFinite(since) && now - since <= 3 * 60 * 1000 ? 'recent' : 'stale';
+}
+
 /** Render one cluster heading with its job ratio or login actions. */
-function clusterSummary(cluster, session) {
+function clusterSummary(cluster, session, now) {
   const clusterName = escapeHtml(cluster.name);
   const loggedOut = clusterLoggedOut(cluster, session);
+  const hasBar = !loggedOut && !cluster.collecting
+    && !(cluster.reachable === false && !(cluster.partitions || []).length);
   const status = loggedOut ? clusterLoginActions(cluster, session)
     : cluster.collecting ? '<span class="cluster-collecting">Loading…</span>'
-      : cluster.reachable === false && !(cluster.partitions || []).length
-        ? '<span class="cluster-collecting">Unavailable</span>'
-        : clusterJobRatio(cluster.user_jobs, cluster.name, cluster.user_gpu_hours);
+      : hasBar ? clusterJobRatio(cluster.user_jobs, cluster.name, cluster.user_gpu_hours)
+        : '<span class="cluster-collecting">Unavailable</span>';
   const error = cluster.error || cluster.resource_error;
   const warning = error ? (() => {
     const timeout = /timed?\s*out|timeout/i.test(String(error));
     const lead = timeout ? 'Cluster refresh timed out.' : 'Cluster refresh failed.';
     const latest = `Latest update: ${timeThenDate(cluster.last_success_at)}`;
     const detail = timeout ? `${lead}\n${latest}` : `${lead}\n${latest}\n${withoutSshUsernames(error)}`;
-    const tooltip = escapeHtml(detail);
-    return `<span class="cluster-warning fast-hover" role="img" aria-label="${tooltip}" data-fast-tooltip="${tooltip}">⚠</span>`;
+    const staleDetail = `${detail}\nRefresh has failed for over 3 minutes.`;
+    const severity = clusterWarningSeverity(cluster, now);
+    const since = Date.parse(cluster.error_since || cluster.last_success_at || '');
+    const sinceAttribute = Number.isFinite(since) ? ` data-warning-since="${since}"` : '';
+    const tooltip = escapeHtml(severity === 'stale' ? staleDetail : detail);
+    return `<span class="cluster-warning cluster-warning-${severity} fast-hover" role="img" aria-label="${tooltip}" data-fast-tooltip="${tooltip}" data-stale-tooltip="${escapeHtml(staleDetail)}"${sinceAttribute}>${severity === 'stale' ? '!' : '⚠'}</span>`;
   })() : '';
-  return `<span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">${clusterName}</span>${status}${warning}</span></span>`;
+  const mainClass = `cluster-summary-main${hasBar ? ' cluster-summary-with-bar' : ''}`;
+  return `<span class="cluster-summary"><span class="${mainClass}"><span class="cluster-summary-name">${clusterName}</span>${status}${warning}</span></span>`;
 }
 
 /**
@@ -1215,7 +1235,7 @@ function renderStatus(payload, disclosures = {}, freshness = {}, server = {}) {
   const clusters = [];
   for (const cluster of payload.clusters || []) {
     const session = sessions.get(String(cluster.name));
-    const summary = clusterSummary(cluster, session);
+    const summary = clusterSummary(cluster, session, Date.now());
     const rawKey = `cluster:${cluster.name}`;
     const disclosureKey = escapeHtml(rawKey);
     const open = openAttribute(disclosures, rawKey, true);
@@ -1238,4 +1258,4 @@ function renderStatus(payload, disclosures = {}, freshness = {}, server = {}) {
   return document('Cluster Status', body);
 }
 
-module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, isFailureGroup, jobGroup, jobRef, launchabilityStrip, metadataSameLine, openAttribute, parseDependency, relativeJobPriority, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderLoading, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };
+module.exports = { DEFAULT_DATE_FORMAT, availabilityStateLabel, availabilityTitle, clusterWarningSeverity, compactGpuName, gpuAvailabilityTitle, localTime, setDateFormat, progressSpec, progressView, commandAttributes, commandButtonAttributes, dependencyStatus, escapeHtml, hasFailedDependency, isFailureGroup, jobGroup, jobRef, launchabilityStrip, metadataSameLine, openAttribute, parseDependency, relativeJobPriority, formatDuration, jobKey, lifecycle, renderJobs, renderJobsApiDisabled, renderLoading, renderMessage, renderStatus, renderWelcome, stateGroup, viewFreshness, waitCell };

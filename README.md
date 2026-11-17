@@ -73,6 +73,8 @@ The browser has its own sortable, collapsible job cards and a browser-local arch
 
 Each cluster has a thin job bar: **blue** for Running, **red** for Pending, and **dark maroon** for Depending. Click a segment in VS Code or the browser to jump to those jobs for that cluster. Slurm partitions and HTCondor's GPU-model display groups then show:
 
+In the VS Code Cluster Status view, the cluster bars stay aligned when a warning appears. A yellow ⚠ marks a communication or refresh failure that began within the last three minutes; a red **!** means the failure has lasted longer. Hover over either icon for the error and the latest successful update. The last known cluster cards remain visible while the service retries. Once the cluster refreshes successfully, the warning clears.
+
 - GPU or APU model, per-device VRAM, FP16/BF16 Tensor throughput, and total CPU threads.
 - Slurm **FairShare** for mapped account associations, or HTCondor **pool share** and effective user priority when the negotiator reports them.
 - **GPUs:** schedulable free devices out of the partition total, and **Nodes:** fully idle nodes out of the total.
