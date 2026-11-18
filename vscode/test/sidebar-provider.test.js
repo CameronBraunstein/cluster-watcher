@@ -38,7 +38,7 @@ test('a later service-reachable event keeps an overview received while the view 
   };
   provider.resolveWebviewView(view);
   assert.match(view.webview.html, /data-disclosure-key="cluster:alpha"><summary>/);
-  assert.match(view.webview.html, /aria-label="2 running, 1 pending, 1 depending"/);
+  assert.match(view.webview.html, /aria-label="2 running, 1 pending, 1 depending, 0 failed dependency"/);
   assert.doesNotMatch(view.webview.html, /Cluster Watcher is running\. Loading cluster status/);
 });
 

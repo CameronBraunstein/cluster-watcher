@@ -8,7 +8,7 @@ function clusterOverviewFromJobs(payload) {
   const clusters = new Map((payload.clusters || []).map((cluster) => [String(cluster.name), {
     name: String(cluster.name), reachable: cluster.reachable !== false,
     error: cluster.reachable === false ? cluster.error : undefined,
-    user_jobs: { running: 0, pending: 0, depending: 0 },
+    user_jobs: { running: 0, pending: 0, depending: 0, failed_dependency: 0 },
     user_gpu_hours: {}, partitions: [],
   }]));
   for (const job of payload.jobs || []) {
@@ -16,11 +16,11 @@ function clusterOverviewFromJobs(payload) {
     if (!name) continue;
     if (!clusters.has(name)) clusters.set(name, {
       name, reachable: true,
-      user_jobs: { running: 0, pending: 0, depending: 0 },
+      user_jobs: { running: 0, pending: 0, depending: 0, failed_dependency: 0 },
       user_gpu_hours: {}, partitions: [],
     });
     const group = jobGroup(job);
-    if (group === 'RUNNING' || group === 'PENDING' || group === 'DEPENDING') {
+    if (['RUNNING', 'PENDING', 'DEPENDING', 'FAILED_DEPENDENCY'].includes(group)) {
       clusters.get(name).user_jobs[group.toLowerCase()] += 1;
     }
   }

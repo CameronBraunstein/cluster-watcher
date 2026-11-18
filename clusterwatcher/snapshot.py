@@ -24,7 +24,7 @@ _PENDING_JOB_STATES = {
 
 
 def active_job_counts(status: ClusterStatus) -> dict[str, int]:
-    """Count running, independently pending, and dependency-held jobs."""
+    """Count active jobs, separating satisfiable and failed dependencies."""
     jobs = status.user_jobs or []
     states = [str(job.get("state", "")).upper() for job in jobs]
     return {
@@ -35,6 +35,8 @@ def active_job_counts(status: ClusterStatus) -> dict[str, int]:
         "depending": sum(state in _PENDING_JOB_STATES and not has_failed_dependency(job)
                          and waits_for_dependency(job)
                          for state, job in zip(states, jobs)),
+        "failed_dependency": sum(state in _PENDING_JOB_STATES and has_failed_dependency(job)
+                                 for state, job in zip(states, jobs)),
     }
 
 

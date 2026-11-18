@@ -99,7 +99,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .cluster-job-track { display:flex; flex:1 1 auto; max-width:16rem; height:.5rem; overflow:hidden; border-radius:999px; background:#8883; margin-left:auto; }
 .cluster-job-track button { display:block; height:100%; border:0; padding:0; cursor:pointer; }
 .cluster-job-track button:hover, .cluster-job-track button:focus-visible { outline:1px solid #fff; outline-offset:-1px; }
-.cluster-job-running { background:#2563eb; } .cluster-job-pending { background:#dc2626; } .cluster-job-depending { background:#6b1026; }
+.cluster-job-running { background:#2563eb; } .cluster-job-pending { background:#dc2626; } .cluster-job-depending { background:#6b1026; } .cluster-job-failed-dependency { background:#c4c4c4; }
 .cluster-detail { margin-top:.75rem; }
 .launchability { display:flex; align-items:end; gap:3px; min-width:0; }
 .launch-shape { display:grid; grid-template-rows:.65rem .85rem; justify-items:center; gap:2px; }
@@ -890,20 +890,23 @@ function condorPoolShareView(rows) {
   }).join('');
 }
 
-/** Summarize active jobs by the same three groups used in the VS Code sidebar. */
+/** Summarize active jobs with failed dependencies in the rightmost segment. */
 function clusterJobRatio(summary) {
   if (!summary || summary.collecting) return '<span class="cluster-collecting">Loading…</span>';
   const counts = summary.user_jobs || {};
-  const total = ['running', 'pending', 'depending'].reduce((sum, key) => sum + (Number(counts[key]) || 0), 0);
-  const segments = ['running', 'pending', 'depending'].map(group => {
+  const groups = ['running', 'pending', 'depending', 'failed_dependency'];
+  const total = groups.reduce((sum, key) => sum + (Number(counts[key]) || 0), 0);
+  const segments = groups.map(group => {
     const count = Number(counts[group]) || 0;
     if (!count) return '';
     const hours = summary.user_gpu_hours?.[group];
-    const detail = hours == null ? 'GPU-hours unavailable' : `${Number(hours).toLocaleString()} GPU-hours ${group === 'running' ? 'remaining' : 'requested'}`;
-    const tooltip = `${count} ${group} job${count === 1 ? '' : 's'}\n${detail}`;
-    return `<button class="cluster-job-${group}" style="width:${count / total * 100}%" data-job-group="${group.toUpperCase()}" data-cluster="${escapeHtml(summary.name)}" title="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}"></button>`;
+    const detail = group === 'failed_dependency' ? 'Dependencies cannot be satisfied'
+      : hours == null ? 'GPU-hours unavailable' : `${Number(hours).toLocaleString()} GPU-hours ${group === 'running' ? 'remaining' : 'requested'}`;
+    const label = group.replace('_', ' ');
+    const tooltip = `${count} ${label} job${count === 1 ? '' : 's'}\n${detail}`;
+    return `<button class="cluster-job-${group.replace('_', '-')}" style="width:${count / total * 100}%" data-job-group="${group.toUpperCase()}" data-cluster="${escapeHtml(summary.name)}" title="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}"></button>`;
   }).join('');
-  return `<span class="cluster-job-track" role="group" aria-label="${Number(counts.running) || 0} running, ${Number(counts.pending) || 0} pending, ${Number(counts.depending) || 0} depending">${segments}</span>`;
+  return `<span class="cluster-job-track" role="group" aria-label="${Number(counts.running) || 0} running, ${Number(counts.pending) || 0} pending, ${Number(counts.depending) || 0} depending, ${Number(counts.failed_dependency) || 0} failed dependency">${segments}</span>`;
 }
 
 const clusterDisclosure = new Map();

@@ -206,7 +206,7 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /querySelectorAll\('\[data-fast-tooltip\]'\)/);
   assert.doesNotMatch(html, /0 mixed/);
   assert.doesNotMatch(html, /<table/);
-  assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary><span class="cluster-summary"><span class="cluster-summary-main cluster-summary-with-bar"><span class="cluster-summary-name">cluster_0<\/span><span class="cluster-job-track" role="group" aria-label="3 running, 1 pending, 0 depending"/);
+  assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary><span class="cluster-summary"><span class="cluster-summary-main cluster-summary-with-bar"><span class="cluster-summary-name">cluster_0<\/span><span class="cluster-job-track" role="group" aria-label="3 running, 1 pending, 0 depending, 0 failed dependency"/);
   assert.match(html, /class="cluster-job-running" style="width:75%"/);
   assert.match(html, /class="cluster-job-pending" style="width:25%"/);
   assert.match(html, /class="cluster-job-running"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;RUNNING&quot;,&quot;cluster_0&quot;\]"/);
@@ -252,7 +252,7 @@ test('cluster job ratio remains empty when no jobs are running or pending', () =
     { name: 'idle', reachable: true, user_jobs: { running: 0, pending: 0 }, partitions: [] },
   ] });
   const track = html.match(/<span class="cluster-job-track"[^>]*>.*?<\/span>/s)[0];
-  assert.match(track, /aria-label="0 running, 0 pending, 0 depending"/);
+  assert.match(track, /aria-label="0 running, 0 pending, 0 depending, 0 failed dependency"/);
   assert.doesNotMatch(track, /cluster-job-(?:running|pending|depending)/);
 });
 
@@ -310,7 +310,7 @@ test('early cluster overview keeps clickable job segments while details load', (
   }] }, { 'cluster:alpha': false });
 
   assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:alpha"><summary>/);
-  assert.match(html, /aria-label="2 running, 1 pending, 1 depending"/);
+  assert.match(html, /aria-label="2 running, 1 pending, 1 depending, 0 failed dependency"/);
   for (const group of ['RUNNING', 'PENDING', 'DEPENDING']) {
     assert.match(html, new RegExp(`data-args="\\[&quot;${group}&quot;,&quot;alpha&quot;\\]"`));
   }
@@ -319,16 +319,24 @@ test('early cluster overview keeps clickable job segments while details load', (
   assert.doesNotMatch(html, /<article class="card partition-card"/);
 });
 
-test('cluster ratio includes three correctly sized status colors', () => {
+test('cluster ratio puts failed dependencies in a clickable light gray rightmost segment', () => {
   const html = renderStatus({ clusters: [
-    { name: 'busy', reachable: true, user_jobs: { running: 2, pending: 1, depending: 1 }, partitions: [] },
+    { name: 'busy', reachable: true, user_jobs: {
+      running: 2, pending: 1, depending: 1, failed_dependency: 1,
+    }, partitions: [] },
   ] });
-  assert.match(html, /aria-label="2 running, 1 pending, 1 depending"/);
-  assert.match(html, /class="cluster-job-running" style="width:50%"/);
-  assert.match(html, /class="cluster-job-pending" style="width:25%"/);
-  assert.match(html, /class="cluster-job-depending" style="width:25%"/);
+  assert.match(html, /aria-label="2 running, 1 pending, 1 depending, 1 failed dependency"/);
+  assert.match(html, /class="cluster-job-running" style="width:40%"/);
+  assert.match(html, /class="cluster-job-pending" style="width:20%"/);
+  assert.match(html, /class="cluster-job-depending" style="width:20%"/);
+  assert.match(html, /class="cluster-job-failed-dependency" style="width:20%"/);
+  assert.ok(html.indexOf('class="cluster-job-depending" style=')
+    < html.indexOf('class="cluster-job-failed-dependency" style='));
   assert.match(html, /class="cluster-job-depending"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;DEPENDING&quot;,&quot;busy&quot;\]"/);
+  assert.match(html, /class="cluster-job-failed-dependency"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;FAILED_DEPENDENCY&quot;,&quot;busy&quot;\]"/);
   assert.match(html, /data-fast-tooltip="1 depending job\nGPU-hours unavailable"/);
+  assert.match(html, /data-fast-tooltip="1 failed dependency job\nDependencies cannot be satisfied"/);
+  assert.match(html, /\.cluster-job-failed-dependency\{display:block;height:100%;background:#c4c4c4\}/);
   assert.match(html, /const target = \[\.\.\.document\.querySelectorAll\('details\.job-group\[data-disclosure-key\]'\)\]/);
   assert.match(html, /if \(!target\.open\) \{ target\.open = true; remember\(target\); \}/);
   assert.match(html, /clusterCard\.scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
@@ -582,7 +590,7 @@ test('Cluster Status replaces logged-out session details with scoped login actio
   const open = summaryFor('open');
   const closed = summaryFor('closed');
 
-  assert.match(open, /class="cluster-job-track"[^>]*aria-label="2 running, 1 pending, 0 depending"/);
+  assert.match(open, /class="cluster-job-track"[^>]*aria-label="2 running, 1 pending, 0 depending, 0 failed dependency"/);
   assert.doesNotMatch(open, /cluster-login-host|a\.example|alice/);
   assert.match(html, /open: alice@a\.example\n🕒 07:59 left/);
   assert.doesNotMatch(open, /alice@/);

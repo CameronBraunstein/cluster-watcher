@@ -131,10 +131,11 @@ class SnapshotTests(TimedTestCase):
             {"state": "CONFIGURING", "reason": "Dependency: afterok:124"},
             {"state": "PENDING", "dependency": "(null)"},
             {"state": "PENDING", "reason": "DependencyNeverSatisfied", "dependency": "afterok:125(failed)"},
+            {"state": "PENDING", "dependency": "afterok:126(invalid)"},
         ]
         snapshot = build_snapshot([status], "2026-09-22T10:00:00+00:00", 15)
         self.assertEqual(snapshot["clusters"][0]["user_jobs"],
-                         {"running": 1, "pending": 2, "depending": 2})
+                         {"running": 1, "pending": 2, "depending": 2, "failed_dependency": 2})
 
     def test_snapshot_estimates_gpu_hours_by_queue_group(self):
         """Running uses remaining walltime; queued jobs use requested walltime."""
@@ -208,7 +209,7 @@ class SnapshotTests(TimedTestCase):
         self.assertTrue(cluster["reachable"])
         self.assertTrue(cluster["resource_data_complete"])
         self.assertEqual(cluster["scheduling"]["scheduler_type"], "sched/backfill")
-        self.assertEqual(cluster["user_jobs"], {"running": 2, "pending": 2, "depending": 0})
+        self.assertEqual(cluster["user_jobs"], {"running": 2, "pending": 2, "depending": 0, "failed_dependency": 0})
         self.assertNotIn("username", cluster)
         self.assertEqual(cluster["resources"]["gpus"]["total"], 8)
         self.assertEqual(cluster["resources"]["gpus"]["schedulable_idle"], 3)
@@ -514,6 +515,8 @@ class SnapshotTests(TimedTestCase):
              "time_limit_seconds": 3600},
             {"id": "3", "state": "PENDING", "dependency": "afterok:1(unfulfilled)",
              "gpus": 1, "time_limit_seconds": 3600},
+            {"id": "4", "state": "PENDING", "reason": "DependencyNeverSatisfied",
+             "dependency": "afterok:99(failed)", "gpus": 1, "time_limit_seconds": 3600},
         ]
         store = StatusStore([Machine("cluster_0", "slurm.example", "alice")], 5, False, 15)
         store._statuses = [status]
@@ -523,7 +526,7 @@ class SnapshotTests(TimedTestCase):
         summary = browser["summary"]["clusters"][0]
         partition = summary["partitions"][0]
 
-        self.assertEqual(summary["user_jobs"], {"running": 1, "pending": 1, "depending": 1})
+        self.assertEqual(summary["user_jobs"], {"running": 1, "pending": 1, "depending": 1, "failed_dependency": 1})
         self.assertEqual(partition["gpus"]["total"], 8)
         self.assertEqual(partition["gpus"]["schedulable_idle"], 3)
         self.assertEqual(partition["node_states"], {"IDLE+DRAIN": 1, "MIXED": 1})

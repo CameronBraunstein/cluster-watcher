@@ -18,6 +18,26 @@ function browserJobRefresh() {
   return context;
 }
 
+test('browser cluster bar links failed dependencies in a light gray rightmost segment', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../../clusterwatcher/dashboard.py'), 'utf8');
+  const start = source.indexOf('function clusterJobRatio(summary)');
+  const end = source.indexOf('const clusterDisclosure', start);
+  assert.ok(start >= 0 && end > start);
+  const context = { escapeHtml: String };
+  vm.runInNewContext(`${source.slice(start, end)}\nglobalThis.clusterJobRatio = clusterJobRatio;`, context);
+
+  const bar = context.clusterJobRatio({ name: 'inf', user_jobs: {
+    running: 2, pending: 1, depending: 1, failed_dependency: 1,
+  } });
+  const segmentOrder = [...bar.matchAll(/class="cluster-job-(running|pending|depending|failed-dependency)"/g)]
+    .map((match) => match[1]);
+  assert.deepEqual(segmentOrder, ['running', 'pending', 'depending', 'failed-dependency']);
+  assert.match(bar, /class="cluster-job-running" style="width:40%"/);
+  assert.match(bar, /class="cluster-job-failed-dependency" style="width:20%" data-job-group="FAILED_DEPENDENCY" data-cluster="inf"/);
+  assert.match(bar, /1 failed dependency job\nDependencies cannot be satisfied/);
+  assert.match(source, /\.cluster-job-failed-dependency \{ background:#c4c4c4; \}/);
+});
+
 test('browser freezes stale running and pending progress bars', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../../clusterwatcher/dashboard.py'), 'utf8');
   const running = source.slice(source.indexOf('function runningJobProgress('),
