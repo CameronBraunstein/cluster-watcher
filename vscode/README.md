@@ -17,6 +17,14 @@ expand an offline placeholder manually.
 
 ## Requirements
 
+- **`tmux` on the extension host's `PATH`** to start a persistent service from
+  VS Code. Install it on the remote development host for Remote SSH, or inside
+  the WSL distribution for a WSL window. On Ubuntu/Debian, run
+  `sudo apt-get update` followed by `sudo apt-get install tmux`; on macOS with
+  Homebrew, run `brew install tmux`. Verify with `tmux -V` on that host.
+  The backend installer and setup wizard do not install it; the wizard does
+  not check for it. For persistent startup from Windows, run the extension
+  and backend inside WSL with `tmux` installed there.
 - On first use, the extension looks for an existing **`cluster-watcher`**
   command on the machine running the extension (the remote host under Remote
   SSH). If it cannot run one, choose **Install and Add to PATH**, **Use Only in
@@ -301,7 +309,8 @@ Below a thin gray divider, the service toggle and dashboard URL appear before
 selected `clusters.toml` without moving the Cluster Status scroll position (or
 offers setup if the file does not exist).
 The extension starts the service in a detached `tmux` session on its host, so
-closing or reloading VS Code does not stop it. `tmux` must be installed there.
+closing or reloading VS Code does not stop it. `tmux` must be installed there;
+see [tmux is required](#tmux-is-required) if startup reports it missing.
 The OpenSSH masters may remain reusable until their own connection or idle
 limit ends. A host reboot ends both the tmux service and SSH sessions; a host
 policy that kills user processes at logout can also end them.
@@ -376,6 +385,37 @@ control sockets all live on that remote development host. Backend selection is
 independent for local, WSL, Remote SSH, and container extension hosts.
 Workspace Trust is required because the extension downloads/runs a native
 executable and opens SSH sessions.
+
+### tmux is required
+
+The message **tmux is required to start a persistent Cluster Watcher service**
+means the extension could not find the `tmux` executable when starting the
+service. This check happens at service startup, not during `cluster-watcher
+setup`, which creates and validates `clusters.toml`.
+
+1. Open a terminal on the machine running the extension. For Remote SSH or
+   WSL, use a terminal in that remote or WSL window; installing `tmux` only on
+   your laptop does not provide it to a remote extension host.
+2. Install `tmux` using the commands in [Requirements](#requirements), then
+   check `command -v tmux` and `tmux -V` in that terminal. If you cannot install
+   system packages, ask the host administrator to provide it.
+3. Retry **Cluster Watcher: Start Service & SSH Sessions**. If `tmux -V` works
+   but the extension still reports it missing, ensure the directory containing
+   `tmux` is on the extension host's `PATH`, then restart VS Code or reconnect
+   the remote window so the extension picks up the environment change.
+
+You can also start the backend in a terminal on the extension host:
+
+```bash
+cluster-watcher serve --jobs-api --no-browser
+```
+
+Keep that terminal open, then use **Cluster Watcher: Start Service & SSH
+Sessions** to attach to the running service. Use your configured executable,
+config file, and host/port if they differ from the defaults; the service URL
+must match `clusterWatcher.backendUrl`. Attaching to an existing service and
+running browser or terminal views do not require local `tmux`. Direct SSH jobs
+still require `tmux` on each job host.
 
 The extension is licensed GPL-3.0-or-later (`LICENSE`). The original Activity
 Bar icon and the Marketplace icon (`media/icon.png`, rendered from

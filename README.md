@@ -31,7 +31,7 @@ Open a new terminal after installation. On Windows, use the [PowerShell installe
 cluster-watcher setup
 ```
 
-The wizard asks for each cluster's name, SSH host, username, and scheduler. It can also record GPU or APU profiles, login groups, and Slurm partition time limits. It writes **one** private `clusters.toml` file. To review or change it later, run `cluster-watcher config`.
+The wizard asks for each cluster's name, SSH host, username, and scheduler. It can also record GPU or APU profiles, login groups, and Slurm partition time limits. It writes **one** private `clusters.toml` file. To review or change it later, run `cluster-watcher config`. The wizard validates configuration; it does not check or install `tmux`, which the VS Code extension needs to start a persistent service.
 
 A minimal entry looks like this:
 
@@ -54,6 +54,17 @@ Do not put passwords or one-time codes in the TOML file. Cluster Watcher uses SS
 | Terminal | `cluster-watcher jobs` and `cluster-watcher status` | Fast readouts, including from an SSH terminal. |
 
 The VS Code extension can install a matching backend on first use. A development checkout works with `python3 cluster_watcher.py <command>` or `python3 -m clusterwatcher <command>`.
+
+**Before starting the service from VS Code, install `tmux` on the machine running the extension.** With Remote SSH, this is the remote development host; with WSL, it is the WSL distribution. The backend installer does not install `tmux`.
+
+```bash
+# Ubuntu / Debian, on the extension host:
+sudo apt-get update
+sudo apt-get install tmux
+tmux -V
+```
+
+On macOS with Homebrew, use `brew install tmux`. Then select **Cluster Watcher: Start Service & SSH Sessions** in VS Code. If you see **tmux is required**, follow the [extension troubleshooting steps](vscode/README.md#tmux-is-required). Running `cluster-watcher serve --jobs-api` directly in a terminal does not require `tmux`; keep that terminal open while using the service.
 
 ## What you can see
 

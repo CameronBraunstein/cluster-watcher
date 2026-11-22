@@ -251,6 +251,10 @@ validates the result and writes the single config file with mode `0600`; an
 existing file is replaced only after confirmation and kept as
 `clusters.toml.bak`.
 
+The wizard validates configuration but does not check or install `tmux`.
+Starting a persistent service from VS Code requires `tmux` on the extension
+host's `PATH`; see the [extension requirements and installation commands](vscode/README.md#requirements).
+
 To change it later, run `cluster-watcher config`. It opens the file in
 `$VISUAL`, `$EDITOR`, or a native fallback (`nano`/`vim`/`vi`, or Notepad/VS
 Code on Windows), validates it when the editor exits, and offers to reopen an
@@ -492,7 +496,11 @@ closes or reloads. The extension then offers masked password and OTP prompts
 for closed SSH sessions, without opening a terminal. Secrets travel only over
 the login helper's private stdin and are never placed in arguments,
 environment variables, logs, or configuration. `tmux` must be installed on the
-extension host. If a service is already listening at
+extension host; neither the backend installer nor the setup wizard installs
+it. Missing `tmux` is detected when the extension tries to start the service.
+See [tmux startup troubleshooting](vscode/README.md#tmux-is-required) for
+installation, Remote SSH/WSL placement, and a manual-service alternative.
+If a service is already listening at
 `clusterWatcher.backendUrl` (default
 `http://127.0.0.1:8080/`), the extension attaches to it instead of starting
 another. On first use without a `cluster-watcher` command, it offers **Install
