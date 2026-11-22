@@ -83,15 +83,32 @@ class ServiceController {
     this.provider.updateServer(this.lifecycle, this.sessions, this.sessionsError);
   }
 
-  /** Ask VS Code for one secret; cancellation is returned to the child explicitly. */
+  /** Confirm a new SSH host or request a secret through the private login pipe. */
   async requestCredential(request) {
+    if (request.kind === 'host_key') {
+      this.publish({ activity: 'Waiting for SSH host verification…' });
+      const choice = await vscode.window.showWarningMessage(
+        'Trust this SSH host?',
+        {
+          modal: true,
+          detail: `${request.prompt}\n\nCompare this fingerprint with one provided by your cluster administrator. `
+            + 'Trust Host lets OpenSSH save this key in its configured known-hosts file on the machine making this SSH connection.',
+        },
+        'Trust Host',
+      );
+      const accepted = choice === 'Trust Host';
+      this.publish({ activity: accepted ? 'Continuing authentication…' : 'SSH host trust cancelled' });
+      return accepted ? 'yes' : 'no';
+    }
     this.publish({ activity: request.prompt });
     const value = await vscode.window.showInputBox({
-      title: request.kind === 'otp' ? 'Cluster Watcher one-time code' : 'Cluster Watcher password',
+      title: request.kind === 'otp' ? 'Cluster Watcher one-time code'
+        : request.kind === 'passphrase' ? 'Cluster Watcher SSH key passphrase' : 'Cluster Watcher password',
       prompt: request.prompt,
       password: true,
       ignoreFocusOut: true,
-      placeHolder: request.kind === 'otp' ? 'Enter the current one-time code' : 'Enter the SSH password',
+      placeHolder: request.kind === 'otp' ? 'Enter the current one-time code'
+        : request.kind === 'passphrase' ? 'Enter the SSH key passphrase' : 'Enter the SSH password',
       validateInput: (candidate) => candidate ? undefined : 'A value is required',
     });
     this.publish({

@@ -1,4 +1,4 @@
-"""Ephemeral password/OTP sharing for related interactive SSH sessions."""
+"""Ephemeral password/OTP sharing and explicit SSH host-key confirmation."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from typing import Callable, TextIO
 from .models import Machine
 from .askpass import ASKPASS_MODE_ENVIRONMENT_VARIABLE
 from .platforms import supports_ssh_multiplexing, user_runtime_token
-from .ssh import select_login_machine, session_status, start_interactive_session
+from .ssh import select_login_machine, session_status, start_interactive_session, verify_submission_host
 
 
 ASKPASS_SOCKET_ENV = "CLUSTER_WATCHER_ASKPASS_SOCKET"
@@ -29,7 +29,7 @@ class CredentialPromptCancelled(RuntimeError):
 
 
 class JsonLineCredentialPrompt:
-    """Exchange secret prompts over newline-delimited standard streams.
+    """Exchange credential and host-trust prompts over private standard streams.
 
     This private protocol lets a graphical client present its own password
     field without placing credentials in command arguments, environment
@@ -44,7 +44,7 @@ class JsonLineCredentialPrompt:
         self._request_id = 0
 
     def __call__(self, kind: str, prompt: str) -> str:
-        """Request one password/OTP and return the client's secret response."""
+        """Request a password/OTP or host-trust decision from the client."""
         self._request_id += 1
         request = {
             "version": 1,
@@ -99,8 +99,12 @@ def _askpass_program() -> tuple[Path, bool]:
 class CredentialBroker:
     """Serve one shared password and one current host's ephemeral OTP."""
 
-    def __init__(self, password: str) -> None:
+    def __init__(self, password: str, host_key_prompt: SecretPrompt | None = None,
+                 credential_prompt: SecretPrompt | None = None) -> None:
         self._password = password
+        self._host_key_prompt = host_key_prompt
+        self._credential_prompt = credential_prompt
+        self.cancelled = False
         self._otp = ""
         self._credential_lock = threading.Lock()
         self._stop = threading.Event()
@@ -173,16 +177,53 @@ class CredentialBroker:
             self._otp = otp
 
     def _response(self, prompt: str) -> str:
-        """Select a credential only for recognized password or OTP prompts."""
+        """Confirm new hosts explicitly; send secrets only to credential prompts."""
         normalized = prompt.casefold()
+        # Check before password/OTP markers: hostnames and known_hosts paths
+        # in a host-key prompt may themselves contain those words.
+        if any(marker in normalized for marker in (
+            "authenticity of host", "host key", "key fingerprint", "continue connecting",
+        )):
+            if not (
+                normalized.startswith("the authenticity of host '")
+                and "key fingerprint is" in normalized
+                and "are you sure you want to continue connecting (yes/no" in normalized
+                and self._host_key_prompt is not None
+            ):
+                return ""
+            try:
+                answer = self._host_key_prompt("host_key", prompt)
+            except (CredentialPromptCancelled, EOFError):
+                return "no"
+            # No response is cached or shared with other hosts in the group.
+            return "yes" if answer == "yes" else "no"
         otp_markers = ("one-time", "one time", "otp", "verification code", "passcode", "token code")
+        kind = (
+            "otp" if any(marker in normalized for marker in otp_markers)
+            else "passphrase" if "passphrase for key" in normalized
+            else "password" if "password" in normalized else None
+        )
         with self._credential_lock:
-            if any(marker in normalized for marker in otp_markers):
-                return self._otp
-            if "password" in normalized:
-                return self._password
-        # Never send a credential to host-key confirmations or unknown prompts.
-        return ""
+            if self.cancelled:
+                return ""
+            value = self._password if kind == "password" else self._otp if kind == "otp" else ""
+        # A user may leave a dialog open while SSH exits. Never hold the lock
+        # while waiting for input, so broker cleanup can still clear secrets.
+        if kind and self._credential_prompt and not value:
+            try:
+                value = self._credential_prompt(kind, prompt)
+            except (CredentialPromptCancelled, EOFError):
+                self.cancelled = True
+                return ""
+            with self._credential_lock:
+                if self._stop.is_set():
+                    return ""
+                if kind == "password":
+                    self._password = value
+                elif kind == "otp":
+                    self._otp = value
+        # Unknown prompts receive nothing; host-key prompts were handled above.
+        return value
 
     def _serve(self) -> None:
         """Answer askpass clients until the startup authentication phase ends."""
@@ -218,6 +259,12 @@ def _secret(kind: str, prompt: str, secret_prompt: SecretPrompt | None) -> str:
     return secret_prompt(kind, prompt) if secret_prompt is not None else getpass.getpass(prompt)
 
 
+def _terminal_host_key_prompt(_kind: str, prompt: str) -> str:
+    """Show OpenSSH's full fingerprint prompt, accepting only an explicit yes."""
+    print(prompt, file=sys.stderr, end="", flush=True)
+    return input().strip().lower()
+
+
 def _start_credential_group(
     machines: list[Machine], timeout: int, secret_prompt: SecretPrompt | None = None,
 ) -> list[tuple[Machine, RuntimeError]]:
@@ -230,7 +277,7 @@ def _start_credential_group(
     password = _secret("password", f"Password for {username} ({label})", secret_prompt)
     errors: list[tuple[Machine, RuntimeError]] = []
     try:
-        with CredentialBroker(password) as broker:
+        with CredentialBroker(password, secret_prompt or _terminal_host_key_prompt) as broker:
             for machine in machines:
                 otp = _secret(
                     "otp", f"One-time code for {machine.name} ({machine.host})", secret_prompt,
@@ -266,29 +313,75 @@ def _start_credential_group(
 def login_targets(
     machines: list[Machine], requested: list[str], include_credential_groups: bool = True,
 ) -> list[Machine]:
-    """Return the interactive machines that ``cluster-watcher login`` should try.
+    """Return machines that an explicit ``cluster-watcher login`` should try.
 
-    With no names, every interactive machine is a target. Named machines also
+    With no names, every machine is a target. Named machines also
     bring in the other machines of their credential groups by default: one
     shared password then covers every group member whose session has closed
     too (each still needs its own OTP). ``include_credential_groups=False``
     restricts named requests to exactly those machines. Machines with an open
-    session are skipped later by :func:`establish_interactive_sessions`, so
-    they cost nothing.
+    session reuse it in :func:`establish_login_sessions`; their submission hop
+    is still checked so a previously untrusted hop can be repaired.
     """
     known = {machine.name: machine for machine in machines}
     unknown = [name for name in requested if name not in known]
     if unknown:
         raise ValueError(f"unknown machine(s): {', '.join(unknown)}")
     if not requested:
-        return [machine for machine in machines if machine.interactive_auth]
+        return list(machines)
     if not include_credential_groups:
-        return [known[name] for name in requested if known[name].interactive_auth]
+        return [known[name] for name in requested]
     groups = {known[name].credential_group for name in requested} - {None}
     return [
         machine for machine in machines
-        if machine.interactive_auth and (machine.name in requested or machine.credential_group in groups)
+        if machine.name in requested or machine.credential_group in groups
     ]
+
+
+def establish_login_sessions(
+    machines: list[Machine], timeout: int, secret_prompt: SecretPrompt | None = None,
+) -> list[tuple[Machine, RuntimeError]]:
+    """Explicit login for keys, passwords, or MFA, including submission-host trust.
+
+    Unlike automatic MFA startup, this runs only at the user's login request.
+    Credentials are requested on demand by SSH. Open masters are reused while
+    submission hops are still checked, allowing a failed second hop to recover.
+    """
+    confirm = secret_prompt or _terminal_host_key_prompt
+    errors: list[tuple[Machine, RuntimeError]] = []
+    if machines and not supports_ssh_multiplexing():
+        return [(machine, RuntimeError("explicit reusable SSH login requires OpenSSH multiplexing; use WSL on Windows"))
+                for machine in machines]
+    groups: dict[tuple[str, str], list[Machine]] = {}
+    for machine in machines:
+        key = ("group", machine.credential_group) if machine.credential_group else ("machine", machine.name)
+        groups.setdefault(key, []).append(machine)
+    for group in groups.values():
+        current = group[0]
+
+        def request(kind: str, prompt: str) -> str:
+            return _secret(kind, f"{current.name} ({current.host}): {prompt}", secret_prompt)
+
+        with CredentialBroker("", confirm, request) as broker:
+            for original in group:
+                try:
+                    current = select_login_machine(original, timeout)
+                    if not session_status(current, timeout)["session_open"]:
+                        try:
+                            start_interactive_session(current, timeout, broker.environment())
+                        except RuntimeError as exc:
+                            # Only retry an OTP we actually requested. A password-only
+                            # failure must not invent an OTP or reuse a wrong password.
+                            if not broker._otp or broker.cancelled or not _authentication_failed(exc):
+                                raise
+                            broker.update_otp("")
+                            start_interactive_session(current, timeout, broker.environment())
+                    verify_submission_host(current, timeout, confirm)
+                except RuntimeError as exc:
+                    errors.append((original, exc))
+                finally:
+                    broker.update_otp("")
+    return errors
 
 
 def establish_interactive_sessions(

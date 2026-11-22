@@ -833,7 +833,7 @@ function capacityBar(label, free, total, tooltip) {
   const count = Math.max(0, Number(total) || 0);
   const percent = count ? available / count * 100 : 0;
   const description = escapeHtml(tooltip);
-  return `<div class="partition-availability"><span class="partition-availability-label">${label}:</span><span class="partition-availability-track fast-hover" role="img" aria-label="${description}" data-fast-tooltip="${description}"><span class="free" style="width:${percent}%"></span><span class="busy" style="width:${100 - percent}%"></span></span><span class="partition-availability-count">${available}/${count} Free</span></div>`;
+  return `<div class="partition-availability"><span class="partition-availability-label">${label}:</span><span class="partition-availability-track fast-hover" role="img" aria-label="${description}" data-fast-tooltip="${description}"><span class="busy" style="width:${100 - percent}%"></span><span class="free" style="width:${percent}%"></span></span><span class="partition-availability-count">${available}/${count} Free</span></div>`;
 }
 
 function partitionView(clusterName, [name, nodes], compute, jobs, thresholds, estimates, estimatesUpdatedAt, fairShare, snapshotPartition, scheduler = 'slurm', condorPriority = []) {
@@ -899,11 +899,11 @@ function condorPoolShareView(rows) {
   }).join('');
 }
 
-/** Summarize active jobs with failed dependencies in the rightmost segment. */
+/** Summarize jobs from failed dependencies on the left to running on the right. */
 function clusterJobRatio(summary) {
   if (!summary || summary.collecting) return '<span class="cluster-collecting">Loading…</span>';
   const counts = summary.user_jobs || {};
-  const groups = ['running', 'pending', 'depending', 'held', 'failed_dependency'];
+  const groups = ['failed_dependency', 'held', 'depending', 'pending', 'running'];
   const total = groups.reduce((sum, key) => sum + (Number(counts[key]) || 0), 0);
   const segments = groups.map(group => {
     const count = Number(counts[group]) || 0;

@@ -15,6 +15,32 @@ test('credential protocol recognizes only valid prefixed requests', () => {
   });
   assert.throws(() => parseCredentialPrompt(`${CREDENTIAL_PROMPT_PREFIX}{bad`), /malformed/);
   assert.throws(() => parseCredentialPrompt(`${CREDENTIAL_PROMPT_PREFIX}{"version":2}`), /unsupported/);
+  assert.equal(parseCredentialPrompt(`${CREDENTIAL_PROMPT_PREFIX}{"version":1,"request_id":4,"kind":"host_key","prompt":"Fingerprint"}`).kind, 'host_key');
+  assert.throws(() => parseCredentialPrompt(`${CREDENTIAL_PROMPT_PREFIX}{"version":1,"request_id":5,"kind":"unknown","prompt":"Prompt"}`), /unsupported/);
+});
+
+test('host trust responses and cancellation travel through the private stdin protocol', async () => {
+  for (const answer of ['yes', 'no', undefined]) {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    const writes = [];
+    child.stdin = { writable: true, write: (value) => writes.push(JSON.parse(value)) };
+    const prompt = "The authenticity of host 'cluster.example' can't be established.\nED25519 key fingerprint is SHA256:example.";
+    const process = new BackgroundCliProcess('cluster-watcher', ['login'], {
+      onCredential: async (request) => {
+        assert.equal(request.kind, 'host_key');
+        assert.equal(request.prompt, prompt);
+        return answer;
+      },
+    }, () => child).start();
+    child.stderr.write(`${CREDENTIAL_PROMPT_PREFIX}${JSON.stringify({ version: 1, request_id: 1, kind: 'host_key', prompt })}\n`);
+    await process.promptQueue;
+    assert.deepEqual(writes, [answer === undefined ? { request_id: 1, cancel: true } : { request_id: 1, value: answer }]);
+    assert.deepEqual(process.recentLines, []);
+    child.emit('close', 0, null);
+    await process.completion;
+  }
 });
 
 test('line decoder preserves split chunks and flushes the final line', () => {

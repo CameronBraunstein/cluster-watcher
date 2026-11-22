@@ -374,9 +374,12 @@ The login node must be able to SSH to the submission host without another
 password or OTP. This might use host-based authentication, a key on the login
 node, or an SSH alias in that node's `~/.ssh/config`. Cluster Watcher does not
 copy credentials to the login node or enable agent forwarding. Before polling,
-log in to a login node and run `ssh submit.cluster-a.internal` once to verify
-the second hop and accept its host key. If that hop requires another secret,
-Cluster Watcher reports the SSH error; it will not prompt during refresh.
+run `cluster-watcher login cluster-a --only` or use **Log in** in VS Code to
+verify both hops and approve unknown host keys. The submission-host prompt
+identifies the login node where its key is stored. If that hop requires another
+secret, Cluster Watcher reports the SSH error; it will not prompt during refresh.
+On hosts that disallow terminal allocation, perform the trust setup manually
+or have the administrator provision the submission host's known-hosts entry.
 The **open** session indicator checks the reusable login-node connection;
 reachability of the submission host is reported by the actual scheduler query.
 
@@ -419,9 +422,35 @@ Machines in the same `credential_group` share a password, so `serve` asks for
 it **once**, then asks for a fresh OTP for each machine right before opening
 its connection. Group members must use the same `username` and set
 `interactive_auth = true`. A machine without `credential_group` keeps the
-normal OpenSSH terminal prompts. Connect to each host once by hand first (or
-provision its host key), because host-key confirmation is intentionally not
-automated.
+normal OpenSSH terminal prompts when run from a terminal. VS Code uses its
+login dialogs for both grouped and ungrouped interactive machines.
+
+Explicit `cluster-watcher login CLUSTER --only` and the VS Code **Log in** action
+also support password-only and key/agent clusters without `interactive_auth`.
+They request passwords, OTPs, and private-key passphrases only when SSH asks;
+an available key or agent requires no credential dialog. Automatic terminal
+startup still uses the `interactive_auth` setting described above.
+
+For a new host, the explicit login workflow forwards OpenSSH's authenticity
+prompt, including its hostname and key fingerprint. VS Code shows **Trust
+this SSH host?** with **Trust Host** and cancel choices; terminal credential
+groups show the same fingerprint and require an explicit `yes`. Compare the
+fingerprint with a value supplied by the cluster administrator before
+approving. OpenSSH writes an approved key to its configured known-hosts file
+on the machine running the login workflow (the extension host in VS Code).
+Each unknown host needs its own approval, even within a credential group.
+Cancelling declines that connection.
+
+Cluster Watcher does not change `StrictHostKeyChecking` or replace stored
+keys. Changed-key errors must be investigated separately. If SSH policy sets
+`StrictHostKeyChecking=yes`, provision the host key first; SSH will reject an
+unknown key without offering a prompt. Explicit login also verifies a configured
+submission hop through the existing login session, allowing its first-time
+host confirmation. The hop's key is saved on the login node, and the prompt
+identifies that location. Only yes/no decisions are forwarded; password, OTP,
+and private-key passphrase prompts are disabled on this hop. The login node
+must permit an SSH terminal for this explicit check. Routine queries remain
+noninteractive. An open login session is retained and reused if the hop fails.
 
 `control_persist` (for example `30m`, `8h`, or `1h30m`) sets how long an idle
 shared connection stays open. Every machine, including key-based ones, uses
@@ -435,8 +464,9 @@ The password lives only in process memory while its group starts. Each OTP is
 held only while its machine authenticates and is cleared before the next one
 is requested. Neither is written to configuration, temporary files,
 command-line arguments, or environment variables. A small askpass helper
-fetches the value through a user-private Unix socket, and unrecognized prompts
-receive nothing. The in-memory broker shuts down and drops its references
+fetches the value through a user-private Unix socket. Recognized new-host
+prompts receive only the user's trust decision; unrecognized prompts receive
+nothing. The in-memory broker shuts down and drops its references
 after startup.
 
 If a host rejects authentication (for example, because the OTP expired before
@@ -984,12 +1014,14 @@ limit), after which refreshes fail with errors like `Permission denied
 ```bash
 cluster-watcher login cluster-b   # this machine and its credential group
 cluster-watcher login cluster-b --only  # only this machine
-cluster-watcher login             # every interactive machine
+cluster-watcher login             # every configured machine
 ```
 
-Open sessions are skipped. A named machine brings the rest of its
-`credential_group`, so the shared password is asked once and each machine
-asks for its own OTP; `--only` suppresses that group expansion. The running
+Open login sessions are reused; configured submission hops are still checked.
+A named machine brings the rest of its `credential_group`, so a requested
+password is shared and each requested OTP is separate. Password-only and
+key/agent logins also work, with no unnecessary OTP prompt; `--only` suppresses
+group expansion. The running
 service picks up the session on its next
 refresh. The service detects closed sessions itself (`ssh -O check`) and
 reports `login_required: true`, so the web dashboard and VS Code offer the

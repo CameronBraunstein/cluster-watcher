@@ -1,17 +1,19 @@
 """SSH transport and optional MFA-friendly connection multiplexing."""
 
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 import hashlib
 import os
 from pathlib import Path
 import re
+import selectors
 import shlex
 import socket
 import subprocess
 import tempfile
 import threading
 import time
-from typing import Mapping
+from typing import Callable, Mapping
 
 from .models import Machine, RemoteCommandResult
 from .platforms import runtime_directory, supports_ssh_multiplexing, user_runtime_token
@@ -161,14 +163,12 @@ def existing_session_ssh_command(
 
 
 def start_interactive_session(machine: Machine, timeout: int, askpass_environment: Mapping[str, str] | None = None) -> None:
-    """Authenticate once and background an SSH master for an MFA machine.
+    """Authenticate once and background an SSH master for an explicit login.
 
     Without ``askpass_environment``, terminal streams are inherited and
     OpenSSH prompts normally. Credential groups instead provide a private
     askpass broker environment whose secrets never appear in this command.
     """
-    if not machine.interactive_auth:
-        return
     if not SSH_MULTIPLEXING_SUPPORTED:
         raise RuntimeError(
             "reusable password/OTP sessions require OpenSSH ControlMaster; "
@@ -190,6 +190,87 @@ def start_interactive_session(machine: Machine, timeout: int, askpass_environmen
         detail = result.stderr.strip() if askpass_environment is not None and result.stderr else ""
         raise RuntimeError(detail or f"interactive SSH authentication exited with status {result.returncode}")
     _mark_activity(machine)
+
+
+NEW_HOST_PROMPT = re.compile(
+    r"The authenticity of host '[^\n]*\n.*?key fingerprint is[^\n]*\n.*?"
+    r"Are you sure you want to continue connecting \(yes/no(?:/\[fingerprint\])?\)\? ?",
+    re.DOTALL,
+)
+
+
+def verify_submission_host(machine: Machine, timeout: int, confirm: Callable[[str, str], str]) -> None:
+    """Verify a submission hop through the existing master, allowing only host trust.
+
+    The remote SSH client needs a terminal for its authenticity prompt. Its
+    password, keyboard-interactive, and private-key passphrase prompts are
+    disabled: this hop must keep using the login node's noninteractive auth.
+    Only yes/no trust decisions cross stdin. Polling remains BatchMode=yes.
+    """
+    if not machine.submission_host:
+        return
+    try:
+        check = subprocess.run(
+            existing_session_ssh_command(machine, timeout, "true"),
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False,
+            timeout=timeout * 2 + 5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"Submission hop {machine.host} → {machine.submission_host} failed: {exc}") from exc
+    if check.returncode == 0:
+        return
+    detail = (check.stderr or check.stdout).strip()
+    if "host key verification failed" not in detail.casefold() or "REMOTE HOST IDENTIFICATION HAS CHANGED" in detail:
+        raise RuntimeError(f"Submission hop {machine.host} → {machine.submission_host} failed: {detail}")
+    inner = shlex.join([
+        "env", "SSH_ASKPASS_REQUIRE=never", "ssh", "-o", "BatchMode=no",
+        "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no",
+        "-o", "NumberOfPasswordPrompts=0", "-o", f"ConnectTimeout={timeout}",
+        "-T", machine.submission_host, "true",
+    ])
+    command = existing_session_ssh_command(replace(machine, submission_host=None), timeout, inner)
+    command.insert(1, "-tt")
+    pending = ""
+    deadline = time.monotonic() + timeout * 2 + 5
+    try:
+        with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as child:
+            assert child.stdin is not None and child.stdout is not None
+            try:
+                with selectors.DefaultSelector() as reader:
+                    reader.register(child.stdout, selectors.EVENT_READ)
+                    while True:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise RuntimeError("submission-host verification timed out")
+                        if not reader.select(min(remaining, 0.2)):
+                            continue
+                        data = os.read(child.stdout.fileno(), 4096)
+                        if not data:
+                            break
+                        pending = (pending + data.decode("utf-8", errors="replace").replace("\r", ""))[-65536:]
+                        match = NEW_HOST_PROMPT.search(pending)
+                        if match:
+                            started = time.monotonic()
+                            response = confirm("host_key", match.group(0) + (
+                                f"\n\nSubmission hop: {machine.host} → {machine.submission_host}. "
+                                f"OpenSSH will save this key in its configured known-hosts file on {machine.host}."
+                            ))
+                            deadline += time.monotonic() - started
+                            child.stdin.write(b"yes\n" if response == "yes" else b"no\n")
+                            child.stdin.flush()
+                            pending = pending[match.end():]
+                code = child.wait(timeout=max(0.1, deadline - time.monotonic()))
+                if code:
+                    raise RuntimeError(pending.strip() or f"SSH exited with status {code}")
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait()
+    except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
+        raise RuntimeError(
+            f"Submission hop {machine.host} → {machine.submission_host} failed: {exc}. "
+            "The login-host session remains open. The submission hop must support key/agent or other noninteractive authentication."
+        ) from exc
 
 
 def run_remote(

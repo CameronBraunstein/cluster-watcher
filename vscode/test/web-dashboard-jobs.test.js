@@ -18,7 +18,7 @@ function browserJobRefresh() {
   return context;
 }
 
-test('browser cluster bar links failed dependencies in a light gray rightmost segment', () => {
+test('browser cluster bar links failed dependencies in a light gray leftmost segment', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../../clusterwatcher/dashboard.py'), 'utf8');
   const start = source.indexOf('function clusterJobRatio(summary)');
   const end = source.indexOf('const clusterDisclosure', start);
@@ -31,14 +31,14 @@ test('browser cluster bar links failed dependencies in a light gray rightmost se
   } });
   const segmentOrder = [...bar.matchAll(/class="cluster-job-(running|pending|depending|failed-dependency)"/g)]
     .map((match) => match[1]);
-  assert.deepEqual(segmentOrder, ['running', 'pending', 'depending', 'failed-dependency']);
+  assert.deepEqual(segmentOrder, ['failed-dependency', 'depending', 'pending', 'running']);
   assert.match(bar, /class="cluster-job-running" style="width:40%"/);
   assert.match(bar, /class="cluster-job-failed-dependency" style="width:20%" data-job-group="FAILED_DEPENDENCY" data-cluster="inf"/);
   assert.match(bar, /1 failed dependency job\nDependencies cannot be satisfied/);
   assert.match(source, /\.cluster-job-failed-dependency \{ background:#c4c4c4; \}/);
 });
 
-test('browser places held jobs after Depending and before failed dependencies', () => {
+test('browser places held jobs after failed dependencies and before Depending', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../../clusterwatcher/dashboard.py'), 'utf8');
   const start = source.indexOf('function clusterJobRatio(summary)');
   const end = source.indexOf('const clusterDisclosure', start);
@@ -49,7 +49,7 @@ test('browser places held jobs after Depending and before failed dependencies', 
   } });
   const segments = [...bar.matchAll(/class="cluster-job-(running|pending|depending|held|failed-dependency)"/g)]
     .map((match) => match[1]);
-  assert.deepEqual(segments, ['running', 'pending', 'depending', 'held', 'failed-dependency']);
+  assert.deepEqual(segments, ['failed-dependency', 'held', 'depending', 'pending', 'running']);
   assert.match(bar, /class="cluster-job-held"[^>]*data-job-group="HELD" data-cluster="inf"/);
   assert.match(bar, /2 held jobs\nHeld; no start estimate/);
   assert.match(source, /\.cluster-job-held \{ background:#eab308; \}/);

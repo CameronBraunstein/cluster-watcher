@@ -257,9 +257,14 @@ To inspect an actual pending job, use `scontrol show job JOB_ID` for its
 account/QOS and `sprio -j JOB_ID -l` for its priority components (with the
 multifactor priority plugin).
 
-**Free GPUs** precedes a green/red bar with its `idle/total` fraction;
+**Free GPUs** and **Free Nodes** show unavailable capacity in red on the left
+and free capacity in green on the right, with their `idle/total` fractions;
 hover the bar for a node-only state breakdown (zero-count categories are
 omitted).
+
+Cluster job bars run left to right from Failed Dependency (light gray), Held
+(yellow), Depending (maroon), and Pending (red), to Running (blue). Running-job
+progress also uses fixed blue, independently of the VS Code theme.
 
 The card does not repeat the same wait information as a graph. The colored
 blocks keep counting down locally between service updates. A
@@ -296,7 +301,7 @@ popup heading and each session. The popup height fits
 its content and stays centered, with minimal space below the last session and a viewport height
 limit for scrolling long lists. Cluster headings and their gray dividers use
 compact spacing. Every
-logged-out interactive machine replaces the job ratio with **Log in**. A machine with
+logged-out machine replaces the job ratio with **Log in**. A machine with
 `credential_group = "site"` also has **Log into all machines on site**; the
 first action targets only that machine, while the second reuses the shared
 password for all closed group members. Session inspection errors also appear in
@@ -347,6 +352,35 @@ arguments, environment, configuration, or retained diagnostic output. If a
 compatible service is already listening at
 `clusterWatcher.backendUrl`, the extension attaches without starting another
 process.
+
+**Log in** supports password-only and key/agent clusters as well as MFA;
+`interactive_auth=true` is not required for an explicit login. Passwords,
+OTPs, and private-key passphrases are requested only when SSH asks for them.
+An available key or agent therefore needs no password dialog.
+
+On a first login to an unknown host, **Trust this SSH host?**
+shows OpenSSH's full authenticity prompt, including the hostname and key
+fingerprint. Compare it with the fingerprint supplied by your cluster
+administrator, then choose **Trust Host** to continue or cancel to decline
+that connection. OpenSSH records an approved key in its configured known-hosts
+file on the extension host (the remote development host under Remote SSH).
+If `submission_host` is configured, login then verifies that hop through the
+existing login session. Its first-time trust dialog identifies the hop and
+explains that OpenSSH saves the submission host's key on the login node.
+An already-open login session is reused when retrying a failed submission
+hop. The submission hop must authenticate without another password or OTP;
+only the host-trust decision is forwarded. Routine refreshes stay noninteractive.
+Approval is separate for each host, including members of a credential group.
+Both the extension and backend must include this host-confirmation support.
+
+Existing SSH host-key settings remain in force. A changed-key error requires
+investigation; Cluster Watcher does not replace the stored key. If your SSH
+configuration sets `StrictHostKeyChecking=yes`, provision the key first because
+OpenSSH will not offer a confirmation prompt. Use **Log in** to approve a new
+host rather than relying on a background refresh to prompt. A host-key error
+on the submission hop also makes **Log in** available while the login session
+remains open. Submission-host confirmation requires the login node to allow
+an SSH terminal for this explicit check.
 
 The tmux session name starts with `cluster-watcher-`. Inspect it with
 `tmux list-sessions` and `tmux attach -t <session-name>` on the extension host;

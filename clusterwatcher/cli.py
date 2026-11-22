@@ -19,6 +19,7 @@ from .credentials import (
     JsonLineCredentialPrompt,
     SecretPrompt,
     establish_interactive_sessions,
+    establish_login_sessions,
     login_targets,
 )
 from .dashboard import serve
@@ -110,14 +111,14 @@ def run_login(
     credential_prompt: SecretPrompt | None = None,
     include_credential_groups: bool = True,
 ) -> int:
-    """Re-open closed interactive sessions and report each selected target."""
+    """Open requested SSH sessions and verify any submission hops."""
     targets = login_targets(machines, list(requested), include_credential_groups)
     if not targets:
-        print("No configured machine uses interactive login (interactive_auth = true).", file=sys.stderr)
+        print("No configured machines to log in to.", file=sys.stderr)
         return 0
     errors = dict(
         (machine.name, error)
-        for machine, error in establish_interactive_sessions(targets, timeout, credential_prompt)
+        for machine, error in establish_login_sessions(targets, timeout, credential_prompt)
     )
     for machine in targets:
         if machine.name in errors:
@@ -219,11 +220,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "login",
         help="log in again to machines whose SSH session has closed",
         description=(
-            "Re-open the shared SSH session of interactive (password/OTP) machines "
-            "whose session has closed; a running service picks it up on its next "
-            "refresh. Machines that share a credential_group with a named machine "
-            "are included, so one password covers all of them (each still asks "
-            "for its own OTP). Machines with an open session are skipped."
+            "Open shared SSH sessions using keys, passwords, or MFA, prompting only "
+            "when SSH requests a credential. Confirm unknown host keys on the login "
+            "and submission hosts. Existing login sessions are reused. Machines that "
+            "share a credential_group with a named machine are included; their "
+            "password is shared and each requested OTP is separate."
         ),
     )
     login_parser.add_argument("machines", nargs="*", metavar="MACHINE", help="configured machine names (default: all)")

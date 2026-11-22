@@ -84,7 +84,7 @@ The browser has its own sortable, collapsible job cards and a browser-local arch
 
 ### Cluster and partition status
 
-Each cluster has a thin job bar: **blue** for Running, **red** for Pending, **dark maroon** for Depending, **yellow** for Held Jobs, and **light gray** at the right for Failed Dependency. The yellow segment follows Depending. Held jobs do not contribute to the runnable pending or depending segments. The gray segment counts jobs whose dependencies Slurm reports as impossible. Click any segment in VS Code or the browser to jump to that cluster's jobs in the corresponding group. Slurm partitions and HTCondor's GPU-model display groups then show:
+Each cluster has a thin job bar, ordered left to right: **light gray** for Failed Dependency, **yellow** for Held Jobs, **dark maroon** for Depending, **red** for Pending, and **blue** for Running. Held jobs do not contribute to the runnable pending or depending segments. The gray segment counts jobs whose dependencies Slurm reports as impossible. Click any segment in VS Code or the browser to jump to that cluster's jobs in the corresponding group. Slurm partitions and HTCondor's GPU-model display groups then show:
 
 In the VS Code Cluster Status view, short cluster names remain visible even at the sidebar's minimum width; the job bars shrink to make room. Hover over a clipped name to see it in full. The bars stay aligned when a warning appears. A yellow ⚠ marks a communication or refresh failure that began within the last three minutes; a red **!** means the failure has lasted longer. Hover over either icon for the error and the latest successful update. The last known cluster cards remain visible while the service retries. Once the cluster refreshes successfully, the warning clears.
 
@@ -93,7 +93,7 @@ In the VS Code Cluster Status view, short cluster names remain visible even at t
 - **GPUs:** schedulable free devices out of the partition total, and **Nodes:** fully idle nodes out of the total.
 - Slurm wait estimates for one-hour jobs requesting 1, 2, 4, 8, 16, 32, or 64 GPUs, when the site permits a probe. The configured partition wall-time cap applies to development partitions. HTCondor shows **FREE** when one host advertises enough free GPUs, **BUSY** when that GPU count fits a host but none is currently free, and **MULTI** when no single host has enough GPUs. These are capacity observations, not start-time estimates; matchmaking, access rules, and other users still apply.
 
-Green availability and completion indicators in the VS Code sidebar use the same shade shown in the screenshots.
+GPU and node availability bars show unavailable capacity in red on the left and free capacity in green on the right. Running-job progress uses blue independently of the VS Code theme.
 
 The browser preserves the node-level view below each compact partition summary. Expand a partition to see one box per node, with large GPU blocks above small CPU blocks. Blue outlines mark resources used by your jobs. A partition or cluster may be reachable while a particular wait probe is denied; the interface labels that result rather than turning it into a fake wait time.
 
@@ -178,6 +178,8 @@ control_persist = "8h"
 
 `cluster-watcher login` opens reusable SSH control sessions; `cluster-watcher sessions` shows their state. The VS Code sidebar offers per-cluster login controls and a group login when credentials are shared. The extension's service runs in tmux, so closing one VS Code window does not stop it. Sessions survive while their SSH masters remain alive; a machine reboot or expired site authentication still requires a new login. VS Code Remote SSH runs the extension and backend on the remote development host, so laptop and remote-host sessions are separate.
 
+Use **Log in** or `cluster-watcher login CLUSTER --only` for first-time setup, including password-only and key/agent clusters with no `interactive_auth` setting. Explicit login requests passwords, OTPs, or key passphrases only when SSH asks for them. A first-time connection shows **Trust this SSH host?** with OpenSSH's hostname and fingerprint; compare it with your administrator's published value before choosing **Trust Host**. OpenSSH saves the login host's key on the extension host. For a configured `submission_host`, login then checks that hop over the same connection and can request separate approval; its key is saved on the login node. Cancelling declines that connection, and an already-open login session is reused on retry. Terminal login supports the same confirmations. Existing SSH policies apply: changed keys need investigation, and `StrictHostKeyChecking=yes` requires keys to be provisioned beforehand.
+
 The sidebar checks the lightweight `/api/v1/service` endpoint to see whether that local process is running. A single slow check shows **Service check timed out; retrying…** while keeping the current views; the third consecutive timeout marks it offline. A definite connection refusal marks it offline immediately. The SSH session inventory can also confirm that the service is reachable when the identity check is slow. A timed-out cluster snapshot keeps the last Cluster Status visible with a warning; before the first snapshot, it stays on Loading and retries. This prevents a busy host from briefly collapsing My Jobs and Cluster Status. If the sidebar reports repeated timeouts, compare `curl --max-time 10 http://127.0.0.1:8080/api/v1/service` with your configured `clusterWatcher.backendUrl` and check whether the host or tmux service is overloaded.
 
 If scheduler commands run on a submission host behind the login node, set `submission_host` on that machine. Cluster Watcher authenticates to `host` once, then SSHes from there to `submission_host` for status, jobs, logs, commands, and shells:
@@ -191,7 +193,7 @@ interactive_auth = true
 submission_host = "submit.atlas.internal"
 ```
 
-The second hop must work without another password or OTP. Check it once with `ssh submit.atlas.internal` while logged into the login node; its host key and SSH alias are managed on that login node. The session view shows the login-to-submission route. See [Two-hop SSH](REFERENCE.md#two-hop-ssh-to-a-submission-host) for details.
+The second hop must work without another password or OTP. `cluster-watcher login atlas --only` checks the hop and offers first-time host-key approval using the login node's SSH configuration. Routine polling stays noninteractive. The session view shows the login-to-submission route. See [Two-hop SSH](REFERENCE.md#two-hop-ssh-to-a-submission-host) for details.
 
 ### HTCondor machines
 

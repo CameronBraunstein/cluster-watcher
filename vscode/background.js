@@ -12,7 +12,7 @@ function parseCredentialPrompt(line) {
   try { request = JSON.parse(String(line).slice(CREDENTIAL_PROMPT_PREFIX.length)); }
   catch (_error) { throw new Error('Cluster Watcher emitted a malformed credential request'); }
   if (!request || request.version !== 1 || !Number.isSafeInteger(request.request_id)
-      || !['password', 'otp'].includes(request.kind) || typeof request.prompt !== 'string') {
+      || !['password', 'otp', 'passphrase', 'host_key'].includes(request.kind) || typeof request.prompt !== 'string') {
     throw new Error('Cluster Watcher emitted an unsupported credential request');
   }
   return request;

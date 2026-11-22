@@ -127,7 +127,7 @@ test('all held jobs have a section and a yellow cluster bar segment after Depend
     user_jobs: { running: 1, pending: 1, depending: 1, held: 4, failed_dependency: 1 }, partitions: [] }] });
   const segments = [...status.matchAll(/class="cluster-job-(running|pending|depending|held|failed-dependency)" style=/g)]
     .map((match) => match[1]);
-  assert.deepEqual(segments, ['running', 'pending', 'depending', 'held', 'failed-dependency']);
+  assert.deepEqual(segments, ['failed-dependency', 'held', 'depending', 'pending', 'running']);
   assert.match(status, /class="cluster-job-held"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;HELD&quot;,&quot;c&quot;\]"/);
   assert.match(status, /\.cluster-job-held\{display:block;height:100%;background:#eab308\}/);
 });
@@ -224,7 +224,7 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /\.availability-count\{font-variant-numeric:tabular-nums;white-space:nowrap\}/);
   assert.match(card, /aria-label="2 of 8 free" title="2\/8 Free">2\/8 Free<\/span>/);
   assert.match(card, /aria-label="2 of 7 free" title="2\/7 Free">2\/7 Free<\/span>/);
-  assert.ok(html.indexOf('class="available"') < html.indexOf('class="unavailable"'));
+  assert.ok(html.indexOf('class="unavailable"') < html.indexOf('class="available"'));
   assert.match(html, /data-availability="2 idle, 4 allocated, 1 reserved, 1 down"/);
   assert.match(html, /data-fast-tooltip="2 idle, 4 allocated, 1 reserved, 1 down"/);
   assert.match(html, /data-availability="2 idle, 3 full, 1 reserved, 1 down"/);
@@ -244,7 +244,7 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.doesNotMatch(html, /data-fast-tooltip="[^"]*(?:cluster_0|Click to view)/);
   assert.doesNotMatch(html, /class="cluster-job-track"[^>]*data-fast-tooltip=/);
   assert.doesNotMatch(html, /class="cluster-login-host"|login-02\.example/);
-  assert.match(html, /\.cluster-job-running\{background:var\(--vscode-progressBar-background\)\}/);
+  assert.match(html, /\.running\{background:#2563eb\}/);
   assert.match(html, /\.cluster-job-pending\{background:var\(--vscode-editorError-foreground\)\}/);
   assert.match(html, /\.cluster-job-depending\{display:block;height:100%;background:#6b1026\}/);
   assert.match(html, /\.cluster-job-running\{background:#2563eb\}\.cluster-job-pending\{background:#dc2626\}/);
@@ -381,7 +381,7 @@ test('early cluster overview keeps clickable job segments while details load', (
   assert.doesNotMatch(html, /<article class="card partition-card"/);
 });
 
-test('cluster ratio puts failed dependencies in a clickable light gray rightmost segment', () => {
+test('cluster ratio puts failed dependencies in a clickable light gray leftmost segment', () => {
   const html = renderStatus({ clusters: [
     { name: 'busy', reachable: true, user_jobs: {
       running: 2, pending: 1, depending: 1, failed_dependency: 1,
@@ -393,7 +393,7 @@ test('cluster ratio puts failed dependencies in a clickable light gray rightmost
   assert.match(html, /class="cluster-job-depending" style="width:20%"/);
   assert.match(html, /class="cluster-job-failed-dependency" style="width:20%"/);
   assert.ok(html.indexOf('class="cluster-job-depending" style=')
-    < html.indexOf('class="cluster-job-failed-dependency" style='));
+    > html.indexOf('class="cluster-job-failed-dependency" style='));
   assert.match(html, /class="cluster-job-depending"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;DEPENDING&quot;,&quot;busy&quot;\]"/);
   assert.match(html, /class="cluster-job-failed-dependency"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;FAILED_DEPENDENCY&quot;,&quot;busy&quot;\]"/);
   assert.match(html, /data-fast-tooltip="1 depending job\nGPU-hours unavailable"/);
@@ -681,6 +681,20 @@ test('session dialog escapes SSH account text before placing it in the webview',
   ] } });
   assert.match(html, /test: &lt;img src=x&gt;@login\.example/);
   assert.doesNotMatch(html, /test: <img src=x>/);
+});
+
+test('password-only clusters and untrusted submission hops offer login', () => {
+  for (const sessionOpen of [false, true]) {
+    const html = renderStatus({ clusters: [{
+      name: 'lst', host: 'login.example', reachable: false, partitions: [],
+      error: sessionOpen ? 'Host key verification failed.' : 'Permission denied',
+    }] }, {}, {}, {
+      service: { state: 'attached', url: 'http://127.0.0.1:8080/' },
+      sessions: { machines: [{ name: 'lst', host: 'login.example', username: 'alice',
+        interactive_auth: false, session_open: sessionOpen, submission_host: 'submit' }] },
+    });
+    assert.match(html, /data-command="clusterWatcher\.login" data-args="\[&quot;lst&quot;,false\]">Log in<\/button>/);
+  }
 });
 
 test('availability tooltips group restrictive Slurm states and omit zero counts', () => {

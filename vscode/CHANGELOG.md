@@ -4,6 +4,16 @@ All notable changes to the Cluster Watcher VS Code extension.
 
 ## Unreleased
 
+- Restore fixed blue running-job progress, place free GPU/node capacity on the
+  right, and reverse cluster job-bar segments so Running is rightmost.
+
+- Show an explicit host-trust dialog with OpenSSH's hostname and fingerprint
+  on first password/OTP login, so new hosts can be approved within VS Code.
+  Keep existing SSH host-key policies and stored keys intact.
+- Include password-only and key/agent clusters in explicit login, requesting
+  credentials only when SSH asks. Verify a configured submission hop through
+  the existing login session and offer separate first-time host approval.
+
 ## 0.2.3 - 2026-11-12
 
 - Show cached cluster and job summaries sooner while each cluster refreshes,

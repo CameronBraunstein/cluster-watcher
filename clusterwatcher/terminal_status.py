@@ -87,7 +87,7 @@ def wait_error_label(estimate: dict[str, object]) -> str:
 
 
 def _availability_bar(idle: int, total: int, use_color: bool, width: int = 8) -> tuple[str, str]:
-    """Render schedulable idle GPUs in green before unavailable GPUs in red."""
+    """Render unavailable GPUs in red before schedulable idle GPUs in green."""
     idle = min(max(0, idle), max(0, total))
     if total < 1:
         plain_bar = "[" + "░" * width + "]"
@@ -98,10 +98,10 @@ def _availability_bar(idle: int, total: int, use_color: bool, width: int = 8) ->
     if total > idle and green == width:
         green -= 1
     red = width - green
-    plain_bar = f"[{'░' * green}{'█' * red}]"
+    plain_bar = f"[{'█' * red}{'░' * green}]"
     if not use_color:
         return plain_bar, plain_bar
-    styled = f"[{ANSI_GREEN}{'█' * green}{ANSI_RED}{'█' * red}{ANSI_RESET}]"
+    styled = f"[{ANSI_RED}{'█' * red}{ANSI_GREEN}{'█' * green}{ANSI_RESET}]"
     return styled, plain_bar
 
 
@@ -201,7 +201,7 @@ def _job_summary(cluster: dict[str, object], use_color: bool) -> str:
         if use_color:
             bar = "".join(
                 f"{color}{block}{ANSI_RESET}" for color, block in
-                zip((ANSI_BLUE, ANSI_RED, ANSI_MAROON, ANSI_YELLOW), blocks) if block
+                reversed(list(zip((ANSI_BLUE, ANSI_RED, ANSI_MAROON, ANSI_YELLOW), blocks))) if block
             )
         else:
             bar = "".join(blocks)
