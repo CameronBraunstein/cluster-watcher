@@ -8,7 +8,7 @@ import sys
 import time
 from typing import Callable, TextIO
 
-from .jobs import ACTIVE_JOB_STATES, JobService, has_failed_dependency, waits_for_dependency
+from .jobs import ACTIVE_JOB_STATES, JobService, has_failed_dependency, is_held_job, waits_for_dependency
 from .models import Machine
 from .scheduler import collect_user_job_status
 from .slurm import normalize_job_state
@@ -40,25 +40,25 @@ def _state_rank(state: object, job: dict[str, object] | None = None) -> int:
     normalized = normalize_job_state(str(state))
     if normalized == "RUNNING":
         return 0
-    if normalized == "HELD":
-        return 7
+    if normalized == "HELD" or (job is not None and is_held_job(job)):
+        return 3
     if normalized == "PENDING" or normalized in ACTIVE_JOB_STATES:
         if job and has_failed_dependency(job):
-            return 3
+            return 4
         return 2 if job and waits_for_dependency(job) else 1
     if normalized == "COMPLETED":
-        return 4
-    if normalized in _FAILURE_STATES:
         return 5
-    if normalized == "CANCELLED":
+    if normalized in _FAILURE_STATES:
         return 6
-    return 7
+    if normalized == "CANCELLED":
+        return 7
+    return 8
 
 
 def _state_group(state: object, job: dict[str, object] | None = None) -> str:
     """Return the visible separator group for a detailed Slurm state."""
     rank = _state_rank(state, job)
-    return ("RUNNING", "PENDING", "DEPENDING", "FAILED_DEPENDENCY", "COMPLETED", "FAILED", "CANCELLED", "OTHER")[rank]
+    return ("RUNNING", "PENDING", "DEPENDING", "HELD", "FAILED_DEPENDENCY", "COMPLETED", "FAILED", "CANCELLED", "OTHER")[rank]
 
 
 def _parse_time(value: object) -> datetime | None:
@@ -139,6 +139,8 @@ def _progress(job: dict[str, object], now: datetime, use_color: bool, width: int
         fraction = elapsed / limit if limit > 0 else 0.0
         styled_bar, plain_bar = _colored_bar(fraction, width, ANSI_BLUE, use_color)
         label = f"{_format_duration(elapsed)} / {_format_duration(limit)}" if limit else f"{_format_duration(elapsed)} elapsed"
+    elif is_held_job(job):
+        return "held", "held"
     elif state == "PENDING" or state in ACTIVE_JOB_STATES:
         submitted = _parse_time(_submitted(job))
         expected = _parse_time(job.get("expected_start_at") or job.get("start_at") or job.get("start_time"))

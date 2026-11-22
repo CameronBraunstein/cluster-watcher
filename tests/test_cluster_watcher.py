@@ -76,7 +76,7 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertEqual(result, 0)
         self.assertEqual(json.loads(output.getvalue()), {
             "schema_version": 1,
-            "capabilities": ["credential-stdin-json", "serve-skip-login"],
+            "capabilities": ["credential-stdin-json", "serve-skip-login", "direct-submit"],
         })
         load_config.assert_not_called()
 
@@ -1008,6 +1008,7 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertIn("%V", SQUEUE_USER_PENDING_COMMAND)
         self.assertIn("%E", SQUEUE_USER_PENDING_COMMAND)
         self.assertIn("%r", SQUEUE_USER_PENDING_COMMAND)
+        self.assertIn("REQUEUE_HOLD,RESV_DEL_HOLD", SQUEUE_USER_PENDING_COMMAND)
         self.assertIn("--array", SQUEUE_USER_PENDING_COMMAND)
 
         array_jobs = parse_jobs(
@@ -1335,7 +1336,7 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertIn("/api/v1/jobs/", PAGE)
         self.assertIn("data-log-stream=\"err\"", PAGE)
         self.assertIn("data-log-stream=\"out\"", PAGE)
-        self.assertIn("jobsApiEnabled && !['PENDING', 'DEPENDING', 'FAILED_DEPENDENCY'].includes(group)", PAGE)
+        self.assertIn("jobsApiEnabled && !['PENDING', 'DEPENDING', 'HELD', 'FAILED_DEPENDENCY'].includes(group)", PAGE)
         self.assertIn("Loading .${stream} tail", PAGE)
         self.assertIn("data-running-progress", PAGE)
         self.assertIn("data-pending-progress", PAGE)
@@ -1438,9 +1439,9 @@ class ClusterWatcherTests(TimedTestCase):
         self.assertIn("ended:'Ended'", PAGE)
         self.assertIn("jobLifecycleCell(job, 'launched')", PAGE)
         self.assertIn("jobLifecycleCell(job, 'ended')", PAGE)
-        self.assertIn("if (!['PENDING', 'DEPENDING', 'FAILED_DEPENDENCY'].includes(group)) rows.push", PAGE)
+        self.assertIn("if (!['PENDING', 'DEPENDING', 'HELD', 'FAILED_DEPENDENCY'].includes(group)) rows.push", PAGE)
         self.assertIn(
-            "if (group !== 'RUNNING' && !['PENDING', 'DEPENDING', 'FAILED_DEPENDENCY'].includes(group)) rows.push",
+            "if (group !== 'RUNNING' && !['PENDING', 'DEPENDING', 'HELD', 'FAILED_DEPENDENCY'].includes(group)) rows.push",
             PAGE,
         )
         self.assertIn("${jobLifecycleRows(job, submittedAt, submittedText)}", PAGE)

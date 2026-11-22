@@ -99,7 +99,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 .cluster-job-track { display:flex; flex:1 1 auto; max-width:16rem; height:.5rem; overflow:hidden; border-radius:999px; background:#8883; margin-left:auto; }
 .cluster-job-track button { display:block; height:100%; border:0; padding:0; cursor:pointer; }
 .cluster-job-track button:hover, .cluster-job-track button:focus-visible { outline:1px solid #fff; outline-offset:-1px; }
-.cluster-job-running { background:#2563eb; } .cluster-job-pending { background:#dc2626; } .cluster-job-depending { background:#6b1026; } .cluster-job-failed-dependency { background:#c4c4c4; }
+.cluster-job-running { background:#2563eb; } .cluster-job-pending { background:#dc2626; } .cluster-job-depending { background:#6b1026; } .cluster-job-held { background:#eab308; } .cluster-job-failed-dependency { background:#c4c4c4; }
 .cluster-detail { margin-top:.75rem; }
 .launchability { display:flex; align-items:end; gap:3px; min-width:0; }
 .launch-shape { display:grid; grid-template-rows:.65rem .85rem; justify-items:center; gap:2px; }
@@ -125,7 +125,7 @@ header { margin-bottom:1rem; } .title-row { display:flex; align-items:center; ga
 @media (max-width:600px) { .title-row { flex-wrap:wrap; gap:.25rem .75rem; } .partition-heading { flex-wrap:wrap; } .job-badge .job-progress { display:none; } }
 </style></head><body><header><div class="title-row"><h1>Cluster Watcher</h1><span id="updated">Loading…</span><div class="refresh-countdown"><svg class="refresh-clock" viewBox="0 0 24 24" role="img" aria-labelledby="refresh-label"><circle class="refresh-clock-face" cx="12" cy="12" r="9.5"></circle><path class="refresh-clock-tick" d="M12 3.8v1.4M20.2 12h-1.4M12 20.2v-1.4M3.8 12h1.4"></path><line id="refresh-clock-hand" class="refresh-clock-hand" x1="12" y1="12" x2="12" y2="5"></line><circle class="refresh-clock-center" cx="12" cy="12" r="1.25"></circle></svg><span id="refresh-label">Waiting for first refresh…</span></div></div></header>
 <section class="my-jobs" id="my-jobs"><h2>My jobs</h2><div id="my-jobs-content">Waiting for job data…</div></section>
-<section class="key"><h2>How to read this dashboard</h2><div class="key-grid"><div><p><i class="swatch powered-off"></i> <b>Drained (powered off)</b> — unavailable and powered off.</p><p><i class="swatch drained"></i> <b>Drained</b> — removed from scheduling.</p><p><i class="swatch allocated"></i> <b>Allocated</b> — fully assigned to jobs, including GPU-saturated nodes.</p><p><i class="swatch mixed-powered-off"></i> <b>Mixed~</b> — partly allocated and powered off/transitioning.</p><p><i class="swatch mixed"></i> <b>Mixed</b> — assigned and free resources coexist.</p><p><i class="swatch idle"></i> <b>Idle</b> — available for eligible jobs.</p></div><div><p><b>Cluster job bar:</b> <span style="color:#2563eb">blue</span> running, <span style="color:#dc2626">red</span> pending, <span style="color:#6b1026">maroon</span> depending. Click a segment to find those jobs.</p><p><b>Free GPUs</b> excludes idle devices on unschedulable nodes. <b>Free Nodes</b> counts fully idle nodes.</p><p><b>FairShare</b> is account-specific: higher factors generally help, but do not predict a start time.</p><p><b>Wait squares</b> estimate one-hour GPU requests. A denied or missing probe is not a wait-time prediction.</p><p><b>Blue outlines</b> mark your resources. Slurm start and node-release times can change.</p></div></div></section>
+<section class="key"><h2>How to read this dashboard</h2><div class="key-grid"><div><p><i class="swatch powered-off"></i> <b>Drained (powered off)</b> — unavailable and powered off.</p><p><i class="swatch drained"></i> <b>Drained</b> — removed from scheduling.</p><p><i class="swatch allocated"></i> <b>Allocated</b> — fully assigned to jobs, including GPU-saturated nodes.</p><p><i class="swatch mixed-powered-off"></i> <b>Mixed~</b> — partly allocated and powered off/transitioning.</p><p><i class="swatch mixed"></i> <b>Mixed</b> — assigned and free resources coexist.</p><p><i class="swatch idle"></i> <b>Idle</b> — available for eligible jobs.</p></div><div><p><b>Cluster job bar:</b> <span style="color:#2563eb">blue</span> running, <span style="color:#dc2626">red</span> pending, <span style="color:#6b1026">maroon</span> depending, <span style="color:#eab308">yellow</span> held. Click a segment to find those jobs.</p><p><b>Free GPUs</b> excludes idle devices on unschedulable nodes. <b>Free Nodes</b> counts fully idle nodes.</p><p><b>FairShare</b> is account-specific: higher factors generally help, but do not predict a start time.</p><p><b>Wait squares</b> estimate one-hour GPU requests. A denied or missing probe is not a wait-time prediction.</p><p><b>Blue outlines</b> mark your resources. Slurm start and node-release times can change.</p></div></div></section>
 <main id="clusters"></main><script>
 const escapeHtml = value => String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const asNumber = value => /^\\d+$/.test(value) ? Number(value) : 0;
@@ -332,7 +332,7 @@ function dependencyStatusDescription(status, clause, id) {
 /** Render a linked dependency job ID followed by its accessible state icon. */
 function dependencyLink(owner, clause, id) {
   const status = dependencyStatus(owner, clause, id);
-  const icons = { waiting:'🕒', satisfied:'✓', failed:'✕' };
+  const icons = { waiting:'⏳', satisfied:'✓', failed:'✕︎' };
   const description = dependencyStatusDescription(status, clause, id);
   return `${dependencyJobLink(owner, id)} <span class="job-dependency-icon fast-hover ${status}" role="img" aria-label="${escapeHtml(description)}" data-fast-tooltip="${escapeHtml(description)}">${icons[status]}</span>`;
 }
@@ -382,6 +382,7 @@ function pendingJobProgress(job, noEstimatePriority = '') {
 }
 
 function pendingJobStatus(job, thresholds) {
+  if (isHeldJob(job)) return 'held';
   const dependency = String(job.dependency || '').trim();
   const waitingForDependency = dependency && !['(null)', 'NULL', 'None', 'N/A'].includes(dependency);
   return waitingForDependency ? 'waiting for dependency' : waitLabel(job.start_time, thresholds);
@@ -392,7 +393,7 @@ function jobBadges(jobs, partition, thresholds) {
     const name = job.name || job.id, dependency = String(job.dependency || '').trim();
     const title = dependency && !['(null)', 'NULL', 'None', 'N/A'].includes(dependency) ? `Job ${job.id} · remaining dependency: ${dependency}` : `Job ${job.id}`;
     if (job.state === 'RUNNING') return `<span class="job-badge" title="${escapeHtml(title)}">▶ ${escapeHtml(name)}${runningJobProgress(job, true)}</span>`;
-    return `<span class="job-badge" title="${escapeHtml(title)}">⌛ ${escapeHtml(name)}: ${escapeHtml(pendingJobStatus(job, thresholds))}</span>`;
+    return `<span class="job-badge" title="${escapeHtml(title)}">${isHeldJob(job) ? '⏸' : '⌛'} ${escapeHtml(name)}: ${escapeHtml(pendingJobStatus(job, thresholds))}</span>`;
   }).join('');
 }
 
@@ -539,13 +540,20 @@ function sortedJobs(jobs, listName) {
   });
 }
 
-const JOB_GROUP_ORDER = ['RUNNING', 'PENDING', 'DEPENDING', 'FAILED_DEPENDENCY', 'COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED', 'OTHER'];
-const JOB_GROUP_LABELS = { RUNNING:'Running', PENDING:'Pending', DEPENDING:'Depending', FAILED_DEPENDENCY:'Failed Dependency', COMPLETED:'Completed', FAILED_EARLY:'Failed (Early)', FAILED_TIMEOUT:'Failed (Timeout)', CANCELLED:'Cancelled', OTHER:'Other' };
+const JOB_GROUP_ORDER = ['RUNNING', 'PENDING', 'DEPENDING', 'HELD', 'FAILED_DEPENDENCY', 'COMPLETED', 'FAILED_EARLY', 'FAILED_TIMEOUT', 'CANCELLED', 'OTHER'];
+const JOB_GROUP_LABELS = { RUNNING:'Running', PENDING:'Pending', DEPENDING:'Depending', HELD:'Held Jobs', FAILED_DEPENDENCY:'Failed Dependency', COMPLETED:'Completed', FAILED_EARLY:'Failed (Early)', FAILED_TIMEOUT:'Failed (Timeout)', CANCELLED:'Cancelled', OTHER:'Other' };
 const PRIORITY_HELP = 'Lower rank numbers are considered sooner, but QOS, reservations, resource fit, and backfill can change the start order.';
-const ACTIVE_JOB_STATES = new Set(['CONFIGURING', 'PENDING', 'REQUEUED', 'REQUEUE_FED', 'REQUEUE_HOLD', 'RESIZING', 'SIGNALING', 'STAGE_OUT', 'SUSPENDED']);
+const ACTIVE_JOB_STATES = new Set(['CONFIGURING', 'PENDING', 'REQUEUED', 'REQUEUE_FED', 'REQUEUE_HOLD', 'RESV_DEL_HOLD', 'RESIZING', 'SIGNALING', 'STAGE_OUT', 'SUSPENDED']);
+/** Recognize Slurm and HTCondor holds regardless of their source. */
+function isHeldJob(job) {
+  const state = String(job.state || '').toUpperCase();
+  return state === 'HELD' || state === 'REQUEUE_HOLD' || state === 'RESV_DEL_HOLD' ||
+    (ACTIVE_JOB_STATES.has(state) && /^JobHold|^JobHeld/i.test(String(job.reason || '').trim()));
+}
 function jobGroup(job) {
   const state = String(job.state || 'UNKNOWN').toUpperCase();
   if (state === 'RUNNING' || state === 'COMPLETED' || state === 'CANCELLED') return state;
+  if (isHeldJob(job)) return 'HELD';
   if (hasFailedDependency(job)) return 'FAILED_DEPENDENCY';
   if (ACTIVE_JOB_STATES.has(state) && waitsForDependency(job)) return 'DEPENDING';
   if (ACTIVE_JOB_STATES.has(state)) return 'PENDING';
@@ -604,8 +612,8 @@ function jobPriorityGauge(job, jobs, prominent = false) {
 function jobLifecycleRows(job, submittedAt, submittedText) {
   const group = jobGroup(job);
   const rows = [`<dt>Submitted</dt><dd><time datetime="${escapeHtml(submittedAt || '')}">${escapeHtml(submittedText)}</time></dd>`];
-  if (!['PENDING', 'DEPENDING', 'FAILED_DEPENDENCY'].includes(group)) rows.push(`<dt>Launched</dt><dd>${jobLifecycleCell(job, 'launched')}</dd>`);
-  if (group !== 'RUNNING' && !['PENDING', 'DEPENDING', 'FAILED_DEPENDENCY'].includes(group)) rows.push(`<dt>Ended</dt><dd>${jobLifecycleCell(job, 'ended')}</dd>`);
+  if (!['PENDING', 'DEPENDING', 'HELD', 'FAILED_DEPENDENCY'].includes(group)) rows.push(`<dt>Launched</dt><dd>${jobLifecycleCell(job, 'launched')}</dd>`);
+  if (group !== 'RUNNING' && !['PENDING', 'DEPENDING', 'HELD', 'FAILED_DEPENDENCY'].includes(group)) rows.push(`<dt>Ended</dt><dd>${jobLifecycleCell(job, 'ended')}</dd>`);
   return rows.join('');
 }
 
@@ -632,7 +640,7 @@ function jobCard(job, listName, jobs) {
   const nodes = nodeCount(job), gpus = Number(job.gpus) || 0, cpus = Number(job.cpus) || 0;
   const resources = job.id || gpus || cpus ? `${nodes} node${nodes === 1 ? '' : 's'} · ${gpus} GPU${gpus === 1 ? '' : 's'} · ${cpus} CPU${cpus === 1 ? '' : 's'}` : `${nodes} node${nodes === 1 ? '' : 's'}`;
   const group = jobGroup(job);
-  const priority = listName === 'active' && job.scheduler !== 'condor' && group === 'PENDING' ? jobPriorityGauge(job, jobs) : '';
+  const priority = listName === 'active' && !['condor', 'direct'].includes(job.scheduler) && group === 'PENDING' ? jobPriorityGauge(job, jobs) : '';
   const dependency = String(job.dependency || '').trim();
   const hasDependency = dependency && !['(null)', 'NULL', 'None', 'N/A'].includes(dependency);
   const submittedMs = new Date(job.submit_time).getTime(), startMs = new Date(job.start_time).getTime();
@@ -640,6 +648,7 @@ function jobCard(job, listName, jobs) {
   const noEstimatePriority = priority && !hasDependency && !hasWaitEstimate ? jobPriorityGauge(job, jobs, true) : '';
   let timing;
   if (group === 'RUNNING') timing = runningJobProgress(job);
+  else if (group === 'HELD') timing = '<span class="job-progress-message">held</span>';
   else if (group === 'PENDING' || group === 'DEPENDING' || group === 'FAILED_DEPENDENCY') timing = pendingJobProgress(job, noEstimatePriority);
   else {
     const ended = jobLifecycleDate(job, 'ended');
@@ -653,7 +662,7 @@ function jobCard(job, listName, jobs) {
   const action = listName === 'archived' ? 'restore' : 'archive';
   const actionLabel = listName === 'archived' ? 'Restore' : 'Archive';
   const actionButton = `<button data-job-action="${action}" data-job-key="${escapeHtml(jobArchiveKey(job))}">${actionLabel}</button>`;
-  const logButtons = jobsApiEnabled && !['PENDING', 'DEPENDING', 'FAILED_DEPENDENCY'].includes(group) ? `<button class="log-button" data-log-stream="err" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .err</button><button class="log-button" data-log-stream="out" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .out</button>` : '';
+  const logButtons = jobsApiEnabled && !['PENDING', 'DEPENDING', 'HELD', 'FAILED_DEPENDENCY'].includes(group) ? `<button class="log-button" data-log-stream="err" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .err</button><button class="log-button" data-log-stream="out" data-cluster="${escapeHtml(job.cluster)}" data-job-id="${escapeHtml(identifier)}">Open .out</button>` : '';
   const disclosureKey = `card:${listName}:${jobArchiveKey(job)}`;
   return `<details class="job-card" data-job-disclosure-key="${escapeHtml(disclosureKey)}" data-job-ref="${escapeHtml(`${job.cluster}/${identifier}`)}"${jobDisclosureAttribute(disclosureKey)}><summary><span class="job-card-summary-title" data-full-name="${escapeHtml(hoverText)}"><span class="job-name">${escapeHtml(name)}</span><span class="job-id">${escapeHtml(identifier)}</span>${warning}</span>${timing}</summary><div class="job-card-body"><div class="job-location">${escapeHtml(job.cluster)} / ${escapeHtml(job.partition || 'no partition')}</div><div><span class="job-state">${escapeHtml(job.state)}</span> · <span class="job-resources">${escapeHtml(resources)}</span></div>${reason}${noEstimatePriority ? '' : priority}<dl class="job-times">${jobLifecycleRows(job, submittedAt, submittedText)}${expandedDependency(job)}</dl><div class="job-card-actions">${actionButton}${logButtons}</div><pre class="log-tail" hidden></pre></div></details>`;
 }
@@ -894,19 +903,23 @@ function condorPoolShareView(rows) {
 function clusterJobRatio(summary) {
   if (!summary || summary.collecting) return '<span class="cluster-collecting">Loading…</span>';
   const counts = summary.user_jobs || {};
-  const groups = ['running', 'pending', 'depending', 'failed_dependency'];
+  const groups = ['running', 'pending', 'depending', 'held', 'failed_dependency'];
   const total = groups.reduce((sum, key) => sum + (Number(counts[key]) || 0), 0);
   const segments = groups.map(group => {
     const count = Number(counts[group]) || 0;
     if (!count) return '';
     const hours = summary.user_gpu_hours?.[group];
     const detail = group === 'failed_dependency' ? 'Dependencies cannot be satisfied'
+      : group === 'held' ? 'Held; no start estimate'
       : hours == null ? 'GPU-hours unavailable' : `${Number(hours).toLocaleString()} GPU-hours ${group === 'running' ? 'remaining' : 'requested'}`;
     const label = group.replace('_', ' ');
     const tooltip = `${count} ${label} job${count === 1 ? '' : 's'}\n${detail}`;
     return `<button class="cluster-job-${group.replace('_', '-')}" style="width:${count / total * 100}%" data-job-group="${group.toUpperCase()}" data-cluster="${escapeHtml(summary.name)}" title="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}"></button>`;
   }).join('');
-  return `<span class="cluster-job-track" role="group" aria-label="${Number(counts.running) || 0} running, ${Number(counts.pending) || 0} pending, ${Number(counts.depending) || 0} depending, ${Number(counts.failed_dependency) || 0} failed dependency">${segments}</span>`;
+  const empty = total === 0;
+  const heldLabel = Number(counts.held) ? `, ${Number(counts.held)} held` : '';
+  const label = empty ? 'No jobs running nor queued' : `${Number(counts.running) || 0} running, ${Number(counts.pending) || 0} pending, ${Number(counts.depending) || 0} depending${heldLabel}, ${Number(counts.failed_dependency) || 0} failed dependency`;
+  return `<span class="cluster-job-track" role="group" aria-label="${label}"${empty ? ` title="${label}"` : ''}>${segments}</span>`;
 }
 
 const clusterDisclosure = new Map();
@@ -916,7 +929,10 @@ function rememberClusterDisclosure() {
 
 function clusterView(cluster, waitThresholds, summary) {
   let content;
-  if (!cluster.nodes || !cluster.nodes.length) content = cluster.error ? '<p>No previous node information is available.</p>' : cluster.capacity_updated_at ? '<p>No individual node information was returned by scontrol.</p>' : '<p>Collecting cluster data…</p>';
+  if (cluster.scheduler === 'direct') {
+    content = (summary?.direct_members || []).map(member => `<article class="card"><strong>${escapeHtml(member.name)}</strong><p>Direct SSH · ${Number(member.running) || 0} running · capacity unmanaged</p></article>`).join('') || '<p>No direct SSH hosts are configured.</p>';
+  }
+  else if (!cluster.nodes || !cluster.nodes.length) content = cluster.error ? '<p>No previous node information is available.</p>' : cluster.capacity_updated_at ? '<p>No individual node information was returned by scontrol.</p>' : '<p>Collecting cluster data…</p>';
   else {
     const compute = new Map((cluster.partition_compute || []).map(item => [item.name, item]));
     const snapshotPartitions = new Map((summary?.partitions || []).map(item => [item.name, item]));
@@ -1182,6 +1198,13 @@ class StatusStore:
             any(getattr(before, field) != getattr(after, field) for field in fields)
             or (before.capacity_updated_at is None) != (after.capacity_updated_at is None)
             or active_job_counts(before) != active_job_counts(after)
+            or (before.scheduler == "direct" and sorted(
+                (str(job.get("id")), str(job.get("partition")), str(job.get("state")))
+                for job in before.user_jobs or []
+            ) != sorted(
+                (str(job.get("id")), str(job.get("partition")), str(job.get("state")))
+                for job in after.user_jobs or []
+            ))
             for before, after in zip(previous, current)
         )
 

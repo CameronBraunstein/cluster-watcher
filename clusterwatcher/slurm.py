@@ -24,8 +24,8 @@ from .ssh import active_host, run_remote
 SINFO_COMMAND = "sinfo --noheader --format='%P|%a|%D|%C|%T|%I|%p'"
 SQUEUE_COMMAND = "squeue --noheader --format='%T'"
 SQUEUE_USER_RUNNING_COMMAND = "TZ=UTC squeue --me --array --states=RUNNING --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r|%Q'"
-SQUEUE_USER_PENDING_COMMAND = "TZ=UTC squeue --me --array --start --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r|%Q'"
-SQUEUE_USER_JOBS_COMMAND = "TZ=UTC squeue --me --array --start --states=RUNNING,PENDING --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r|%Q'"
+SQUEUE_USER_PENDING_COMMAND = "TZ=UTC squeue --me --array --start --states=PENDING,REQUEUE_HOLD,RESV_DEL_HOLD --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r|%Q'"
+SQUEUE_USER_JOBS_COMMAND = "TZ=UTC squeue --me --array --start --states=RUNNING,PENDING,REQUEUE_HOLD,RESV_DEL_HOLD --noheader --format='%i|%j|%T|%P|%N|%D|%C|%b|%S|%V|%E|%M|%l|%L|%r|%Q'"
 # Transfer a priority histogram rather than every queued job. This still lets
 # the client rank the user's jobs against the visible cluster-wide queue.
 SQUEUE_PENDING_PRIORITY_COUNTS_COMMAND = (

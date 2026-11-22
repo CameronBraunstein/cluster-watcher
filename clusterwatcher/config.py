@@ -89,8 +89,10 @@ def load_config(path: Path) -> list[Machine]:
         if not isinstance(hidden, bool):
             raise ValueError(f"machine {name!r} has an invalid hidden value")
         scheduler = raw.get("scheduler", "auto")
-        if not isinstance(scheduler, str) or scheduler not in {"auto", "slurm", "condor"}:
-            raise ValueError(f"machine {name!r} scheduler must be auto, slurm, or condor")
+        if not isinstance(scheduler, str) or scheduler not in {"auto", "slurm", "condor", "direct"}:
+            raise ValueError(f"machine {name!r} scheduler must be auto, slurm, condor, or direct")
+        if scheduler == "direct" and submission_host is not None:
+            raise ValueError(f"direct cluster {name!r} cannot set submission_host")
         port = raw.get("port", 22)
         if not isinstance(port, int) or not 1 <= port <= 65535:
             raise ValueError(f"machine {name!r} has an invalid port")
@@ -100,6 +102,11 @@ def load_config(path: Path) -> list[Machine]:
         interactive_auth = raw.get("interactive_auth", False)
         if not isinstance(interactive_auth, bool):
             raise ValueError(f"machine {name!r} has an invalid interactive_auth value")
+        if scheduler == "direct" and interactive_auth:
+            raise ValueError(
+                f"direct cluster {name!r} requires SSH keys or an agent; "
+                "interactive_auth is not supported for member hosts"
+            )
         control_persist = raw.get("control_persist", "8h")
         if not isinstance(control_persist, str) or not control_persist.strip():
             raise ValueError(f"machine {name!r} has an invalid control_persist value")

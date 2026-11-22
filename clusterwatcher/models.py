@@ -7,10 +7,12 @@ from dataclasses import dataclass, field, replace
 
 @dataclass(frozen=True)
 class Machine:
-    """Connection settings for one scheduler and its optional second SSH hop.
+    """Connection settings for one scheduler or direct SSH cluster.
 
     ``host``/``hosts`` are login endpoints. ``submission_host``, when set, is
-    reached by an SSH client running on the authenticated login node.
+    reached by an SSH client running on the authenticated login node. For
+    ``scheduler='direct'``, ``hosts`` are independent job hosts rather than
+    failover login endpoints.
     """
 
     name: str
@@ -30,7 +32,7 @@ class Machine:
 
     @property
     def candidate_hosts(self) -> tuple[str, ...]:
-        """Return physical login nodes in configured failover order."""
+        """Return configured SSH endpoints: direct members or login failover hosts."""
         return self.hosts or (self.host,)
 
     def for_host(self, host: str) -> Machine:

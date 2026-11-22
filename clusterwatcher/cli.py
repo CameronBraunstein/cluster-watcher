@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import shlex
+import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -21,6 +22,7 @@ from .credentials import (
     login_targets,
 )
 from .dashboard import serve
+from .direct import submit_job
 from .models import Machine
 from .setup_wizard import edit_config, run_setup
 from .scheduler import collect_status
@@ -135,7 +137,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return askpass_main()
     parser = argparse.ArgumentParser(
         prog=os.environ.get("CLUSTER_WATCHER_COMMAND_NAME") or None,
-        description="Inspect Slurm and HTCondor clusters through SSH.",
+        description="Inspect Slurm and HTCondor clusters, or run direct SSH jobs.",
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="TOML config path (default: clusters.toml)")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -241,6 +243,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     exec_parser.add_argument("machine", metavar="MACHINE", help="configured machine name")
     exec_parser.add_argument("remote_command", nargs=argparse.REMAINDER, metavar="COMMAND", help="command and arguments, normally after --")
+    submit_parser = subparsers.add_parser(
+        "submit", help="run a remote script in tmux on an unmanaged SSH host",
+        description=(
+            "Run an existing remote script on one host of a scheduler=direct cluster. "
+            "The directory must be absolute and the script must already exist there. "
+            "#SBATCH job name and output/error paths are honored; resource and time "
+            "directives are advisory, not enforced. Arrays and dependencies are unsupported."
+        ),
+    )
+    submit_parser.add_argument("cluster", metavar="CLUSTER", help="configured direct cluster name")
+    submit_parser.add_argument("member", metavar="MACHINE", help="one host listed in the cluster's host array")
+    submit_parser.add_argument("directory", metavar="DIRECTORY", help="absolute working directory on that host")
+    submit_parser.add_argument("script", metavar="SCRIPT", help="existing script filename in DIRECTORY")
+    submit_parser.add_argument("--timeout", type=int, default=15, help="SSH connection timeout in seconds (default: 15)")
     shell_parser = subparsers.add_parser("shell", help="open a shell through an existing SSH session")
     shell_parser.add_argument("--timeout", type=int, default=15, help="session check timeout in seconds (default: 15)")
     shell_parser.add_argument("machine", metavar="MACHINE", help="configured machine name")
@@ -248,7 +264,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "capabilities":
         print(json.dumps({
             "schema_version": 1,
-            "capabilities": ["credential-stdin-json", "serve-skip-login"],
+            "capabilities": ["credential-stdin-json", "serve-skip-login", "direct-submit"],
         }))
         return 0
     if args.command == "config" and args.path:
@@ -267,7 +283,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "list":
             for machine in machines:
                 target = f"\tsubmission_host={machine.submission_host}" if machine.submission_host else ""
-                print(f"{machine.name}\t{machine.username}@{machine.host}\tport={machine.port}\tscheduler={machine.scheduler}{target}")
+                hosts = ",".join(machine.candidate_hosts) if machine.scheduler == "direct" else machine.host
+                print(f"{machine.name}\t{machine.username}@{hosts}\tport={machine.port}\tscheduler={machine.scheduler}{target}")
+            return 0
+        if args.command == "submit":
+            if args.timeout < 1:
+                raise ValueError("--timeout must be at least 1")
+            selected = select_machines(machines, [args.cluster])[0]
+            try:
+                result = submit_job(selected, args.member, args.directory, args.script, args.timeout)
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+                print(f"cluster-watcher: {exc}", file=sys.stderr)
+                return 1
+            print(f"Started direct job {result['job_id']} on {args.cluster}/{args.member} "
+                  f"in tmux session {result['tmux_session']}")
+            print(f"stdout: {result['stdout']}")
+            print(f"stderr: {result['stderr']}")
             return 0
         if args.command == "jobs":
             if args.timeout < 1:
@@ -352,6 +383,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     command = CONDOR_STATUS_COMMAND
                 elif machine.scheduler == "slurm":
                     command = SINFO_COMMAND
+                elif machine.scheduler == "direct":
+                    command = "command -v tmux >/dev/null && echo 'direct SSH job host'"
                 else:
                     command = (
                         "if command -v sinfo >/dev/null 2>&1 && ! command -v condor_q >/dev/null 2>&1; "

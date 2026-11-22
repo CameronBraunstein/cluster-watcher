@@ -87,6 +87,19 @@ class SetupWizardTests(TimedTestCase):
         self.assertIn('scheduler = "condor"', self.path.read_text())
         self.assertTrue(any("Scheduler must be" in line for line in output))
 
+    def test_setup_records_independent_direct_ssh_hosts(self):
+        """The wizard writes a host array without password prompts or a submit hop."""
+        prompt = scripted(
+            "lab", "gpu-a.example", "", "alice", "direct", "gpu-b.example, gpu-c.example",
+            "", "", "", "n", "n",
+        )
+        self.assertEqual(run_setup(self.path, prompt, lambda _line: None, {}), 0)
+        machine = load_config(self.path)[0]
+        self.assertEqual(machine.scheduler, "direct")
+        self.assertEqual(machine.candidate_hosts, ("gpu-a.example", "gpu-b.example", "gpu-c.example"))
+        self.assertFalse(machine.interactive_auth)
+        self.assertIn('host = ["gpu-a.example", "gpu-b.example", "gpu-c.example"]', self.path.read_text())
+
     def test_setup_writes_an_explicit_apu_profile(self):
         """The wizard preserves APU type in the single configuration file."""
         prompt = scripted(

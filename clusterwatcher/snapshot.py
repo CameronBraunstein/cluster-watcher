@@ -9,7 +9,7 @@ from typing import Any
 from .compute import GPUProfile, profile_for
 from .config import DEFAULT_WAIT_THRESHOLD_MINUTES
 from .fair_share import partition_associations
-from .jobs import has_failed_dependency, waits_for_dependency
+from .jobs import has_failed_dependency, is_held_job, waits_for_dependency
 from .models import ClusterStatus
 from .wait_probes import WAIT_PROBE_REFRESH_SECONDS, classify_wait_error
 
@@ -18,7 +18,7 @@ SNAPSHOT_SCHEMA_VERSION = "1.0"
 """Current public snapshot schema; incompatible changes require a new API version."""
 
 _PENDING_JOB_STATES = {
-    "PENDING", "CONFIGURING", "REQUEUED", "REQUEUE_FED", "REQUEUE_HOLD",
+    "PENDING", "CONFIGURING", "REQUEUED", "REQUEUE_FED", "REQUEUE_HOLD", "RESV_DEL_HOLD",
     "RESIZING", "SIGNALING", "STAGE_OUT", "SUSPENDED",
 }
 
@@ -29,13 +29,14 @@ def active_job_counts(status: ClusterStatus) -> dict[str, int]:
     states = [str(job.get("state", "")).upper() for job in jobs]
     return {
         "running": sum(state == "RUNNING" for state in states),
-        "pending": sum(state in _PENDING_JOB_STATES and not has_failed_dependency(job)
+        "pending": sum(state in _PENDING_JOB_STATES and not is_held_job(job) and not has_failed_dependency(job)
                        and not waits_for_dependency(job)
                        for state, job in zip(states, jobs)),
-        "depending": sum(state in _PENDING_JOB_STATES and not has_failed_dependency(job)
+        "depending": sum(state in _PENDING_JOB_STATES and not is_held_job(job) and not has_failed_dependency(job)
                          and waits_for_dependency(job)
                          for state, job in zip(states, jobs)),
-        "failed_dependency": sum(state in _PENDING_JOB_STATES and has_failed_dependency(job)
+        "held": sum(is_held_job(job) for job in jobs),
+        "failed_dependency": sum(state in _PENDING_JOB_STATES and not is_held_job(job) and has_failed_dependency(job)
                                  for state, job in zip(states, jobs)),
     }
 
@@ -51,7 +52,7 @@ def active_gpu_hours(status: ClusterStatus) -> dict[str, float | None]:
         state = str(job.get("state", "")).upper()
         if state == "RUNNING":
             groups["running"].append(job)
-        elif state in _PENDING_JOB_STATES and not has_failed_dependency(job):
+        elif state in _PENDING_JOB_STATES and not is_held_job(job) and not has_failed_dependency(job):
             groups["depending" if waits_for_dependency(job) else "pending"].append(job)
     accounting_totals = {
         str(record.get("job_id")): int(record["gpus"])
@@ -359,6 +360,20 @@ def _cluster_resources(status: ClusterStatus) -> dict[str, object]:
     }
 
 
+def _direct_members(status: ClusterStatus) -> list[dict[str, object]]:
+    """Summarize tmux jobs per unmanaged SSH host without claiming capacity."""
+    return [
+        {
+            "name": host,
+            "running": sum(job.get("state") == "RUNNING" and job.get("partition") == host
+                           for job in status.user_jobs or []),
+            "completed": sum(job.get("state") == "COMPLETED" and job.get("partition") == host
+                             for job in status.user_jobs or []),
+        }
+        for host in status.hosts or (status.host,)
+    ]
+
+
 def build_snapshot(
     statuses: list[ClusterStatus], generated_at: str | None, refresh_seconds: int,
     wait_threshold_minutes: tuple[int, ...] = DEFAULT_WAIT_THRESHOLD_MINUTES,
@@ -384,6 +399,7 @@ def build_snapshot(
                 "host": status.host,
                 "submission_host": status.submission_host,
                 "hosts": list(status.hosts or (status.host,)),
+                "direct_members": _direct_members(status) if status.scheduler == "direct" else [],
                 "reachable": status.error is None,
                 "collecting": collecting,
                 # Additive field: the session needs ``cluster-watcher login NAME``.

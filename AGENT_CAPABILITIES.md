@@ -1,6 +1,6 @@
 # Cluster Watcher operating guide for agents
 
-Cluster Watcher is the user's local gateway to Slurm and HTCondor clusters. Use its
+Cluster Watcher is the user's local gateway to Slurm, HTCondor, and direct SSH clusters. Use its
 versioned loopback APIs for structured observations instead of inventing SSH
 commands or scraping the HTML dashboard. The normal service address is
 `http://127.0.0.1:8080`; a different port may be configured by the user.
@@ -26,10 +26,17 @@ interactive MFA is required.
 | Run a non-interactive remote command | `cluster-watcher exec` or `POST /api/v1/commands` | Existing SSH master; HTTP also needs `--command-api` | Potentially **yes** |
 | Open an interactive remote shell | `cluster-watcher shell MACHINE` | Existing SSH master and a human terminal | Potentially **yes** |
 | Present live terminal views | `cluster-watcher status [SECONDS]` and `cluster-watcher jobs [SECONDS]` | May prompt if no SSH master exists | No |
+| Launch an existing script on an unmanaged SSH host | `cluster-watcher submit CLUSTER MACHINE DIRECTORY SCRIPT` | `scheduler = "direct"`, configured member host, SSH key or agent, remote tmux | **Yes** |
 
 The browser and VS Code extension are human interfaces, not automation
 contracts. Their archives and expanded/collapsed state are local UI state and
 do not archive, hold, or modify remote jobs.
+
+Direct SSH jobs appear in My Jobs and the cluster job bar. The cluster status
+lists the configured hosts and running job counts. CPU/GPU requests read from
+`#SBATCH` comments are descriptive only: direct hosts have no scheduler,
+reservation, queue wait estimate, or enforced limit. Arrays and dependencies
+are unsupported. Direct jobs cannot be cancelled through the jobs API.
 
 ## Service modes
 
@@ -69,6 +76,9 @@ the versioned `/api/v1/*` routes rather than the dashboard's private
 The snapshot includes:
 
 - Per-cluster reachability and partial collection errors.
+- `user_jobs.held` counts personal jobs held by Slurm or HTCondor, including
+  user, administrator, and system holds. These jobs are excluded from the
+  runnable `pending` and dependency-waiting `depending` counts.
 - Slurm partitions or HTCondor model display groups plus an aggregate `pool`, physical nodes,
   CPU threads, GPU/APU
   allocation, and `schedulable_idle` resources.

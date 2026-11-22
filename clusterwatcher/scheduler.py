@@ -45,6 +45,9 @@ def collect_status(machine: Machine, timeout: int, include_jobs: bool, *args: ob
         scheduler = detected_scheduler(machine, timeout)
     except (OSError, RuntimeError) as exc:
         return ClusterStatus(machine.name, machine.host, machine.username, error=str(exc), scheduler=machine.scheduler)
+    if scheduler == "direct":
+        from .direct import collect_status as collect_direct_status
+        return collect_direct_status(machine, timeout, include_jobs, *args, **kwargs)
     if scheduler == "condor":
         from .condor import collect_status as collect_condor_status
         return collect_condor_status(machine, timeout, include_jobs, *args, **kwargs)
@@ -58,6 +61,9 @@ def collect_user_job_status(machine: Machine, timeout: int) -> ClusterStatus:
         scheduler = detected_scheduler(machine, timeout)
     except (OSError, RuntimeError) as exc:
         return ClusterStatus(machine.name, machine.host, machine.username, error=str(exc), scheduler=machine.scheduler)
+    if scheduler == "direct":
+        from .direct import collect_user_job_status as collect_direct_jobs
+        return collect_direct_jobs(machine, timeout)
     if scheduler == "condor":
         from .condor import collect_user_job_status as collect_condor_jobs
         return collect_condor_jobs(machine, timeout)

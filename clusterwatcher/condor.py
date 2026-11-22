@@ -211,6 +211,7 @@ def parse_jobs(output: str, username: str, *, history: bool = False) -> list[dic
             "elapsed_seconds": elapsed, "time_limit_seconds": limit,
             "time_left_seconds": max(0, limit - elapsed) if limit is not None and elapsed is not None else None,
             "expected_start_at": None, "priority": ad.get("JobPrio"), "reason": reason,
+            "hold_reason_code": _integer(ad.get("HoldReasonCode")) if state == "HELD" else None,
             "dependency": None, "exit_code": ad.get("ExitCode"),
             "_stdout": ad.get("Out"), "_stderr": ad.get("Err"), "_workdir": ad.get("Iwd"),
             "_submit_file": ad.get("JobSubmitFile"),

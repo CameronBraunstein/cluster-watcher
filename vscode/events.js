@@ -53,14 +53,16 @@ function statusSummary(jobs, refreshedAt) {
   let running = 0;
   let pending = 0;
   let depending = 0;
+  let held = 0;
   for (const job of jobs || []) {
     const group = jobGroup(job);
     if (group === 'RUNNING') running += 1;
     else if (group === 'PENDING') pending += 1;
     else if (group === 'DEPENDING') depending += 1;
+    else if (group === 'HELD') held += 1;
   }
-  const text = running || pending || depending
-    ? `$(server-process) ${running} running · ${pending} pending${depending ? ` · ${depending} depending` : ''}`
+  const text = running || pending || depending || held
+    ? `$(server-process) ${running} running · ${pending} pending${depending ? ` · ${depending} depending` : ''}${held ? ` · ${held} held` : ''}`
     : '$(server-process) no active jobs';
   return {
     text,

@@ -28,11 +28,25 @@ from .ssh import run_remote
 DEFAULT_JOB_LOOKBACK_HOURS = 24
 MAX_LOG_TAIL_LINES = 2000
 ACTIVE_JOB_STATES = {
-    "CONFIGURING", "PENDING", "REQUEUED", "REQUEUE_FED", "REQUEUE_HOLD",
+    "CONFIGURING", "PENDING", "REQUEUED", "REQUEUE_FED", "REQUEUE_HOLD", "RESV_DEL_HOLD",
     "RESIZING", "RUNNING", "SIGNALING", "STAGE_OUT", "SUSPENDED", "HELD",
 }
 _JOB_ID_PATTERN = re.compile(r"\d+(?:[_.]\d+)?")
 _MISSING_VALUES = {"", "Unknown", "N/A", "None", "(null)", "NULL"}
+
+
+def is_held_job(job: dict[str, object]) -> bool:
+    """Identify a held job regardless of who or what placed the hold.
+
+    HTCondor uses the HELD state. Slurm uses REQUEUE_HOLD or a pending reason
+    such as JobHeldUser, JobHeldAdmin, or JobHoldMaxRequeue.
+    """
+    state = str(job.get("state") or "").upper()
+    if state in {"HELD", "REQUEUE_HOLD", "RESV_DEL_HOLD"}:
+        return True
+    return state in {"PENDING", "CONFIGURING", "REQUEUED", "REQUEUE_FED"} and bool(
+        re.match(r"^JobHold|^JobHeld", str(job.get("reason") or "").strip(), re.IGNORECASE)
+    )
 
 
 def waits_for_dependency(job: dict[str, object]) -> bool:
@@ -105,6 +119,17 @@ def parse_since(value: str | None, now: datetime | None = None) -> datetime:
     return parsed
 
 
+def parse_direct_job_time(value: object) -> datetime | None:
+    """Parse a persistent direct-job timestamp for history filtering."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+
+
 def validate_job_ids(job_ids: tuple[str, ...]) -> tuple[str, ...]:
     """Validate Slurm array IDs and HTCondor ``ClusterId.ProcId`` IDs."""
     unique = tuple(dict.fromkeys(job_ids))
@@ -129,7 +154,7 @@ def _active_record(cluster: str, job: dict[str, object]) -> dict[str, object]:
     # impossible dependency. Ordinary dependency waits retain the established
     # descriptive fallback used by the terminal and older clients.
     dependency_failed = (slurm_reason or "").casefold() == "dependencyneversatisfied"
-    reason = slurm_reason if dependency_failed or not dependency else f"Dependency: {dependency}"
+    reason = slurm_reason if dependency_failed or is_held_job(job) or not dependency else f"Dependency: {dependency}"
     start = _present(job.get("start_time"))
     return {
         "cluster": cluster,
@@ -390,6 +415,10 @@ class JobService:
             """Fetch one cluster's accounting without holding another query."""
             machine = machines[name]
             status = statuses.get(name)
+            if machine.scheduler == "direct":
+                # Remote manifests already include completed jobs. There is no
+                # scheduler accounting service to query separately.
+                return [], None
             if status is not None and status.scheduler == "condor":
                 from .condor import collect_history
                 try:
@@ -409,15 +438,25 @@ class JobService:
             with ThreadPoolExecutor(max_workers=len(selected_names), thread_name_prefix="jobs") as pool:
                 accounting_results = list(pool.map(accounting_for, selected_names))
         for name, (accounting, accounting_error) in zip(selected_names, accounting_results):
+            machine = machines[name]
             status = statuses.get(name)
             status_error = status.error if status else "No cluster status has been collected"
             error = accounting_error or status_error
+            sources = status.user_jobs if status and status.user_jobs else []
+            if machine.scheduler == "direct" and not requested_ids:
+                sources = [job for job in sources if (
+                    str(job.get("state")) in ACTIVE_JOB_STATES
+                    or (timestamp := parse_direct_job_time(job.get("end_at") or job.get("submit_at"))) is not None
+                    and timestamp >= since
+                )]
             active_records = [
-                ({**job, "cluster": name} if status and status.scheduler == "condor" else _active_record(name, job))
-                for job in (status.user_jobs if status and status.user_jobs else [])
+                ({**job, "cluster": name} if status and status.scheduler in {"condor", "direct"}
+                 else _active_record(name, job))
+                for job in sources
             ]
-            for source, record in zip((status.user_jobs if status and status.user_jobs else []), active_records):
-                record["gpu_models"] = _gpu_models_for_job(name, source, status.nodes or [])
+            for source, record in zip(sources, active_records):
+                if status.scheduler != "direct":
+                    record["gpu_models"] = _gpu_models_for_job(name, source, status.nodes or [])
             active = {
                 str(record["job_id"]): record
                 for record in active_records
@@ -440,6 +479,8 @@ class JobService:
                     if accounting_record.get("gpu_models"):
                         record["gpu_models"] = accounting_record["gpu_models"]
                 merged[job_id] = {**record, **private}
+                if machine.scheduler == "direct":
+                    log_records[(name, job_id)] = merged[job_id].copy()
 
             if accounting_error and requested_ids:
                 for job_id in requested_ids:
@@ -453,6 +494,12 @@ class JobService:
                     record["last_success_at"] = status.last_success_at if status is not None else None
                 if record["scheduler"] == "condor":
                     record["script_available"] = bool(record.get("_submit_file"))
+                    record["log_paths_available"] = {
+                        "out": bool(record.get("_stdout")),
+                        "err": bool(record.get("_stderr")),
+                    }
+                elif record["scheduler"] == "direct":
+                    record["script_available"] = bool(record.get("_script"))
                     record["log_paths_available"] = {
                         "out": bool(record.get("_stdout")),
                         "err": bool(record.get("_stderr")),
@@ -490,6 +537,19 @@ class JobService:
             "jobs": jobs,
         }
 
+    def _direct_record(self, machine: Machine, job_id: str) -> tuple[Machine, dict[str, object]]:
+        """Find one submitted direct job and pin its original SSH host."""
+        status = next((item for item in self.status_provider() if item.name == machine.name), None)
+        records = status.user_jobs if status and status.user_jobs else []
+        record = next((job for job in records if str(job.get("job_id")) == job_id), None)
+        if record is None:
+            with self._lock:
+                record = self._log_records.get((machine.name, job_id))
+        host = str(record.get("_host") or "") if record else ""
+        if host not in machine.candidate_hosts:
+            raise JobLogNotFound(f"No known direct job {job_id} on {machine.name}")
+        return machine.for_host(host), record
+
     def cancel(self, cluster: str, job_id: str) -> dict[str, object]:
         """Cancel one of the configured user's jobs with ``scancel``.
 
@@ -502,6 +562,8 @@ class JobService:
         machine = next((machine for machine in self.machines if machine.name == cluster), None)
         if machine is None:
             raise ValueError(f"unknown cluster: {cluster}")
+        if machine.scheduler == "direct":
+            raise ValueError("direct SSH jobs cannot be ended from the dashboard; use the remote tmux session")
         status = next((item for item in self.status_provider() if item.name == cluster), None)
         if status is not None and status.scheduler == "condor":
             from .condor import _ads
@@ -530,6 +592,15 @@ class JobService:
         machine = next((machine for machine in self.machines if machine.name == cluster), None)
         if machine is None:
             raise ValueError(f"unknown cluster: {cluster}")
+        if machine.scheduler == "direct":
+            endpoint, record = self._direct_record(machine, job_id)
+            path = str(record.get("_script") or "")
+            if not path.startswith("/"):
+                raise JobScriptNotFound(f"No script path is available for direct job {job_id}")
+            from .job_scripts import MAX_SCRIPT_BYTES
+            content = run_remote(endpoint, self.timeout, f"head -c {MAX_SCRIPT_BYTES + 1} {shlex.quote(path)}")
+            return {"cluster": cluster, "job_id": job_id, "source": "file", "path": path,
+                    "content": content[:MAX_SCRIPT_BYTES], "truncated": len(content) > MAX_SCRIPT_BYTES}
         status = next((item for item in self.status_provider() if item.name == cluster), None)
         if status is not None and status.scheduler == "condor":
             from .condor import collect_history, fetch_submit_file
@@ -566,6 +637,12 @@ class JobService:
         if cluster not in by_name:
             raise ValueError(f"unknown cluster: {cluster}")
         machine = by_name[cluster]
+        direct_path: str | None = None
+        if machine.scheduler == "direct":
+            machine, record = self._direct_record(machine, job_id)
+            direct_path = str(record.get("_stdout" if stream == "out" else "_stderr") or "")
+            if not direct_path.startswith("/"):
+                raise JobLogNotFound(f"No {stream} log path is available for direct job {job_id}")
 
         if explicit_path is not None:
             if not explicit_path.startswith("/") or "\x00" in explicit_path:
@@ -574,7 +651,7 @@ class JobService:
                 raise ValueError(f"cluster {machine.name} has no configured job_log_roots")
             path = explicit_path
         else:
-            path = self._resolve_job_log_path(machine, job_id, stream)
+            path = direct_path or self._resolve_job_log_path(machine, job_id, stream)
 
         try:
             if explicit_path is not None:

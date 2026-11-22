@@ -60,6 +60,16 @@ def capacity_payload() -> dict[str, object]:
 class TerminalStatusTests(TimedTestCase):
     """Exercise status columns, capacity colors, probes, and live output."""
 
+    def test_cluster_job_summary_places_yellow_held_after_depending(self):
+        """The terminal capacity bar uses the same active-job order as the UI."""
+        payload = capacity_payload()
+        payload["clusters"][0]["user_jobs"] = {"running": 1, "pending": 1, "depending": 1, "held": 1}
+        board = render_status_board(payload, use_color=True)
+        self.assertIn("\033[38;5;88m", board)
+        self.assertIn("\033[33m", board)
+        self.assertLess(board.index("\033[38;5;88m"), board.index("\033[33m"))
+        self.assertIn("1 held", board)
+
     def test_availability_bar_places_green_capacity_before_red_capacity(self):
         """Keep available capacity on the left in plain and colored output."""
         styled, plain = _availability_bar(2, 4, True, width=4)

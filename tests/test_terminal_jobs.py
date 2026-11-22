@@ -122,6 +122,20 @@ class TerminalJobsTests(TimedTestCase):
                 self.assertIn("waiting for dependency", board)
                 self.assertIn("dependency cannot be satisfied", board)
 
+    def test_user_and_system_holds_get_their_own_section(self):
+        """Held jobs follow Depending and show no fabricated wait progress."""
+        depending = job("PENDING", "1")
+        depending["dependency"] = "afterok:9"
+        held = job("PENDING", "2")
+        held["reason"] = "JobHeldAdmin"
+        condor_held = job("HELD", "3")
+        condor_held["reason"] = "Missing input"
+        completed = job("COMPLETED", "4")
+        board = render_job_board({"jobs": [completed, held, depending, condor_held]}, now=NOW, width=100)
+        self.assertLess(board.index("### DEPENDING ###"), board.index("### HELD ###"))
+        self.assertLess(board.index("### HELD ###"), board.index("### COMPLETED ###"))
+        self.assertIn("held · submitted", board)
+
     def test_utc_accounting_submission_is_rendered_in_local_timezone(self):
         """Convert explicit accounting UTC rather than printing it as local."""
         completed = job("COMPLETED", "1000414")

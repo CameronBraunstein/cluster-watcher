@@ -135,7 +135,24 @@ class SnapshotTests(TimedTestCase):
         ]
         snapshot = build_snapshot([status], "2026-09-22T10:00:00+00:00", 15)
         self.assertEqual(snapshot["clusters"][0]["user_jobs"],
-                         {"running": 1, "pending": 2, "depending": 2, "failed_dependency": 2})
+                         {"running": 1, "pending": 2, "depending": 2, "held": 0, "failed_dependency": 2})
+
+    def test_snapshot_counts_all_holds_without_inflating_pending_or_depending(self):
+        """User, administrator, system, and Condor holds share one yellow count."""
+        status = example_status()
+        status.user_jobs = [
+            {"state": "PENDING", "reason": "Priority"},
+            {"state": "PENDING", "reason": "Dependency", "dependency": "afterok:4"},
+            {"state": "PENDING", "reason": "JobHeldUser", "dependency": "afterok:4"},
+            {"state": "PENDING", "reason": "JobHeldAdmin"},
+            {"state": "PENDING", "reason": "JobHoldMaxRequeue"},
+            {"state": "REQUEUE_HOLD", "reason": "Requeued"},
+            {"state": "RESV_DEL_HOLD", "reason": "Reservation deleted"},
+            {"state": "HELD", "reason": "Missing input", "hold_reason_code": 13},
+        ]
+        counts = build_snapshot([status], "2026-09-22T10:00:00+00:00", 15)["clusters"][0]["user_jobs"]
+        self.assertEqual(counts, {"running": 0, "pending": 1, "depending": 1,
+                                  "held": 6, "failed_dependency": 0})
 
     def test_snapshot_estimates_gpu_hours_by_queue_group(self):
         """Running uses remaining walltime; queued jobs use requested walltime."""
@@ -169,7 +186,7 @@ class SnapshotTests(TimedTestCase):
 
     def test_browser_groups_dependency_waits_after_pending(self):
         """The browser shares the three-way queue grouping with the API."""
-        self.assertIn("'RUNNING', 'PENDING', 'DEPENDING', 'FAILED_DEPENDENCY'", PAGE)
+        self.assertIn("'RUNNING', 'PENDING', 'DEPENDING', 'HELD', 'FAILED_DEPENDENCY'", PAGE)
         self.assertIn("DEPENDING:'Depending'", PAGE)
         self.assertIn("if (ACTIVE_JOB_STATES.has(state) && waitsForDependency(job))", PAGE)
         self.assertIn(".job-progress.pending .job-progress-fill { background:#dc2626; }", PAGE)
@@ -209,7 +226,7 @@ class SnapshotTests(TimedTestCase):
         self.assertTrue(cluster["reachable"])
         self.assertTrue(cluster["resource_data_complete"])
         self.assertEqual(cluster["scheduling"]["scheduler_type"], "sched/backfill")
-        self.assertEqual(cluster["user_jobs"], {"running": 2, "pending": 2, "depending": 0, "failed_dependency": 0})
+        self.assertEqual(cluster["user_jobs"], {"running": 2, "pending": 2, "depending": 0, "held": 0, "failed_dependency": 0})
         self.assertNotIn("username", cluster)
         self.assertEqual(cluster["resources"]["gpus"]["total"], 8)
         self.assertEqual(cluster["resources"]["gpus"]["schedulable_idle"], 3)
@@ -526,7 +543,7 @@ class SnapshotTests(TimedTestCase):
         summary = browser["summary"]["clusters"][0]
         partition = summary["partitions"][0]
 
-        self.assertEqual(summary["user_jobs"], {"running": 1, "pending": 1, "depending": 1, "failed_dependency": 1})
+        self.assertEqual(summary["user_jobs"], {"running": 1, "pending": 1, "depending": 1, "held": 0, "failed_dependency": 1})
         self.assertEqual(partition["gpus"]["total"], 8)
         self.assertEqual(partition["gpus"]["schedulable_idle"], 3)
         self.assertEqual(partition["node_states"], {"IDLE+DRAIN": 1, "MIXED": 1})

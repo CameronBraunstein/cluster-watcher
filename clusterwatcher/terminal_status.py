@@ -19,6 +19,7 @@ from .wait_probes import WAIT_PROBE_REFRESH_SECONDS, classify_wait_error, collec
 
 
 ANSI_RED = "\033[31m"
+ANSI_YELLOW = "\033[33m"
 ANSI_GREEN = "\033[32m"
 ANSI_BLUE = "\033[34m"
 ANSI_MAROON = "\033[38;5;88m"
@@ -190,17 +191,17 @@ def _partition_row(partition: dict[str, object], use_color: bool) -> tuple[list[
 
 
 def _job_summary(cluster: dict[str, object], use_color: bool) -> str:
-    """Summarize the user's running, ready, and dependency-held jobs."""
+    """Summarize active personal jobs, including jobs held for any reason."""
     counts = cluster.get("user_jobs") or {}
-    values = [max(0, int(counts.get(key) or 0)) for key in ("running", "pending", "depending")]
+    values = [max(0, int(counts.get(key) or 0)) for key in ("running", "pending", "depending", "held")]
     total = sum(values)
     if total:
-        bounds = [round(sum(values[:index]) / total * 12) for index in range(4)]
-        blocks = ["█" * max(0, bounds[index + 1] - bounds[index]) for index in range(3)]
+        bounds = [round(sum(values[:index]) / total * 12) for index in range(5)]
+        blocks = ["█" * max(0, bounds[index + 1] - bounds[index]) for index in range(4)]
         if use_color:
             bar = "".join(
                 f"{color}{block}{ANSI_RESET}" for color, block in
-                zip((ANSI_BLUE, ANSI_RED, ANSI_MAROON), blocks) if block
+                zip((ANSI_BLUE, ANSI_RED, ANSI_MAROON, ANSI_YELLOW), blocks) if block
             )
         else:
             bar = "".join(blocks)
@@ -210,6 +211,7 @@ def _job_summary(cluster: dict[str, object], use_color: bool) -> str:
     return (
         f"My jobs {bar} "
         f"{values[0]} running · {values[1]} pending · {values[2]} depending"
+        f"{f' · {values[3]} held' if values[3] else ''}"
     )
 
 
@@ -295,6 +297,13 @@ def render_status_board(
             lines.append(f"ERROR: {cluster.get('error') or 'cluster is unreachable'}")
             continue
         lines.append(_job_summary(cluster, use_color))
+        if cluster.get("scheduler") == "direct":
+            members = cluster.get("direct_members") or []
+            lines.append("Direct SSH hosts: " + ", ".join(
+                f"{item['name']} ({int(item.get('running') or 0)} running)" for item in members
+            ))
+            lines.append("Capacity unmanaged; jobs run immediately in tmux. GPU availability and waits are unknown.")
+            continue
         if cluster.get("resource_error"):
             lines.append(f"WARNING: {cluster['resource_error']}")
         partitions = [item for item in cluster.get("partitions", []) if isinstance(item, dict)]

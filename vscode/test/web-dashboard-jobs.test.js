@@ -38,6 +38,52 @@ test('browser cluster bar links failed dependencies in a light gray rightmost se
   assert.match(source, /\.cluster-job-failed-dependency \{ background:#c4c4c4; \}/);
 });
 
+test('browser places held jobs after Depending and before failed dependencies', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../../clusterwatcher/dashboard.py'), 'utf8');
+  const start = source.indexOf('function clusterJobRatio(summary)');
+  const end = source.indexOf('const clusterDisclosure', start);
+  const context = { escapeHtml: String };
+  vm.runInNewContext(`${source.slice(start, end)}\nglobalThis.clusterJobRatio = clusterJobRatio;`, context);
+  const bar = context.clusterJobRatio({ name: 'inf', user_jobs: {
+    running: 1, pending: 1, depending: 1, held: 2, failed_dependency: 1,
+  } });
+  const segments = [...bar.matchAll(/class="cluster-job-(running|pending|depending|held|failed-dependency)"/g)]
+    .map((match) => match[1]);
+  assert.deepEqual(segments, ['running', 'pending', 'depending', 'held', 'failed-dependency']);
+  assert.match(bar, /class="cluster-job-held"[^>]*data-job-group="HELD" data-cluster="inf"/);
+  assert.match(bar, /2 held jobs\nHeld; no start estimate/);
+  assert.match(source, /\.cluster-job-held \{ background:#eab308; \}/);
+});
+
+test('browser groups user, administrator, system, and Condor holds together', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../../clusterwatcher/dashboard.py'), 'utf8');
+  const start = source.indexOf('const JOB_GROUP_ORDER =');
+  const end = source.indexOf('/** Return whether a queued job carries', start);
+  assert.ok(start >= 0 && end > start);
+  const context = { hasFailedDependency: () => false, waitsForDependency: () => false,
+    FAILED_JOB_STATES: new Set() };
+  vm.runInNewContext(`${source.slice(start, end)}\nglobalThis.jobGroup = jobGroup;`, context);
+  for (const job of [
+    { state: 'PENDING', reason: 'JobHeldUser' },
+    { state: 'PENDING', reason: 'JobHeldAdmin' },
+    { state: 'REQUEUE_HOLD' },
+    { state: 'RESV_DEL_HOLD' },
+    { state: 'HELD', scheduler: 'condor', reason: 'Missing input' },
+  ]) assert.equal(context.jobGroup(job), 'HELD');
+  assert.equal(context.jobGroup({ state: 'PENDING', reason: 'Priority' }), 'PENDING');
+});
+
+test('browser empty cluster bar explains that no jobs are running or queued', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../../clusterwatcher/dashboard.py'), 'utf8');
+  const start = source.indexOf('function clusterJobRatio(summary)');
+  const end = source.indexOf('const clusterDisclosure', start);
+  const context = { escapeHtml: String };
+  vm.runInNewContext(`${source.slice(start, end)}\nglobalThis.clusterJobRatio = clusterJobRatio;`, context);
+  const bar = context.clusterJobRatio({ name: 'lab', user_jobs: {} });
+  assert.match(bar, /title="No jobs running nor queued"/);
+  assert.doesNotMatch(bar, /<button/);
+});
+
 test('browser freezes stale running and pending progress bars', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../../clusterwatcher/dashboard.py'), 'utf8');
   const running = source.slice(source.indexOf('function runningJobProgress('),

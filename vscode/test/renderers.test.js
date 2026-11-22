@@ -105,6 +105,33 @@ test('dependency waits appear in Depending between Pending and failed dependenci
   assert.doesNotMatch(held, /data-progress=/);
 });
 
+test('all held jobs have a section and a yellow cluster bar segment after Depending', () => {
+  const jobs = [
+    { job_id: 'ready', cluster: 'c', state: 'PENDING', reason: 'Priority' },
+    { job_id: 'dependency', cluster: 'c', state: 'PENDING', dependency: 'afterok:9' },
+    { job_id: 'user', cluster: 'c', state: 'PENDING', reason: 'JobHeldUser', dependency: 'afterok:9' },
+    { job_id: 'admin', cluster: 'c', state: 'PENDING', reason: 'JobHeldAdmin' },
+    { job_id: 'system', cluster: 'c', state: 'REQUEUE_HOLD', reason: 'Requeued' },
+    { job_id: 'condor', cluster: 'c', state: 'HELD', scheduler: 'condor', reason: 'Missing input', hold_reason_code: 13 },
+    { job_id: 'done', cluster: 'c', state: 'COMPLETED' },
+  ];
+  for (const held of jobs.slice(2, 6)) assert.equal(jobGroup(held), 'HELD');
+  const html = renderJobs({ jobs });
+  assert.ok(html.indexOf('Depending (1)') < html.indexOf('Held Jobs (4)'));
+  assert.ok(html.indexOf('Held Jobs (4)') < html.indexOf('Completed (1)'));
+  const heldCard = html.match(/data-job-ref="c\/admin"[^>]*>.*?<\/details>/s)[0];
+  assert.match(heldCard, /held<\/span>/);
+  assert.doesNotMatch(heldCard, /no estimate available|data-progress=/);
+
+  const status = renderStatus({ clusters: [{ name: 'c', reachable: true,
+    user_jobs: { running: 1, pending: 1, depending: 1, held: 4, failed_dependency: 1 }, partitions: [] }] });
+  const segments = [...status.matchAll(/class="cluster-job-(running|pending|depending|held|failed-dependency)" style=/g)]
+    .map((match) => match[1]);
+  assert.deepEqual(segments, ['running', 'pending', 'depending', 'held', 'failed-dependency']);
+  assert.match(status, /class="cluster-job-held"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;HELD&quot;,&quot;c&quot;\]"/);
+  assert.match(status, /\.cluster-job-held\{display:block;height:100%;background:#eab308\}/);
+});
+
 test('finished and failed cards expose one Archive icon before summary progress', () => {
   const cases = [
     ['running', 'RUNNING', {}, false],
@@ -206,7 +233,7 @@ test('status shows every partition detail compactly without a card disclosure', 
   assert.match(html, /querySelectorAll\('\[data-fast-tooltip\]'\)/);
   assert.doesNotMatch(html, /0 mixed/);
   assert.doesNotMatch(html, /<table/);
-  assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary><span class="cluster-summary"><span class="cluster-summary-main cluster-summary-with-bar"><span class="cluster-summary-name">cluster_0<\/span><span class="cluster-job-track" role="group" aria-label="3 running, 1 pending, 0 depending, 0 failed dependency"/);
+  assert.match(html, /<details class="cluster-group" data-disclosure-key="cluster:cluster_0" open><summary><span class="cluster-summary"><span class="cluster-summary-main cluster-summary-with-bar"><span class="cluster-summary-name" title="cluster_0">cluster_0<\/span><span class="cluster-job-track" role="group" aria-label="3 running, 1 pending, 0 depending, 0 failed dependency"/);
   assert.match(html, /class="cluster-job-running" style="width:75%"/);
   assert.match(html, /class="cluster-job-pending" style="width:25%"/);
   assert.match(html, /class="cluster-job-running"[^>]*data-command="clusterWatcher\.showJobsGroup" data-args="\[&quot;RUNNING&quot;,&quot;cluster_0&quot;\]"/);
@@ -252,8 +279,20 @@ test('cluster job ratio remains empty when no jobs are running or pending', () =
     { name: 'idle', reachable: true, user_jobs: { running: 0, pending: 0 }, partitions: [] },
   ] });
   const track = html.match(/<span class="cluster-job-track"[^>]*>.*?<\/span>/s)[0];
-  assert.match(track, /aria-label="0 running, 0 pending, 0 depending, 0 failed dependency"/);
+  assert.match(track, /aria-label="No jobs running nor queued" data-fast-tooltip="No jobs running nor queued"/);
   assert.doesNotMatch(track, /cluster-job-(?:running|pending|depending)/);
+});
+
+test('narrow Cluster Status headings reserve space for short cluster names', () => {
+  const names = ['inf', 'viper', 'dais', 'raven', 'lst'];
+  const html = renderStatus({ clusters: names.map(name => ({
+    name, reachable: true, user_jobs: { running: 1, pending: 2 }, partitions: [],
+  })) });
+  for (const name of names) {
+    assert.match(html, new RegExp(`<span class="cluster-summary-name" title="${name}">${name}</span><span class="cluster-job-track"`));
+  }
+  assert.match(html, /\.cluster-summary-with-bar\{display:grid;grid-template-columns:minmax\(46px,1fr\) minmax\(40px,140px\) 13px/);
+  assert.match(html, /\.cluster-summary-name\{[^}]*text-overflow:ellipsis/);
 });
 
 test('Condor pool cards show negotiator share and omit Slurm-only script actions', () => {
@@ -276,6 +315,29 @@ test('Condor pool cards show negotiator share and omit Slurm-only script actions
   assert.match(jobs, /42\.0/);
   assert.doesNotMatch(jobs, /clusterWatcher\.openScript/);
   assert.match(jobs, /clusterWatcher\.openLog/);
+});
+
+test('direct SSH hosts and jobs appear without scheduler capacity or cancellation controls', () => {
+  const status = renderStatus({ clusters: [{
+    name: 'lab', scheduler: 'direct', reachable: true,
+    direct_members: [{ name: 'gpu-a.example', running: 2 }, { name: 'gpu-b.example', running: 0 }],
+    user_jobs: { running: 2 }, partitions: [],
+  }] });
+  assert.match(status, /gpu-a\.example/);
+  assert.match(status, /gpu-b\.example/);
+  assert.match(status, /Direct SSH · 2 running · capacity unmanaged/);
+  assert.equal((status.match(/class="card partition-card direct-member-card"/g) || []).length, 2);
+
+  const jobs = renderJobs({ jobs: [{
+    cluster: 'lab', scheduler: 'direct', job_id: '123', name: 'training',
+    state: 'RUNNING', partition: 'gpu-a.example', node_count: 1,
+    gpus: 1, cpus: 4, script_available: true,
+    log_paths_available: { out: true, err: true },
+  }] });
+  assert.match(jobs, /training/);
+  assert.match(jobs, /clusterWatcher\.openLog/);
+  assert.match(jobs, /clusterWatcher\.openScript/);
+  assert.doesNotMatch(jobs, /clusterWatcher\.cancelJob/);
 });
 
 test('Condor model cards show current GPU fit and submit-file actions', () => {
@@ -689,7 +751,7 @@ test('remembered disclosure choices override default open/closed state', () => {
   assert.match(html, /<details class="card" data-disclosure-key="[^"]+" data-job-ref="cluster_0\/7" open>/);
 
   const status = renderStatus({ clusters: [{ name: 'cluster_0', host: 'login.example', reachable: false }] }, { 'cluster:cluster_0': false });
-  assert.match(status, /data-disclosure-key="cluster:cluster_0"><summary><span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name">cluster_0<\/span>/);
+  assert.match(status, /data-disclosure-key="cluster:cluster_0"><summary><span class="cluster-summary"><span class="cluster-summary-main"><span class="cluster-summary-name" title="cluster_0">cluster_0<\/span>/);
   assert.doesNotMatch(status, /class="cluster-login-host"|login\.example/);
 });
 
@@ -754,7 +816,7 @@ test('dependencies are parsed and rendered as links to the referenced card', () 
     { job_id: '12', cluster: 'cluster_0', state: 'RUNNING' },
     { job_id: '13', cluster: 'cluster_0', state: 'PENDING', dependency: 'afterok:12(unfulfilled)' },
   ] });
-  assert.match(html, /<dt>Depends on<\/dt><dd class="dependency-value">afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"[^>]*>12<\/a> <span class="dependency-icon waiting"[^>]*data-fast-tooltip="Unfulfilled: waiting for job 12 to satisfy afterok"[^>]*>🕒<\/span>/);
+  assert.match(html, /<dt>Depends on<\/dt><dd class="dependency-value">afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"[^>]*>12<\/a> <span class="dependency-icon waiting"[^>]*data-fast-tooltip="Unfulfilled: waiting for job 12 to satisfy afterok"[^>]*>⏳<\/span>/);
   const summary = html.match(/<summary><span class="card-summary-title" data-full-name="cluster_0 13 13">.*?<\/summary>/s)[0];
   assert.match(summary, /dependency:afterok <a class="dep-link" href="#" data-jump="cluster_0\/12"[^>]*>12<\/a>/);
   assert.doesNotMatch(summary, /dependency-icon/);
@@ -788,8 +850,8 @@ test('dependency icons reflect referenced outcomes and impossible jobs get their
   ] });
   assert.match(html, /Failed Dependency \(1\)/);
   assert.match(html, /class="dependency-icon satisfied"[^>]*>✓<\/span>/);
-  assert.match(html, /class="dependency-icon failed"[^>]*>✕<\/span>/);
-  assert.match(html, /class="dependency-icon waiting"[^>]*>🕒<\/span>/);
+  assert.match(html, /class="dependency-icon failed"[^>]*>✕︎<\/span>/);
+  assert.match(html, /class="dependency-icon waiting"[^>]*>⏳<\/span>/);
   assert.match(html, /data-fast-tooltip="Satisfied: job 10 satisfied afterany"/);
   assert.match(html, /data-fast-tooltip="Failed: job 11 cannot satisfy afterok"/);
   assert.match(html, /data-fast-tooltip="Waiting: waiting for job 12 to satisfy afterok"/);
@@ -1221,7 +1283,7 @@ test('cluster warnings turn red after three minutes without moving their job bar
       last_success_at: '2026-11-16T11:50:00Z', user_jobs: { running: 1 }, partitions: [{ name: 'gpu' }] },
   ] });
   assert.equal((recent.match(/class="cluster-summary-main cluster-summary-with-bar"/g) || []).length, 2);
-  assert.match(recent, /grid-template-columns:minmax\(0,1fr\) minmax\(40px,140px\) 13px/);
+  assert.match(recent, /grid-template-columns:minmax\(46px,1fr\) minmax\(40px,140px\) 13px/);
   assert.match(recent, /class="cluster-warning cluster-warning-recent fast-hover"[^>]*data-warning-since="\d+"[^>]*>⚠<\/span>/);
   assert.match(recent, /target\.classList\.replace\('cluster-warning-recent', 'cluster-warning-stale'\)/);
 

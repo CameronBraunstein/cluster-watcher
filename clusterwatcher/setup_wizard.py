@@ -28,7 +28,8 @@ HEADER = """\
 # by your normal OpenSSH configuration.
 # Add `hidden = true` to any machine entry to skip its login, polling, and display.
 # Set `submission_host` if scheduler commands run on a passwordless SSH hop behind `host`.
-# Set `scheduler` to slurm or condor if automatic command detection is ambiguous.
+# Set `scheduler` to slurm or condor if detection is ambiguous, or direct for tmux jobs.
+# For direct clusters, `host = ["node1", "node2"]` lists independent SSH hosts.
 # Optional `[[profile]]` entries below describe one GPU/APU model per cluster.
 # Set `device_type = "apu"` for an APU profile; GPU is the default.
 # VRAM and dense FP16/BF16 Tensor throughput are per device, not partition totals.
@@ -49,7 +50,11 @@ def render_config(
     for machine in machines:
         lines = ["[[machine]]"]
         for key in ("name", "host", "username"):
-            lines.append(f"{key} = {_toml_string(str(machine[key]))}")
+            value = machine[key]
+            if key == "host" and isinstance(value, list):
+                lines.append(f"host = [{', '.join(_toml_string(str(host)) for host in value)}]")
+            else:
+                lines.append(f"{key} = {_toml_string(str(value))}")
         if machine.get("submission_host"):
             lines.append(f"submission_host = {_toml_string(str(machine['submission_host']))}")
         if machine.get("scheduler", "auto") != "auto":
@@ -123,11 +128,17 @@ def _ask_machine(prompt: Prompt, output: Output, taken: set[str], default_userna
         "username": _ask(prompt, "Username", default_username or None),
     }
     while True:
-        scheduler = _ask(prompt, "Scheduler (auto/slurm/condor)", "auto").lower()
-        if scheduler in {"auto", "slurm", "condor"}:
+        scheduler = _ask(prompt, "Scheduler (auto/slurm/condor/direct)", "auto").lower()
+        if scheduler in {"auto", "slurm", "condor", "direct"}:
             machine["scheduler"] = scheduler
             break
-        output("Scheduler must be auto, slurm, or condor.")
+        output("Scheduler must be auto, slurm, condor, or direct.")
+    if scheduler == "direct":
+        if machine["submission_host"]:
+            output("Direct SSH clusters use their own hosts; ignoring submission_host.")
+            machine["submission_host"] = ""
+        extras = _ask(prompt, "Additional direct SSH hosts, comma-separated (blank for none)", required=False)
+        machine["host"] = [str(machine["host"]), *(host.strip() for host in extras.split(",") if host.strip())]
     while True:
         port = _ask(prompt, "SSH port", "22")
         if port.isdecimal() and 1 <= int(port) <= 65535:
@@ -135,7 +146,7 @@ def _ask_machine(prompt: Prompt, output: Output, taken: set[str], default_userna
             break
         output("The port must be a number between 1 and 65535.")
     machine["identity_file"] = _ask(prompt, "SSH identity file (blank uses your OpenSSH defaults)", required=False)
-    if _confirm(prompt, "Does this machine ask for a password or one-time code at login?"):
+    if scheduler != "direct" and _confirm(prompt, "Does this machine ask for a password or one-time code at login?"):
         machine["interactive_auth"] = True
         machine["credential_group"] = _ask(
             prompt, "Credential group shared with other machines using the same password (blank for none)",

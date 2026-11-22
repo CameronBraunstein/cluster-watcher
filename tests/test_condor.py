@@ -99,8 +99,9 @@ class CondorTests(unittest.TestCase):
                                "JobStatus": 4, "ExitCode": 2, "QDate": 1760000000}])
         self.assertEqual(parse_jobs(history, "cameronb", history=True)[0]["state"], "FAILED")
         held = parse_jobs(json.dumps([{"Owner": "cameronb", "ClusterId": 43, "ProcId": 0,
-                                      "JobStatus": 5, "HoldReason": "Missing input"}]), "cameronb")
-        self.assertEqual(_state_group(held[0]["state"]), "OTHER")
+                                      "JobStatus": 5, "HoldReason": "Missing input", "HoldReasonCode": 13}]), "cameronb")
+        self.assertEqual(_state_group(held[0]["state"]), "HELD")
+        self.assertEqual(held[0]["hold_reason_code"], 13)
 
     def test_pool_snapshot_and_model_capacity_signals(self):
         sections = {

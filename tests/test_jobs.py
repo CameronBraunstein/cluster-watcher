@@ -12,7 +12,7 @@ import threading
 from unittest.mock import patch
 
 from clusterwatcher.dashboard import is_loopback_host, serve
-from clusterwatcher.jobs import JobLogNotFound, JobService, MAX_LOG_TAIL_LINES, parse_since
+from clusterwatcher.jobs import JobLogNotFound, JobService, MAX_LOG_TAIL_LINES, _active_record, is_held_job, parse_since
 from clusterwatcher.models import AccountingSnapshot, ClusterStatus, Machine
 from clusterwatcher.slurm import accounting_jobs_command, parse_accounting_jobs
 from helpers import TimedTestCase
@@ -38,6 +38,17 @@ def accounting_line(
 
 class JobServiceTests(TimedTestCase):
     """Exercise parsing, degradation, caching, and safe bounded log access."""
+
+    def test_slurm_holds_keep_their_reason_even_with_a_dependency(self):
+        """A hold takes precedence over a dependency when making an API card."""
+        source = {"id": "42", "name": "train", "state": "PENDING", "reason": "JobHeldAdmin",
+                  "dependency": "afterok:41", "partition": "gpu"}
+        record = _active_record("inf", source)
+        self.assertEqual(record["reason"], "JobHeldAdmin")
+        self.assertTrue(is_held_job(record))
+        self.assertTrue(is_held_job({"state": "REQUEUE_HOLD", "reason": "Requeued"}))
+        self.assertTrue(is_held_job({"state": "RESV_DEL_HOLD", "reason": "Reservation deleted"}))
+        self.assertFalse(is_held_job({"state": "PENDING", "reason": "Priority"}))
 
     def test_viper_apu_profile_fills_generic_slurm_job_model(self):
         """A generic Slurm GPU GRES still identifies Viper's MI300A APUs."""

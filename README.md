@@ -59,7 +59,9 @@ The VS Code extension can install a matching backend on first use. A development
 
 ### Your jobs
 
-**My Jobs** separates Running, Pending, and Depending jobs. Pending jobs are eligible to wait in the scheduler; Depending jobs are held by a dependency. Failed dependencies, completed jobs, failures, and cancellations have their own sections. Active jobs are ordered by cluster, then newest submission time.
+**My Jobs** separates Running, Pending, Depending, and Held Jobs. Pending jobs are eligible to wait in the scheduler; Depending jobs await a dependency. Held Jobs contains jobs held by the user, an administrator, or a system policy, between Depending and Completed. Held cards show the scheduler's reason when available and do not show a start estimate. Failed dependencies, completed jobs, failures, and cancellations have their own sections. Active jobs are ordered by cluster, then newest submission time.
+
+In an expanded dependency row, **⏳** means a prerequisite is still outstanding, **✓** means satisfied, and a plain red **✕** means it cannot be satisfied. The icon hover explains the referenced job. An empty cluster job bar says **No jobs running nor queued** on hover.
 
 Running cards show elapsed time against a time limit when the scheduler supplies one. Pending cards show a start estimate when Slurm supplies one. Expand a card to see its partition or Condor pool, requested resources, submission and launch times, and available scheduler details. In VS Code, cards can open their `.out` and `.err` files; Slurm cards can also open a submitted script when recoverable. Cancellation asks for confirmation. Archive hides a card from the main list and can be undone.
 
@@ -71,9 +73,9 @@ The browser has its own sortable, collapsible job cards and a browser-local arch
 
 ### Cluster and partition status
 
-Each cluster has a thin job bar: **blue** for Running, **red** for Pending, **dark maroon** for Depending, and **light gray** at the right for Failed Dependency. The gray segment counts jobs whose dependencies Slurm reports as impossible; they do not contribute to the runnable pending or depending segments. Click any segment in VS Code or the browser to jump to that cluster's jobs in the corresponding group. Slurm partitions and HTCondor's GPU-model display groups then show:
+Each cluster has a thin job bar: **blue** for Running, **red** for Pending, **dark maroon** for Depending, **yellow** for Held Jobs, and **light gray** at the right for Failed Dependency. The yellow segment follows Depending. Held jobs do not contribute to the runnable pending or depending segments. The gray segment counts jobs whose dependencies Slurm reports as impossible. Click any segment in VS Code or the browser to jump to that cluster's jobs in the corresponding group. Slurm partitions and HTCondor's GPU-model display groups then show:
 
-In the VS Code Cluster Status view, the cluster bars stay aligned when a warning appears. A yellow ⚠ marks a communication or refresh failure that began within the last three minutes; a red **!** means the failure has lasted longer. Hover over either icon for the error and the latest successful update. The last known cluster cards remain visible while the service retries. Once the cluster refreshes successfully, the warning clears.
+In the VS Code Cluster Status view, short cluster names remain visible even at the sidebar's minimum width; the job bars shrink to make room. Hover over a clipped name to see it in full. The bars stay aligned when a warning appears. A yellow ⚠ marks a communication or refresh failure that began within the last three minutes; a red **!** means the failure has lasted longer. Hover over either icon for the error and the latest successful update. The last known cluster cards remain visible while the service retries. Once the cluster refreshes successfully, the warning clears.
 
 - GPU or APU model, per-device VRAM, FP16/BF16 Tensor throughput, and total CPU threads.
 - Slurm **FairShare** for mapped account associations, or HTCondor **pool share** and effective user priority when the negotiator reports them.
@@ -125,6 +127,28 @@ The live boards use the terminal's alternate screen: old frames are replaced, sc
 
 Run `cluster-watcher jobs -h` or `cluster-watcher status -h` for selection, timeout, JSON, and refresh options. Terminal `status` gathers personal job and fair-share information as well as physical capacity, so its first collection can take longer than a capacity-only SSH command. The browser and extension keep a running service and refresh in the background.
 
+### Run a script on an SSH host without a scheduler
+
+Use a `direct` cluster for machines with SSH and tmux but no Slurm or HTCondor. Each value in `host` is an independent machine, not a failover login address. The same username, port, and SSH identity apply to each host. Configure SSH keys or an agent for noninteractive login; `interactive_auth` is not supported for direct members.
+
+```toml
+[[machine]]
+name = "lab"
+scheduler = "direct"
+host = ["gpu-a.example.org", "gpu-b.example.org"]
+username = "alex"
+```
+
+Put the script in a directory that already exists on the selected remote host, then run:
+
+```bash
+cluster-watcher submit lab gpu-a.example.org /home/alex/experiments train.sh
+```
+
+The script runs once in a detached remote tmux session named `cw-<job-id>`. Cluster Watcher prints the numeric job ID, session name, and log paths. It records the job on that host, so `cluster-watcher jobs`, the browser, and VS Code My Jobs can show its running or finished state after the submit command exits. Cluster Status lists each direct host and its running job count. GPU availability, wait times, and free CPU capacity are **unknown** because there is no scheduler or reservation system. CPU/GPU counts parsed from the script are descriptive requests only; they do not reserve or limit hardware. Direct jobs currently cannot be ended from the dashboard.
+
+The script may use Slurm-style `#SBATCH` header lines for `--job-name`, `--output`, and `--error`; `-J`, `-o`, and `-e` are accepted too. Relative log paths are resolved under the supplied remote directory. `%j` expands to Cluster Watcher's job ID, `%x` to the job name, `%N` to the chosen host's short name, `%u` to the configured username, and `%%` to a literal percent sign. Without `--output`, output and errors share `slurm-%j.out`, following [Slurm's default](https://slurm.schedmd.com/sbatch.html). Cluster Watcher opens the recorded `.out` and `.err` files from the original host; it does not upload the script. `--cpus-per-task`, `--ntasks`, `--gpus`, and `--gres=gpu:...` are read for display only. Other allocation directives, including `--time`, are not enforced. `--nodes` must be 1, and arrays and dependencies are rejected. The script is run with Bash, so commands that require `srun` or another Slurm service will need to be adapted.
+
 ## Configure and authenticate
 
 The installer and extension use a per-user config directory: `~/.config/cluster-watcher/clusters.toml` on a typical Linux desktop, the application-support directory on macOS, or `%APPDATA%\ClusterWatcher\clusters.toml` on Windows. A source checkout uses a local `clusters.toml` by default. `--config PATH` overrides either choice. Use `cluster-watcher config` to open the file actually selected.
@@ -173,7 +197,7 @@ scheduler = "condor"
 
 HTCondor has slots rather than Slurm partitions. The dashboard shows **pool: H200**, **pool: H100**, and other GPU-model groups based on each host's advertised model. **pool** remains an aggregate of all hosts; do not add its counts to the model groups. These names are display groups, not submit targets. Hosts with unknown or mixed GPU models remain only in pool. It reads live jobs with `condor_q -json`, recent completed jobs with `condor_history -json`, capacity and GPU names with `condor_status -json`, and pool-wide submitter priority with `condor_userprio`. An empty queue is normal. `ClusterId.ProcId` keeps individual jobs in one submit cluster distinct. Add a `[[profile]]` with the reported model as an alias to display TFLOPS/s. HTCondor user priority is **lower is better**; pool share is an estimate from the negotiator, not a GPU-model-specific entitlement.
 
-Condor `.out` and `.err` files are read from the submit host when a job ad contains their paths. A running job may not have created a file yet, and file transfer or site policy may delay its appearance. The first read needs an SSH round trip; recent job history and resolved paths are cached to avoid repeating slow `condor_history` lookups on each click. When a job advertises `JobSubmitFile`, its card offers **script** to open the current `.sub` file. Condor does not retain an immutable copy here, so this file may have changed since submission or may no longer exist. Held Condor jobs are shown as Held; they are not labeled Depending without dependency evidence.
+Condor `.out` and `.err` files are read from the submit host when a job ad contains their paths. A running job may not have created a file yet, and file transfer or site policy may delay its appearance. The first read needs an SSH round trip; recent job history and resolved paths are cached to avoid repeating slow `condor_history` lookups on each click. When a job advertises `JobSubmitFile`, its card offers **script** to open the current `.sub` file. Condor does not retain an immutable copy here, so this file may have changed since submission or may no longer exist. Held Condor jobs appear in Held Jobs, with their `HoldReason` visible when reported. Slurm jobs enter Held Jobs when their state is `REQUEUE_HOLD` or `RESV_DEL_HOLD`, or their reason begins with `JobHeld` or `JobHold`.
 
 The `lst` configuration now includes these five models. Values are **per GPU**; the node table's memory column summed eight devices. The throughput column uses dense FP16/BF16 Tensor performance, excluding the vendor's sparsity multiplier.
 

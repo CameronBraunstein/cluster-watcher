@@ -66,6 +66,15 @@ test('status bar adds Depending only when dependency-held jobs exist', () => {
     '$(server-process) 0 running · 0 pending · 1 depending');
 });
 
+test('status bar includes held jobs without counting them as pending', () => {
+  const summary = statusSummary([
+    job('1', 'PENDING', { reason: 'Priority' }),
+    job('2', 'PENDING', { reason: 'JobHeldUser' }),
+    job('3', 'HELD', { scheduler: 'condor', reason: 'Missing input' }),
+  ]);
+  assert.equal(summary.text, '$(server-process) 0 running · 1 pending · 2 held');
+});
+
 test('publishing is blocked while placeholders remain', () => {
   assert.equal(publishProblems({ publisher: 'cluster-watcher-project', repository: { url: 'https://github.com/REPLACE-ME/x' } }).length, 4);
   assert.deepEqual(publishProblems({

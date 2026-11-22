@@ -60,6 +60,7 @@ test('early cluster overview counts active job groups in configuration order', (
       { cluster: 'alpha', state: 'PENDING', dependency: 'afterok:42(unfulfilled)' },
       { cluster: 'alpha', state: 'PENDING', reason: 'DependencyNeverSatisfied',
         dependency: 'afterok:41(failed)' },
+      { cluster: 'alpha', state: 'HELD', scheduler: 'condor', reason: 'Missing input' },
       { cluster: 'alpha', state: 'COMPLETED' },
       { cluster: 'beta', state: 'RUNNING' },
     ],
@@ -68,12 +69,12 @@ test('early cluster overview counts active job groups in configuration order', (
   assert.equal(overview.overview_only, true);
   assert.deepEqual(overview.clusters.map((cluster) => cluster.name), ['alpha', 'beta', 'empty']);
   assert.deepEqual(overview.clusters[0].user_jobs,
-    { running: 1, pending: 1, depending: 1, failed_dependency: 1 });
+    { running: 1, pending: 1, depending: 1, held: 1, failed_dependency: 1 });
   assert.deepEqual(overview.clusters[1].user_jobs,
-    { running: 1, pending: 0, depending: 0, failed_dependency: 0 });
+    { running: 1, pending: 0, depending: 0, held: 0, failed_dependency: 0 });
   assert.equal(overview.clusters[1].error, 'Timed out');
   assert.deepEqual(overview.clusters[2].user_jobs,
-    { running: 0, pending: 0, depending: 0, failed_dependency: 0 });
+    { running: 0, pending: 0, depending: 0, held: 0, failed_dependency: 0 });
 });
 
 test('a failed cluster retains only its own prior jobs until it recovers', () => {

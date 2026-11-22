@@ -1,7 +1,7 @@
 {
   "name": "cluster-watcher",
   "displayName": "Cluster Watcher",
-  "description": "Monitor Slurm jobs and capacity, manage the local service, and reopen SSH sessions from the VS Code sidebar.",
+  "description": "Monitor Slurm, HTCondor, and direct SSH jobs, manage the local service, and reopen SSH sessions from the VS Code sidebar.",
   "version": "0.2.3",
   "publisher": "CameronBraunstein",
   "license": "GPL-3.0-or-later",
@@ -31,6 +31,7 @@
   ],
   "keywords": [
     "slurm",
+    "htcondor",
     "cluster",
     "ssh",
     "hpc"
